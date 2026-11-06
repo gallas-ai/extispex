@@ -1,0 +1,7 @@
+{
+  "name": "@evaluation-telemetry/service-runtime",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/mod.ts"
+  }
+}

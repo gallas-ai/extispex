@@ -1,0 +1,122 @@
+name: Pull request checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DENO_VERSION: v2.9.5
+
+jobs:
+  static-checks-and-unit-tests:
+    name: Static checks and unit tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: telemetry
+          POSTGRES_PASSWORD: telemetry
+          POSTGRES_DB: telemetry_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U telemetry"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+      - run: deno install --frozen
+      - run: deno fmt --check
+      - run: deno lint
+      - run: deno check
+      - name: Unit, service and architecture tests on SQLite and PostgreSQL
+        run: deno task test
+        env:
+          TELEMETRY_TEST_POSTGRES_URL: postgresql://telemetry:telemetry@localhost:5432/telemetry_test
+
+  end-to-end-tests:
+    name: End-to-end tests (${{ matrix.deployment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        deployment: [all-in-one, services]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: telemetry
+          POSTGRES_PASSWORD: telemetry
+          POSTGRES_DB: telemetry_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U telemetry"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+      - run: deno install --frozen
+      - run: deno task build:web
+      - run: deno task test:e2e
+        env:
+          E2E_DEPLOYMENT: ${{ matrix.deployment }}
+          E2E_TELEMETRY_DATABASE_URL: postgresql://telemetry:telemetry@localhost:5432/telemetry_e2e
+
+  container-images:
+    name: Container images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+      - run: deno install --frozen
+      - name: Build images
+        run: |
+          docker build -f deploy/docker/all-in-one.Dockerfile -t evaluation-telemetry/all-in-one:ci .
+          docker build -f deploy/docker/telemetry.Dockerfile -t evaluation-telemetry/telemetry:ci .
+          docker build -f deploy/docker/gateway.Dockerfile -t evaluation-telemetry/gateway:ci .
+      - name: Start the all-in-one image as an arbitrary user, as OpenShift does
+        run: |
+          mkdir -p "$RUNNER_TEMP/certs"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            -keyout "$RUNNER_TEMP/certs/key.pem" -out "$RUNNER_TEMP/certs/cert.pem"
+          chmod 644 "$RUNNER_TEMP"/certs/*.pem
+          docker run -d --name all-in-one --user 1000870000:0 \
+            -p 4317:4317 -p 4318:4318 -p 8080:8080 \
+            -v "$RUNNER_TEMP/certs:/certs:ro" \
+            -e STATIC_API_KEYS=e2e-api-key=e2e-project \
+            -e TELEMETRY_GRPC_TLS_CERTIFICATE_FILE=/certs/cert.pem \
+            -e TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE=/certs/key.pem \
+            evaluation-telemetry/all-in-one:ci
+          for attempt in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/health && exit 0
+            sleep 1
+          done
+          docker logs all-in-one
+          exit 1
+      - name: End-to-end tests against the container
+        run: deno task test:e2e
+        env:
+          E2E_DEPLOYMENT: external
+          E2E_GATEWAY_URL: http://127.0.0.1:8080
+          E2E_OTLP_HTTP_URL: http://127.0.0.1:4318
+          E2E_OTLP_GRPC_ADDRESS: localhost:4317
+          E2E_API_KEY: e2e-api-key
+          E2E_GRPC_ROOT_CERTIFICATE_FILE: ${{ runner.temp }}/certs/cert.pem
+      - name: Container logs
+        if: failure()
+        run: docker logs all-in-one

@@ -1,0 +1,17 @@
+{
+  "name": "@evaluation-telemetry/typescript-examples",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./send-conversation.ts"
+  },
+  "imports": {
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/context-async-hooks": "npm:@opentelemetry/context-async-hooks@^3.0.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "npm:@opentelemetry/exporter-trace-otlp-proto@^0.300.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^3.0.0",
+    "@opentelemetry/sdk-trace": "npm:@opentelemetry/sdk-trace@^3.0.0"
+  },
+  "tasks": {
+    "send-conversation": "deno run --allow-net --allow-env send-conversation.ts"
+  }
+}

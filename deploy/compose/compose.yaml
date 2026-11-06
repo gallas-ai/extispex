@@ -1,0 +1,48 @@
+# Production-like deployment with separate services and PostgreSQL, for development.
+# Start from the repository root:
+#   docker compose -f deploy/compose/compose.yaml up --build
+# Override host ports with OTLP_GRPC_HOST_PORT, OTLP_HTTP_HOST_PORT and GATEWAY_HOST_PORT.
+name: evaluation-telemetry
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: telemetry
+      POSTGRES_PASSWORD: telemetry
+      POSTGRES_DB: telemetry
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telemetry"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  telemetry:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/telemetry.Dockerfile
+    environment:
+      TELEMETRY_DATABASE_URL: postgresql://telemetry:telemetry@postgres:5432/telemetry
+      STATIC_API_KEYS: local-development-key=default
+    ports:
+      - "${OTLP_GRPC_HOST_PORT:-4317}:4317"
+      - "${OTLP_HTTP_HOST_PORT:-4318}:4318"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/gateway.Dockerfile
+    environment:
+      TELEMETRY_URL: http://telemetry:4318
+    ports:
+      - "${GATEWAY_HOST_PORT:-8080}:8080"
+    depends_on:
+      - telemetry
+
+volumes:
+  postgres-data:

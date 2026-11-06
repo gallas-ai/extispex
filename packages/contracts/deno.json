@@ -1,0 +1,10 @@
+{
+  "name": "@evaluation-telemetry/contracts",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/mod.ts"
+  },
+  "imports": {
+    "zod": "npm:zod@^4.1.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@evaluation-telemetry/architecture-tests",
+  "version": "0.1.0",
+  "exports": {
+    "./descriptive-names-lint-plugin": "./descriptive-names-lint-plugin.ts"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.0",
+    "@std/fs": "jsr:@std/fs@^1.0.0",
+    "@std/path": "jsr:@std/path@^1.0.0"
+  }
+}

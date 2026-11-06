@@ -1,0 +1,12 @@
+{
+  "name": "@evaluation-telemetry/telemetry-ids",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/mod.ts",
+    "./attributes": "./src/telemetry-id-attributes.ts"
+  },
+  "imports": {
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/sdk-trace": "npm:@opentelemetry/sdk-trace@^3.0.0"
+  }
+}

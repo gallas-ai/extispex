@@ -1,0 +1,10 @@
+{
+  "name": "@evaluation-telemetry/all-in-one",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "tasks": {
+    "start": "deno run --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-sys src/main.ts"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "workspace": [
+    "packages/contracts",
+    "packages/service-client",
+    "packages/service-runtime",
+    "packages/telemetry-ids",
+    "services/telemetry",
+    "services/gateway",
+    "apps/all-in-one",
+    "apps/web",
+    "tests/e2e",
+    "tests/architecture",
+    "examples/typescript"
+  ],
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "strict": true
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "exclude": [
+      "**/dist/",
+      "**/otlp-proto/",
+      "**/generated/",
+      "data/",
+      "docs/business.md"
+    ]
+  },
+  "lint": {
+    "exclude": [
+      "**/dist/",
+      "**/generated/",
+      "data/"
+    ],
+    "plugins": [
+      "./tests/architecture/descriptive-names-lint-plugin.ts"
+    ],
+    "rules": {
+      "tags": [
+        "recommended"
+      ]
+    }
+  },
+  "tasks": {
+    "start:all-in-one": "deno task --cwd apps/all-in-one start",
+    "build:web": "deno task --cwd apps/web build",
+    "dev:web": "deno task --cwd apps/web dev",
+    "generate:otlp-descriptor": "deno task --cwd services/telemetry generate:otlp-descriptor",
+    "check": "deno fmt --check && deno lint && deno check",
+    "test": "deno test --allow-read --allow-write --allow-env --allow-ffi --allow-sys --allow-net --ignore=tests/e2e",
+    "test:e2e": "deno test --allow-all tests/e2e"
+  },
+  "exclude": [
+    "**/dist/",
+    "data/"
+  ]
+}
