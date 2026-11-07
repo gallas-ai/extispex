@@ -1,8 +1,7 @@
 import {
-  API_KEY_SECURITY_SCHEME,
-  API_KEY_SECURITY_SCHEME_NAME,
   createErrorResponse,
   PUBLIC_API_INFO,
+  PUBLIC_API_SECURITY_SCHEMES,
   publicApiRoutesByService,
   type PublicApiServiceName,
 } from "@extispex/contracts";
@@ -30,6 +29,7 @@ const FORWARDED_HEADER_NAMES = ["authorization", "accept", "content-type"];
 const SERVICE_DISPLAY_NAMES: Record<PublicApiServiceName, string> = {
   telemetry: "Telemetry",
   prompt: "Prompt",
+  identity: "Identity",
 };
 
 export function createGatewayService(dependencies: GatewayServiceDependencies): GatewayService {
@@ -126,11 +126,13 @@ async function createForwardedRequest(request: Request): Promise<Request> {
 /** One OpenAPI document for the whole public API, built from the shared route definitions. */
 function buildPublicApiDocument(): unknown {
   const documentBuilder = new OpenAPIHono();
-  documentBuilder.openAPIRegistry.registerComponent(
-    "securitySchemes",
-    API_KEY_SECURITY_SCHEME_NAME,
-    API_KEY_SECURITY_SCHEME,
-  );
+  for (const [schemeName, securityScheme] of Object.entries(PUBLIC_API_SECURITY_SCHEMES)) {
+    documentBuilder.openAPIRegistry.registerComponent(
+      "securitySchemes",
+      schemeName,
+      securityScheme,
+    );
+  }
   for (const routes of Object.values(publicApiRoutesByService)) {
     for (const route of routes) {
       documentBuilder.openAPIRegistry.registerPath(route);

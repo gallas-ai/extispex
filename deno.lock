@@ -1314,6 +1314,7 @@
       },
       "packages/service-runtime": {
         "dependencies": [
+          "jsr:@std/assert@1",
           "npm:@hono/zod-openapi@^1.1.0",
           "npm:hono@^4.10.0"
         ]
@@ -1338,6 +1339,16 @@
           "jsr:@std/assert@1",
           "jsr:@std/http@1",
           "npm:@hono/zod-openapi@^1.1.0",
+          "npm:hono@^4.10.0"
+        ]
+      },
+      "services/identity": {
+        "dependencies": [
+          "jsr:@std/assert@1",
+          "npm:@hono/zod-openapi@^1.1.0",
+          "npm:@mikro-orm/core@7.2.7",
+          "npm:@mikro-orm/migrations@7.2.7",
+          "npm:@mikro-orm/sql@7.2.7",
           "npm:hono@^4.10.0"
         ]
       },

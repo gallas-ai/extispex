@@ -4,13 +4,14 @@ Each step gets its own Correlation ID; both steps share one Session ID. The appl
 both values: the platform never generates them.
 
     python -m venv .venv && .venv/bin/pip install -r requirements.txt
-    .venv/bin/python send_conversation.py
+    API_KEY=<your Project API key> .venv/bin/python send_conversation.py
 
-Environment: OTLP_HTTP_URL (default http://127.0.0.1:4318) and API_KEY
-(default local-development-key, the local image's built-in key).
+Environment: API_KEY (required), the key of the Project to send to, and OTLP_HTTP_URL
+(default http://127.0.0.1:4318).
 """
 
 import os
+import sys
 import uuid
 from contextlib import contextmanager
 
@@ -48,7 +49,12 @@ def telemetry_ids(correlation_id, session_id=None):
 
 
 otlp_http_url = os.environ.get("OTLP_HTTP_URL", "http://127.0.0.1:4318")
-api_key = os.environ.get("API_KEY", "local-development-key")
+api_key = os.environ.get("API_KEY")
+if not api_key:
+    sys.exit(
+        "Set API_KEY to a Project API key. A new instance logs the key of its first Project on "
+        "first start; more keys are created under Projects in the UI."
+    )
 
 tracer_provider = TracerProvider(resource=Resource.create({"service.name": "support-bot-python-example"}))
 # Copies the IDs onto every span. It must run before the exporting processor.

@@ -14,6 +14,7 @@ import type { RunningDeployment } from "./deployment.ts";
 
 /** Kept in step with apps/web/src/api-key/api-key-storage.ts. */
 const API_KEY_STORAGE_KEY = "extispex.api-key";
+const INSTANCE_ADMIN_KEY_STORAGE_KEY = "extispex.instance-admin-key";
 
 export async function launchBrowser(): Promise<Browser> {
   try {
@@ -40,6 +41,8 @@ interface OpenUiOptions {
   height?: number;
   /** The key stored before the page loads; null opens the UI without one. */
   apiKey: string | null;
+  /** The Instance admin key stored before the page loads, for the Projects pages. */
+  instanceAdminKey?: string | null;
   colorScheme?: "light" | "dark";
   path?: string;
 }
@@ -47,7 +50,8 @@ interface OpenUiOptions {
 export async function openUi(
   browser: Browser,
   deployment: RunningDeployment,
-  { width, height = 900, apiKey, colorScheme = "light", path = "/" }: OpenUiOptions,
+  { width, height = 900, apiKey, instanceAdminKey = null, colorScheme = "light", path = "/" }:
+    OpenUiOptions,
 ): Promise<UiSession> {
   const context = await browser.newContext({
     baseURL: deployment.gatewayUrl,
@@ -57,16 +61,23 @@ export async function openUi(
     timezoneId: "UTC",
     reducedMotion: "reduce",
   });
-  if (apiKey !== null) {
+  const storedKeys: [string, string][] = [];
+  if (apiKey !== null) storedKeys.push([API_KEY_STORAGE_KEY, apiKey]);
+  if (instanceAdminKey !== null) {
+    storedKeys.push([INSTANCE_ADMIN_KEY_STORAGE_KEY, instanceAdminKey]);
+  }
+  if (storedKeys.length > 0) {
     await context.addInitScript(
-      ([storageKey, storedApiKey]) => {
+      (keysToStore) => {
         // Only on the first load, so that a test can still disconnect and reload.
-        if (sessionStorage.getItem("e2e-api-key-seeded") === null) {
-          localStorage.setItem(storageKey, storedApiKey);
-          sessionStorage.setItem("e2e-api-key-seeded", "yes");
+        if (sessionStorage.getItem("e2e-keys-seeded") === null) {
+          for (const [storageKey, storedValue] of keysToStore) {
+            localStorage.setItem(storageKey, storedValue);
+          }
+          sessionStorage.setItem("e2e-keys-seeded", "yes");
         }
       },
-      [API_KEY_STORAGE_KEY, apiKey],
+      storedKeys,
     );
   }
   const page = await context.newPage();

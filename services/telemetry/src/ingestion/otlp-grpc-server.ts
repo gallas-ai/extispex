@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import {
   authenticateProject,
+  ProjectResolutionUnavailableError,
   type ProjectResolver,
   type StructuredLogger,
 } from "@extispex/service-runtime";
@@ -51,10 +52,19 @@ export function createOtlpGrpcServer(dependencies: OtlpGrpcServerDependencies): 
       respond: grpc.sendUnaryData<TraceExportOutcome>,
     ) => {
       const authorizationHeader = call.metadata.get("authorization")[0]?.toString();
-      const projectId = await authenticateProject(
-        dependencies.projectResolver,
-        authorizationHeader,
-      );
+      let projectId: string | null;
+      try {
+        projectId = await authenticateProject(dependencies.projectResolver, authorizationHeader);
+      } catch (error) {
+        if (!(error instanceof ProjectResolutionUnavailableError)) throw error;
+        dependencies.logger.warn("API key could not be checked", { error });
+        // OTLP exporters retry UNAVAILABLE, so the spans are not lost while Identity is down.
+        respond({
+          code: grpc.status.UNAVAILABLE,
+          details: "The API key could not be checked. Retry later.",
+        });
+        return;
+      }
       if (projectId === null) {
         respond({
           code: grpc.status.UNAUTHENTICATED,

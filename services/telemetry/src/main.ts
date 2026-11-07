@@ -1,5 +1,6 @@
+import { createHttpServiceClient } from "@extispex/service-client";
 import {
-  createStaticApiKeyProjectResolver,
+  createIdentityProjectResolver,
   createStructuredLogger,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
@@ -21,9 +22,9 @@ const database = await openTelemetryDatabase(
 );
 const telemetryService = createTelemetryService({
   database,
-  projectResolver: createStaticApiKeyProjectResolver(
-    readRequiredEnvironmentVariable("STATIC_API_KEYS"),
-  ),
+  projectResolver: createIdentityProjectResolver({
+    identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
+  }),
   logger,
 });
 

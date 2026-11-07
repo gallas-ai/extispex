@@ -25,6 +25,7 @@ Deno.test("forwards trace queries with only the allowed headers", async () => {
     serviceClients: {
       telemetry: recordingServiceClient(receivedRequests, { traces: [] }),
       prompt: unexpectedServiceCall(),
+      identity: unexpectedServiceCall(),
     },
     webAssetsDirectory: null,
     logger,
@@ -49,6 +50,7 @@ Deno.test("forwards prompt requests with their body to the Prompt service", asyn
     serviceClients: {
       telemetry: unexpectedServiceCall(),
       prompt: recordingServiceClient(receivedRequests),
+      identity: unexpectedServiceCall(),
     },
     webAssetsDirectory: null,
     logger,
@@ -79,6 +81,7 @@ Deno.test("answers 503 when a service is unreachable", async () => {
     serviceClients: {
       telemetry: () => Promise.reject(new TypeError("connection refused")),
       prompt: () => Promise.reject(new TypeError("connection refused")),
+      identity: () => Promise.reject(new TypeError("connection refused")),
     },
     webAssetsDirectory: null,
     logger: { ...logger, error: () => {} },
@@ -94,9 +97,65 @@ Deno.test("answers 503 when a service is unreachable", async () => {
   });
 });
 
+Deno.test("forwards Project management with the admin key to the Identity service", async () => {
+  const receivedRequests: Request[] = [];
+  const gatewayService = createGatewayService({
+    serviceClients: {
+      telemetry: unexpectedServiceCall(),
+      prompt: unexpectedServiceCall(),
+      identity: recordingServiceClient(receivedRequests),
+    },
+    webAssetsDirectory: null,
+    logger,
+  });
+
+  const response = await gatewayService.handleRequest(
+    new Request("http://gateway.test/v1/projects/project-one/api-keys/key-one", {
+      method: "DELETE",
+      headers: { authorization: "Bearer admin-key" },
+    }),
+  );
+  await response.body?.cancel();
+
+  assertEquals(response.status, 200);
+  assertEquals(receivedRequests[0].method, "DELETE");
+  assertEquals(
+    new URL(receivedRequests[0].url).pathname,
+    "/v1/projects/project-one/api-keys/key-one",
+  );
+  assertEquals(receivedRequests[0].headers.get("authorization"), "Bearer admin-key");
+});
+
+Deno.test("does not expose the internal API key resolution through the gateway", async () => {
+  const gatewayService = createGatewayService({
+    serviceClients: {
+      telemetry: unexpectedServiceCall(),
+      prompt: unexpectedServiceCall(),
+      identity: unexpectedServiceCall(),
+    },
+    webAssetsDirectory: null,
+    logger,
+  });
+
+  const response = await gatewayService.handleRequest(
+    new Request("http://gateway.test/internal/v1/api-keys/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ apiKey: "guessed-key" }),
+    }),
+  );
+
+  assertEquals(response.status, 404);
+  await response.body?.cancel();
+});
+
 Deno.test("does not expose OTLP ingestion through the gateway", async () => {
   const gatewayService = createGatewayService({
-    serviceClients: { telemetry: unexpectedServiceCall(), prompt: unexpectedServiceCall() },
+    serviceClients: {
+      telemetry: unexpectedServiceCall(),
+      prompt: unexpectedServiceCall(),
+      identity: unexpectedServiceCall(),
+    },
     webAssetsDirectory: null,
     logger,
   });
@@ -111,7 +170,11 @@ Deno.test("does not expose OTLP ingestion through the gateway", async () => {
 
 Deno.test("publishes one OpenAPI document for every service", async () => {
   const gatewayService = createGatewayService({
-    serviceClients: { telemetry: unexpectedServiceCall(), prompt: unexpectedServiceCall() },
+    serviceClients: {
+      telemetry: unexpectedServiceCall(),
+      prompt: unexpectedServiceCall(),
+      identity: unexpectedServiceCall(),
+    },
     webAssetsDirectory: null,
     logger,
   });
@@ -132,6 +195,9 @@ Deno.test("publishes one OpenAPI document for every service", async () => {
       "/v1/prompts/{promptName}/versions/{versionNumber}",
       "/v1/prompts/{promptName}/labels/{labelName}",
       "/v1/prompts/{promptName}/compare",
+      "/v1/projects",
+      "/v1/projects/{projectId}/api-keys",
+      "/v1/projects/{projectId}/api-keys/{apiKeyId}",
     ]
   ) {
     assert(documentedPaths.includes(expectedPath), `${expectedPath} is not documented.`);
@@ -141,7 +207,11 @@ Deno.test("publishes one OpenAPI document for every service", async () => {
     "put",
     "delete",
   ]);
-  assertEquals(Object.keys(openApiDocument.components.securitySchemes), ["apiKey"]);
+  assertEquals(Object.keys(openApiDocument.components.securitySchemes), [
+    "apiKey",
+    "instanceAdminKey",
+  ]);
+  assertEquals(openApiDocument.paths["/v1/projects"].post.security, [{ instanceAdminKey: [] }]);
 });
 
 Deno.test("turns OpenAPI path parameters into Hono path parameters", () => {

@@ -8,8 +8,9 @@ import type {
   PromptVersionComparison,
 } from "@extispex/contracts";
 import {
-  createStaticApiKeyProjectResolver,
   createStructuredLogger,
+  ProjectResolutionUnavailableError,
+  type ProjectResolver,
 } from "@extispex/service-runtime";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import {
@@ -20,6 +21,14 @@ import {
 
 const API_KEY = "test-api-key";
 const OTHER_PROJECT_API_KEY = "other-project-api-key";
+
+/** Stands in for Identity: two keys, each in its own Project. */
+const testProjectResolver: ProjectResolver = {
+  resolveProjectId: (apiKey) =>
+    Promise.resolve(
+      ({ [API_KEY]: "project-one", [OTHER_PROJECT_API_KEY]: "project-two" })[apiKey] ?? null,
+    ),
+};
 
 const SUPPORT_AGENT_PROMPT = {
   name: "support-agent",
@@ -56,9 +65,7 @@ async function withPromptService(databaseUrl: string, testBody: PromptTestBody):
     let clockMilliseconds = Date.parse("2026-11-07T10:00:00Z");
     await testBody(createPromptService({
       database,
-      projectResolver: createStaticApiKeyProjectResolver(
-        `${API_KEY}=project-one,${OTHER_PROJECT_API_KEY}=project-two`,
-      ),
+      projectResolver: testProjectResolver,
       logger: createStructuredLogger("prompt-test"),
       // Each request is one second later, so that ordering by time is deterministic.
       readCurrentTime: () => new Date(clockMilliseconds += 1_000),
@@ -393,6 +400,26 @@ definePromptTest("requires a valid API key", async (promptService) => {
   });
   assertEquals(response.status, 401);
   assertEquals((await response.json()).error.code, "unauthenticated");
+});
+
+Deno.test("asks clients to retry while API keys cannot be checked", async () => {
+  const database = await openPromptDatabase("sqlite::memory:");
+  try {
+    const promptService = createPromptService({
+      database,
+      projectResolver: {
+        resolveProjectId: () =>
+          Promise.reject(new ProjectResolutionUnavailableError("Identity is down.")),
+      },
+      logger: { ...createStructuredLogger("prompt-test"), warn: () => {} },
+    });
+    const response = await sendRequest(promptService, "GET", "/v1/prompts");
+    assertEquals(response.status, 503);
+    assertEquals(response.headers.get("retry-after"), "5");
+    assertEquals((await response.json()).error.code, "identity_unavailable");
+  } finally {
+    await database.close();
+  }
 });
 
 definePromptTest("publishes an OpenAPI 3.1 document", async (promptService) => {

@@ -5,15 +5,15 @@
 Self-hosted observability and evaluation for GenAI applications and agents. Your application sends
 OpenTelemetry traces; Extispex stores them, lets you find them by your own Correlation ID or Session
 ID, and shows them in a web UI. It also keeps your prompts as immutable versions with movable labels
-such as `production`.
+such as `production`, and keeps each Project's data apart behind its own API keys.
 
 > **Why "Extispex"?** An _extispex_ was a Roman diviner, from Latin _exta_ (entrails) and _specio_
 > (I look): the one who looks inside. By examining the inner organs of a sacrifice, an extispex
 > judged whether an undertaking would end well. Looking inside and judging the outcome is tracing
 > and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
 
-**Status:** early development. The trace pipeline and versioned prompts work end to end. Logs,
-metrics, evaluations and identity management are designed in
+**Status:** early development. The trace pipeline, versioned prompts, and Projects with API keys
+work end to end. Logs, metrics, evaluations, users and sign-in are designed in
 [docs/architecture.md](docs/architecture.md) but not built yet.
 
 ## Try it locally
@@ -33,17 +33,45 @@ docker run -p 4317:4317 -p 4318:4318 -p 8080:8080 -v extispex-data:/data \
 | 4318 | OTLP over HTTP, protobuf or JSON                     |
 | 8080 | Web UI and REST API, described at `/v1/openapi.json` |
 
-Open <http://localhost:8080> and enter the API key `local-development-key`. Set
-`STATIC_API_KEYS=your-key=your-project` before exposing the instance to anyone else.
+On first start the instance creates the Project `Default` and logs two keys, once:
 
-Then send a sample conversation from [examples/](examples/).
+```text
+{"level":"info","service":"all-in-one","message":"Generated the Instance admin key. …","instanceAdminKey":"extispex_admin_…"}
+{"level":"info","service":"all-in-one","message":"Created the first Project. …","projectName":"Default","apiKey":"extispex_…"}
+```
+
+Open <http://localhost:8080> and enter the `apiKey`. Then send a sample conversation from
+[examples/](examples/) with it. The `instanceAdminKey` manages Projects and API keys under
+**Projects**; the image also keeps it in `/data/instance-admin-key`.
+
+To choose the keys yourself, set `INSTANCE_ADMIN_KEY` and `BOOTSTRAP_PROJECT_API_KEY` (at least 32
+characters each) before the first start.
+
+## Projects and API keys
+
+A Project keeps its telemetry and prompts apart from every other Project. An application sends one
+of the Project's API keys, and the key alone decides where the data goes. Create Projects and keys
+under **Projects** in the UI, or through the REST API with the Instance admin key:
+
+```sh
+curl -X POST localhost:8080/v1/projects -H "authorization: Bearer $INSTANCE_ADMIN_KEY" \
+  -H 'content-type: application/json' -d '{"name": "checkout-assistant"}'
+curl -X POST localhost:8080/v1/projects/<project id>/api-keys \
+  -H "authorization: Bearer $INSTANCE_ADMIN_KEY" -H 'content-type: application/json' \
+  -d '{"name": "CI pipeline"}'
+```
+
+A key looks like `extispex_` followed by 43 letters and digits, and is shown only when it is
+created: Extispex stores only its hash. A revoked key, or any key of a deleted Project, stops
+working within a minute. The Instance admin key manages Projects but cannot read their data. It
+stands in for users and Roles, which come later.
 
 ## Sending telemetry
 
 Every span must carry a **Correlation ID** in the `correlation.id` attribute, or it is rejected.
 Your application chooses the value, so you can always find a call again by your own identifier.
-Spans may also carry `session.id` to group several traces into one conversation. Send the API key as
-`Authorization: Bearer <key>`.
+Spans may also carry `session.id` to group several traces into one conversation. Send the Project's
+API key as `Authorization: Bearer <key>`.
 
 The [`telemetry-ids` package](packages/telemetry-ids/) and the
 [Python example](examples/python/send_conversation.py) show a span processor that adds both
@@ -71,14 +99,14 @@ immutable version, and a Prompt Label such as `production` points to the version
 uses:
 
 ```sh
-curl -X POST localhost:8080/v1/prompts -H 'authorization: Bearer local-development-key' \
+curl -X POST localhost:8080/v1/prompts -H "authorization: Bearer $EXTISPEX_API_KEY" \
   -H 'content-type: application/json' -d '{
     "name": "support-agent", "type": "chat", "labels": ["production"],
     "messages": [{ "role": "system", "content": "You help customers of {{company}}." }],
     "modelParameters": { "model": "gpt-4.1", "temperature": 0.2 }
   }'
 curl localhost:8080/v1/prompts/support-agent/labels/production \
-  -H 'authorization: Bearer local-development-key'
+  -H "authorization: Bearer $EXTISPEX_API_KEY"
 ```
 
 The full API, including comparing two versions, is described at `/v1/openapi.json`.
@@ -96,7 +124,7 @@ all-in-one image takes the bare name because it is the one to try first.
 | `ghcr.io/gallas-ai/extispex-evaluation`        | Evaluation service API                     | Planned |
 | `ghcr.io/gallas-ai/extispex-evaluation-worker` | Evaluation worker                          | Planned |
 | `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Built   |
-| `ghcr.io/gallas-ai/extispex-identity`          | Identity service                           | Planned |
+| `ghcr.io/gallas-ai/extispex-identity`          | Identity service: Projects and API keys    | Built   |
 
 ## Development
 
@@ -110,11 +138,11 @@ deno task build:web         # build the UI into apps/web/dist, which port 8080 s
 deno task start:all-in-one  # run everything locally on ports 4317, 4318 and 8080, with SQLite in apps/all-in-one/data
 ```
 
-Open <http://localhost:8080> and enter the API key `local-development-key`. In a second terminal,
-send a sample conversation and search for the Session ID it prints:
+Open <http://localhost:8080> and enter the API key that the first start logged. In a second
+terminal, send a sample conversation with it and search for the Session ID it prints:
 
 ```sh
-cd examples/typescript && deno task send-conversation
+cd examples/typescript && API_KEY=extispex_… deno task send-conversation
 ```
 
 To work on the UI, run `deno task dev:web` next to the running instance and open

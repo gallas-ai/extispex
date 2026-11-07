@@ -1,5 +1,6 @@
+import { createHttpServiceClient } from "@extispex/service-client";
 import {
-  createStaticApiKeyProjectResolver,
+  createIdentityProjectResolver,
   createStructuredLogger,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
@@ -12,9 +13,9 @@ const logger = createStructuredLogger("prompt");
 const database = await openPromptDatabase(readRequiredEnvironmentVariable("PROMPT_DATABASE_URL"));
 const promptService = createPromptService({
   database,
-  projectResolver: createStaticApiKeyProjectResolver(
-    readRequiredEnvironmentVariable("STATIC_API_KEYS"),
-  ),
+  projectResolver: createIdentityProjectResolver({
+    identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
+  }),
   logger,
 });
 

@@ -5,7 +5,8 @@
  * - `services`: every service as a separate process on PostgreSQL; needs `E2E_POSTGRES_URL`, a
  *   server on which each service uses its own database `<service>_e2e`, created on first start.
  * - `external`: an already running deployment described by `E2E_GATEWAY_URL`,
- *   `E2E_OTLP_HTTP_URL`, `E2E_OTLP_GRPC_ADDRESS`, `E2E_API_KEY` and optionally
+ *   `E2E_OTLP_HTTP_URL`, `E2E_OTLP_GRPC_ADDRESS`, `E2E_API_KEY` (the first Project's key, set as
+ *   `BOOTSTRAP_PROJECT_API_KEY`), `E2E_INSTANCE_ADMIN_KEY` and optionally
  *   `E2E_GRPC_ROOT_CERTIFICATE_FILE`.
  */
 
@@ -15,12 +16,17 @@ export interface RunningDeployment {
   otlpGrpcAddress: string;
   /** Certificate that signs the gRPC server's TLS certificate, or null for plaintext gRPC. */
   grpcRootCertificate: Uint8Array | null;
+  /** An API key of the Project that the deployment created on first start. */
   apiKey: string;
+  /** Manages Projects and API keys. */
+  instanceAdminKey: string;
   stop(): Promise<void>;
 }
 
 const REPOSITORY_ROOT = new URL("../../", import.meta.url).pathname;
-const E2E_API_KEY = "e2e-api-key";
+/** Configured keys need at least 32 characters. */
+const E2E_API_KEY = "extispex_e2eProjectApiKey00000000000000000000000";
+const E2E_INSTANCE_ADMIN_KEY = "extispex_admin_e2eInstanceAdminKey000000000000000";
 const STARTUP_TIMEOUT_MILLISECONDS = 60_000;
 const SERVICE_PERMISSIONS = [
   "--allow-net",
@@ -51,7 +57,8 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
   const [otlpHttpPort, otlpGrpcPort, gatewayPort] = await reserveFreePorts(3);
   const allInOneProcess = startDenoProcess("all-in-one", "apps/all-in-one/src/main.ts", {
     DATA_DIRECTORY: `${workingDirectory}/data`,
-    STATIC_API_KEYS: `${E2E_API_KEY}=e2e-project`,
+    INSTANCE_ADMIN_KEY: E2E_INSTANCE_ADMIN_KEY,
+    BOOTSTRAP_PROJECT_API_KEY: E2E_API_KEY,
     TELEMETRY_HTTP_PORT: String(otlpHttpPort),
     TELEMETRY_GRPC_PORT: String(otlpGrpcPort),
     GATEWAY_PORT: String(gatewayPort),
@@ -64,6 +71,7 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
     otlpGrpcAddress: `localhost:${otlpGrpcPort}`,
     grpcRootCertificate: await Deno.readFile(tlsFiles.certificateFile),
     apiKey: E2E_API_KEY,
+    instanceAdminKey: E2E_INSTANCE_ADMIN_KEY,
     stop: async () => {
       await allInOneProcess.stop();
       await Deno.remove(workingDirectory, { recursive: true });
@@ -80,10 +88,18 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   }
   const workingDirectory = await Deno.makeTempDir({ prefix: "extispex-e2e-" });
   const tlsFiles = await createSelfSignedCertificate(workingDirectory);
-  const [otlpHttpPort, otlpGrpcPort, promptPort, gatewayPort] = await reserveFreePorts(4);
+  const [otlpHttpPort, otlpGrpcPort, promptPort, identityPort, gatewayPort] =
+    await reserveFreePorts(5);
+  const identityUrl = `http://127.0.0.1:${identityPort}`;
+  const identityProcess = startDenoProcess("identity", "services/identity/src/main.ts", {
+    IDENTITY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "identity_e2e"),
+    INSTANCE_ADMIN_KEY: E2E_INSTANCE_ADMIN_KEY,
+    BOOTSTRAP_PROJECT_API_KEY: E2E_API_KEY,
+    IDENTITY_PORT: String(identityPort),
+  });
   const telemetryProcess = startDenoProcess("telemetry", "services/telemetry/src/main.ts", {
     TELEMETRY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "telemetry_e2e"),
-    STATIC_API_KEYS: `${E2E_API_KEY}=e2e-project`,
+    IDENTITY_URL: identityUrl,
     TELEMETRY_HTTP_PORT: String(otlpHttpPort),
     TELEMETRY_GRPC_PORT: String(otlpGrpcPort),
     TELEMETRY_GRPC_TLS_CERTIFICATE_FILE: tlsFiles.certificateFile,
@@ -91,12 +107,13 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   });
   const promptProcess = startDenoProcess("prompt", "services/prompt/src/main.ts", {
     PROMPT_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "prompt_e2e"),
-    STATIC_API_KEYS: `${E2E_API_KEY}=e2e-project`,
+    IDENTITY_URL: identityUrl,
     PROMPT_PORT: String(promptPort),
   });
   const gatewayProcess = startDenoProcess("gateway", "services/gateway/src/main.ts", {
     TELEMETRY_URL: `http://127.0.0.1:${otlpHttpPort}`,
     PROMPT_URL: `http://127.0.0.1:${promptPort}`,
+    IDENTITY_URL: identityUrl,
     GATEWAY_PORT: String(gatewayPort),
     WEB_ASSETS_DIRECTORY: `${REPOSITORY_ROOT}apps/web/dist`,
   });
@@ -106,14 +123,20 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     otlpGrpcAddress: `localhost:${otlpGrpcPort}`,
     grpcRootCertificate: await Deno.readFile(tlsFiles.certificateFile),
     apiKey: E2E_API_KEY,
+    instanceAdminKey: E2E_INSTANCE_ADMIN_KEY,
     stop: async () => {
-      await Promise.all([gatewayProcess.stop(), promptProcess.stop(), telemetryProcess.stop()]);
+      await Promise.all([
+        gatewayProcess.stop(),
+        promptProcess.stop(),
+        telemetryProcess.stop(),
+        identityProcess.stop(),
+      ]);
       await Deno.remove(workingDirectory, { recursive: true });
     },
   };
   await waitUntilHealthy(
-    [deployment.gatewayUrl, deployment.otlpHttpUrl, `http://127.0.0.1:${promptPort}`],
-    [telemetryProcess, promptProcess, gatewayProcess],
+    [identityUrl, deployment.gatewayUrl, deployment.otlpHttpUrl, `http://127.0.0.1:${promptPort}`],
+    [identityProcess, telemetryProcess, promptProcess, gatewayProcess],
   );
   return deployment;
 }
@@ -140,6 +163,7 @@ function readExternalDeployment(): RunningDeployment {
     otlpGrpcAddress: readRequired("E2E_OTLP_GRPC_ADDRESS"),
     grpcRootCertificate: rootCertificateFile ? Deno.readFileSync(rootCertificateFile) : null,
     apiKey: readRequired("E2E_API_KEY"),
+    instanceAdminKey: readRequired("E2E_INSTANCE_ADMIN_KEY"),
     stop: () => Promise.resolve(),
   };
 }

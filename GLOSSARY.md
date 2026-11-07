@@ -96,6 +96,14 @@ organization
 **Project**: The unit of data isolation within an Instance. Telemetry, Datasets, prompts and API
 keys each belong to exactly one Project. _Avoid_: Workspace, tenant
 
+**API key**: A secret that an application or script sends to act on one Project, which the key alone
+identifies. It is shown once, when it is created, and stored only as a hash. It can be revoked.
+_Avoid_: Token, access key
+
+**Instance admin key**: A secret from the Instance's configuration that manages Projects and API
+keys but reads no Project's data. It stands in for admins until users and Roles exist. _Avoid_:
+Master key (the encryption key for stored credentials), root key
+
 **Group**: A set of users, imported from the company's identity system or created locally, that
 receives a Role in a Project. _Avoid_: Team
 

@@ -1,15 +1,22 @@
 import { useState } from "react";
 import { BrowserRouter, Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router";
 import { ApiKeyMenu } from "./api-key/api-key-menu.tsx";
-import { readStoredApiKey, storeApiKey } from "./api-key/api-key-storage.ts";
+import {
+  readStoredApiKey,
+  readStoredInstanceAdminKey,
+  storeApiKey,
+  storeInstanceAdminKey,
+} from "./api-key/api-key-storage.ts";
 import { ConnectProject } from "./api-key/connect-project.tsx";
+import { ProjectPage } from "./projects/project-page.tsx";
+import { ProjectsPage } from "./projects/projects-page.tsx";
 import { PromptComparisonPage } from "./prompts/prompt-comparison-page.tsx";
 import { NewPromptPage, NewPromptVersionPage } from "./prompts/prompt-editor-page.tsx";
 import { PromptPage } from "./prompts/prompt-page.tsx";
 import { NEW_PROMPT_PATH, PromptsPage } from "./prompts/prompts-page.tsx";
 import { ThemeSwitcher } from "./theme/theme-switcher.tsx";
 import { TracesPage } from "./traces/traces-page.tsx";
-import { ActivityIcon, BrandMark, InboxIcon, PromptIcon } from "./ui/icons.tsx";
+import { ActivityIcon, BrandMark, FolderIcon, InboxIcon, PromptIcon } from "./ui/icons.tsx";
 
 export function App() {
   return (
@@ -23,17 +30,27 @@ export function App() {
 
 function AppShell() {
   const [apiKey, setApiKey] = useState(readStoredApiKey);
+  const [instanceAdminKey, setInstanceAdminKey] = useState(readStoredInstanceAdminKey);
   const { pathname } = useLocation();
 
   const updateApiKey = (nextApiKey: string) => {
     setApiKey(nextApiKey);
     storeApiKey(nextApiKey);
   };
+  const updateInstanceAdminKey = (nextInstanceAdminKey: string) => {
+    setInstanceAdminKey(nextInstanceAdminKey);
+    storeInstanceAdminKey(nextInstanceAdminKey);
+  };
   const disconnect = () => updateApiKey("");
   const isConnected = apiKey !== "";
   // Creating a prompt lives outside /prompts/ so that a prompt may be named "new".
   const isInPrompts = pathname.startsWith("/prompts") || pathname === NEW_PROMPT_PATH;
   const pageProps = { apiKey, onDisconnect: disconnect };
+  // Managing Projects takes the Instance admin key, so it works without a Project API key.
+  const instanceAdminProps = {
+    instanceAdminKey,
+    onInstanceAdminKeyChange: updateInstanceAdminKey,
+  };
 
   return (
     <div className="app-shell">
@@ -43,22 +60,28 @@ function AppShell() {
             <BrandMark size={26} />
             <span className="brand-name">Extispex</span>
           </Link>
-          {isConnected && (
-            <nav className="primary-navigation" aria-label="Sections">
-              <NavLink className="navigation-link" to="/traces">
-                <ActivityIcon size={15} />
-                <span className="navigation-link-text">Traces</span>
-              </NavLink>
-              <Link
-                className="navigation-link"
-                to="/prompts"
-                aria-current={isInPrompts ? "page" : undefined}
-              >
-                <PromptIcon size={15} />
-                <span className="navigation-link-text">Prompts</span>
-              </Link>
-            </nav>
-          )}
+          <nav className="primary-navigation" aria-label="Sections">
+            {isConnected && (
+              <>
+                <NavLink className="navigation-link" to="/traces">
+                  <ActivityIcon size={15} />
+                  <span className="navigation-link-text">Traces</span>
+                </NavLink>
+                <Link
+                  className="navigation-link"
+                  to="/prompts"
+                  aria-current={isInPrompts ? "page" : undefined}
+                >
+                  <PromptIcon size={15} />
+                  <span className="navigation-link-text">Prompts</span>
+                </Link>
+              </>
+            )}
+            <NavLink className="navigation-link" to="/projects">
+              <FolderIcon size={15} />
+              <span className="navigation-link-text">Projects</span>
+            </NavLink>
+          </nav>
         </div>
         <div className="top-bar-end">
           {isConnected && <ApiKeyMenu apiKey={apiKey} onApiKeyChange={updateApiKey} />}
@@ -66,24 +89,33 @@ function AppShell() {
         </div>
       </header>
       <main className="app-content">
-        {!isConnected ? <ConnectProject onConnect={updateApiKey} /> : (
-          <Routes>
-            <Route path="/" element={<RedirectToTraces />} />
-            <Route path="/traces" element={<TracesPage {...pageProps} />} />
-            <Route path="/prompts" element={<PromptsPage {...pageProps} />} />
-            <Route path={NEW_PROMPT_PATH} element={<NewPromptPage {...pageProps} />} />
-            <Route path="/prompts/:promptName" element={<PromptPage {...pageProps} />} />
-            <Route
-              path="/prompts/:promptName/versions/new"
-              element={<NewPromptVersionPage {...pageProps} />}
-            />
-            <Route
-              path="/prompts/:promptName/compare"
-              element={<PromptComparisonPage {...pageProps} />}
-            />
-            <Route path="*" element={<PageNotFound />} />
-          </Routes>
-        )}
+        <Routes>
+          <Route path="/projects" element={<ProjectsPage {...instanceAdminProps} />} />
+          <Route
+            path="/projects/:projectId"
+            element={<ProjectPage {...instanceAdminProps} onUseApiKey={updateApiKey} />}
+          />
+          {isConnected
+            ? (
+              <>
+                <Route path="/" element={<RedirectToTraces />} />
+                <Route path="/traces" element={<TracesPage {...pageProps} />} />
+                <Route path="/prompts" element={<PromptsPage {...pageProps} />} />
+                <Route path={NEW_PROMPT_PATH} element={<NewPromptPage {...pageProps} />} />
+                <Route path="/prompts/:promptName" element={<PromptPage {...pageProps} />} />
+                <Route
+                  path="/prompts/:promptName/versions/new"
+                  element={<NewPromptVersionPage {...pageProps} />}
+                />
+                <Route
+                  path="/prompts/:promptName/compare"
+                  element={<PromptComparisonPage {...pageProps} />}
+                />
+                <Route path="*" element={<PageNotFound />} />
+              </>
+            )
+            : <Route path="*" element={<ConnectProject onConnect={updateApiKey} />} />}
+        </Routes>
       </main>
     </div>
   );

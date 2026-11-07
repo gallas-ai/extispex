@@ -10,8 +10,8 @@ working session that ends with a merged pull request and green CI. Terms are def
 | ---- | ------------------------------------------------------------------------------------------------------ | ------ |
 | 0    | First trace pipeline and CI on GitHub                                                                  | Done   |
 | 1    | [Prompt service](#1-prompt-service)                                                                    | Done   |
-| 2    | [Projects and API keys](#2-projects-and-api-keys)                                                      | Next   |
-| 3    | [Users, Groups, Roles and tokens](#3-users-groups-roles-and-tokens)                                    |        |
+| 2    | [Projects and API keys](#2-projects-and-api-keys)                                                      | Done   |
+| 3    | [Users, Groups, Roles and tokens](#3-users-groups-roles-and-tokens)                                    | Next   |
 | 4    | [Datasets and Client-Driven Execution](#4-datasets-and-client-driven-execution)                        |        |
 | 5    | [Trace completion and Telemetry Evaluator](#5-trace-completion-and-telemetry-evaluator)                |        |
 | 6    | [Server-Driven Execution and Session Test Cases](#6-server-driven-execution-and-session-test-cases)    |        |
@@ -156,6 +156,9 @@ JWTs locally and get their own tokens for service-to-service calls.
 - Service tokens: a service obtains a short-lived token for a Project from Identity.
 - UI: sign-in page, Project switcher, Group and Role management. The UI no longer asks for an API
   key.
+- Replace the Instance admin key from step 2 with Roles for managing Projects and API keys, and
+  require a service token on Identity's internal API key resolution, which relies on network
+  isolation until then.
 
 **Decisions to make first:**
 

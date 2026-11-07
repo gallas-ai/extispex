@@ -8,6 +8,7 @@
     "packages/service-storage",
     "services/telemetry",
     "services/prompt",
+    "services/identity",
     "services/gateway",
     "apps/all-in-one",
     "apps/web",

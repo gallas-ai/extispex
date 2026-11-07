@@ -14,6 +14,7 @@ const gatewayService = createGatewayService({
   serviceClients: {
     telemetry: createHttpServiceClient(readRequiredEnvironmentVariable("TELEMETRY_URL")),
     prompt: createHttpServiceClient(readRequiredEnvironmentVariable("PROMPT_URL")),
+    identity: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
   },
   webAssetsDirectory: readOptionalEnvironmentVariable("WEB_ASSETS_DIRECTORY") ?? null,
   logger,

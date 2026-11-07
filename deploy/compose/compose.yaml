@@ -3,6 +3,10 @@
 #   docker compose -f deploy/compose/compose.yaml up --build
 # Override host ports with OTLP_GRPC_HOST_PORT, OTLP_HTTP_HOST_PORT and GATEWAY_HOST_PORT.
 #
+# The Instance admin key and the first Project's API key default to development values that
+# everyone can read here. Override them with INSTANCE_ADMIN_KEY and BOOTSTRAP_PROJECT_API_KEY
+# (at least 32 characters each) before anyone else can reach the ports.
+#
 # One PostgreSQL server hosts a separate database for each service. Each service creates its own
 # database on first start, which needs a user that may create databases.
 name: extispex
@@ -22,19 +26,34 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  identity:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/identity.Dockerfile
+    environment:
+      IDENTITY_DATABASE_URL: postgresql://extispex:extispex@postgres:5432/identity
+      INSTANCE_ADMIN_KEY: ${INSTANCE_ADMIN_KEY:-development-instance-admin-key-not-for-production}
+      BOOTSTRAP_PROJECT_API_KEY: ${BOOTSTRAP_PROJECT_API_KEY:-development-project-api-key-not-for-production}
+    # No published port: the internal API key resolution must stay inside the network.
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   telemetry:
     build:
       context: ../..
       dockerfile: deploy/docker/telemetry.Dockerfile
     environment:
       TELEMETRY_DATABASE_URL: postgresql://extispex:extispex@postgres:5432/telemetry
-      STATIC_API_KEYS: local-development-key=default
+      IDENTITY_URL: http://identity:8082
     ports:
       - "${OTLP_GRPC_HOST_PORT:-4317}:4317"
       - "${OTLP_HTTP_HOST_PORT:-4318}:4318"
     depends_on:
       postgres:
         condition: service_healthy
+      identity:
+        condition: service_started
 
   prompt:
     build:
@@ -42,10 +61,12 @@ services:
       dockerfile: deploy/docker/prompt.Dockerfile
     environment:
       PROMPT_DATABASE_URL: postgresql://extispex:extispex@postgres:5432/prompt
-      STATIC_API_KEYS: local-development-key=default
+      IDENTITY_URL: http://identity:8082
     depends_on:
       postgres:
         condition: service_healthy
+      identity:
+        condition: service_started
 
   gateway:
     build:
@@ -54,11 +75,13 @@ services:
     environment:
       TELEMETRY_URL: http://telemetry:4318
       PROMPT_URL: http://prompt:8081
+      IDENTITY_URL: http://identity:8082
     ports:
       - "${GATEWAY_HOST_PORT:-8080}:8080"
     depends_on:
       - telemetry
       - prompt
+      - identity
 
 volumes:
   postgres-data:

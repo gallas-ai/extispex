@@ -1,8 +1,7 @@
 import { type FormEvent, useState } from "react";
-import { BrandMark, EyeIcon, EyeOffIcon } from "../ui/icons.tsx";
-
-/** The key the local image accepts unless STATIC_API_KEYS is set. */
-const LOCAL_DEVELOPMENT_API_KEY = "local-development-key";
+import { Link } from "react-router";
+import { AlertIcon, BrandMark, EyeIcon, EyeOffIcon } from "../ui/icons.tsx";
+import { INSTANCE_ADMIN_KEY_PREFIX } from "./api-key-storage.ts";
 
 interface ConnectProjectProps {
   onConnect: (apiKey: string) => void;
@@ -12,11 +11,17 @@ interface ConnectProjectProps {
 export function ConnectProject({ onConnect }: ConnectProjectProps) {
   const [draftApiKey, setDraftApiKey] = useState("");
   const [isKeyVisible, setIsKeyVisible] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
   const connect = (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
     const trimmedApiKey = draftApiKey.trim();
-    if (trimmedApiKey !== "") onConnect(trimmedApiKey);
+    if (trimmedApiKey === "") return;
+    if (trimmedApiKey.startsWith(INSTANCE_ADMIN_KEY_PREFIX)) {
+      setProblem("This is the Instance admin key. Use it under Projects to create an API key.");
+      return;
+    }
+    onConnect(trimmedApiKey);
   };
 
   return (
@@ -52,23 +57,25 @@ export function ConnectProject({ onConnect }: ConnectProjectProps) {
               {isKeyVisible ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
             </button>
           </div>
+          {problem !== null && (
+            <p className="form-problem" role="alert">
+              <AlertIcon size={14} />
+              {problem}
+            </p>
+          )}
           <button type="submit" className="button button-primary button-block">
             Connect
           </button>
         </form>
         <div className="connect-hint">
           <p>
-            Running the local image? Its built-in key is <code>{LOCAL_DEVELOPMENT_API_KEY}</code>
-            {" "}
-            unless <code>STATIC_API_KEYS</code> is set.
+            A new instance creates the Project <code>Default</code>{" "}
+            and logs its API key once, on first start. Create more keys under Projects with the
+            Instance admin key.
           </p>
-          <button
-            type="button"
-            className="button button-ghost button-small"
-            onClick={() => onConnect(LOCAL_DEVELOPMENT_API_KEY)}
-          >
-            Use the local key
-          </button>
+          <Link className="button button-ghost button-small" to="/projects">
+            Manage Projects and API keys
+          </Link>
         </div>
       </section>
     </div>

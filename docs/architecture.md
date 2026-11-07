@@ -56,6 +56,7 @@ flowchart LR
   gateway --> identity
   company -- "OIDC, SCIM, file import" --> identity
   telemetry -- "validate API key, cached 60 s" --> identity
+  prompt -- "validate API key, cached 60 s" --> identity
   evaluation_worker -- "read traces and sessions" --> telemetry
   evaluation_worker -- "read Prompt Versions" --> prompt
   evaluation_worker -- "call Target" --> app
@@ -299,11 +300,42 @@ those definitions, and the Gateway builds its forwarding table and the combined 
 ### Requests
 
 - **UI and REST:** Identity issues a short-lived JWT carrying Roles. Each service verifies its
-  signature locally.
+  signature locally. Until users exist (roadmap step 3), the UI and REST use a Project API key, like
+  OTLP.
 - **OTLP:** Telemetry validates the Project API key with Identity and caches the result for 60
   seconds, so a revocation takes effect within a minute.
 - **Service to service:** each service obtains a short-lived token from Identity. The worker uses it
   to read Telemetry and Prompt data for the Project it is evaluating.
+
+### Projects and API keys
+
+Built in roadmap step 2. Identity owns Projects and their API keys; Telemetry and Prompt only ask it
+which Project a key belongs to.
+
+- **Key format:** `extispex_` followed by 43 base62 characters, 256 random bits. The prefix lets
+  people and secret scanners recognise a key. Identity stores the key's SHA-256 hash and its first
+  17 characters, which the UI shows to tell keys apart. The full key is returned once, when it is
+  created. See [ADR 0007](adr/0007-prefixed-api-keys-resolved-through-identity.md).
+- **Resolution:** Telemetry and Prompt call `POST /internal/v1/api-keys/resolve` through
+  `packages/service-client` with the key in the body. `packages/service-runtime` caches each answer,
+  positive or negative, for 60 seconds, keyed by the key's hash, and lets concurrent requests with
+  the same key share one call. A revoked key, or any key of a deleted Project, therefore stops
+  working within a minute.
+- **Identity unavailable:** a key that is not cached gets `503` with `Retry-After` on HTTP and
+  `UNAVAILABLE` on gRPC. OTLP exporters retry both, so spans are not lost during a short outage.
+- **Internal endpoint:** the Gateway does not forward `/internal/` paths, because they are not in
+  the shared contracts. Within the Instance's network the endpoint is unauthenticated until service
+  tokens exist (step 3), so Identity's port must not be published. Compose does not publish it.
+- **Instance admin key:** until users and Roles exist, creating and deleting Projects and API keys
+  takes the key from `INSTANCE_ADMIN_KEY`. It reads no Project's data. The local image generates it
+  into `/data/instance-admin-key` on first start when the variable is not set, and logs it once.
+- **First start:** when the Instance has no Project at all, Identity creates the Project `Default`
+  with the key from `BOOTSTRAP_PROJECT_API_KEY`. The local image generates that key when the
+  variable is not set and logs it once. Separate services without the variable start with no
+  Project; the admin creates one in the UI. Several replicas starting at once create one Project,
+  because the name is unique among Projects that are not deleted.
+- **Deleting a Project** sets its deletion time. Its keys stop resolving at once and it disappears
+  from the list; purging its data in every service is step 13.
 
 ### Secrets
 
@@ -470,6 +502,17 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The Projects and API keys step added these checks on 2026-11-07.
+
+| Tested                                    | Result                                                                                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity service on SQLite and PostgreSQL | Projects, API keys, revocation, deletion and the first-start Project work on both; five replicas starting at once create one first Project                          |
+| A key created through the Gateway         | Accepted by OTLP/HTTP, OTLP/gRPC and the Telemetry and Prompt REST APIs at once, in all-in-one, in separate services, in the all-in-one image and in Docker Compose |
+| Revoking a key and deleting a Project     | Both keys were refused by every entry point about 60.5 seconds later, after the cached answers expired                                                              |
+| Identity unavailable                      | Telemetry and Prompt answer `503` with `Retry-After`, and gRPC `UNAVAILABLE`, instead of refusing the key                                                           |
+| First start of the all-in-one process     | Generates and logs the Instance admin key and the `Default` Project's key once; a restart reuses the stored admin key and logs neither                              |
+| Projects pages in headless Chromium       | Entering the admin key, creating a Project and a key, using it in the browser, revoking and deleting work; nothing scrolls sideways from 360px to 2,000px           |
+
 The Prompt service step added these checks on 2026-11-07.
 
 | Tested                                          | Result                                                                                                                   |
@@ -483,8 +526,10 @@ The Prompt service step added these checks on 2026-11-07.
 ### What has not been verified
 
 - The capacity target of 5,000 spans per second
-- The Prompt service's image running against a managed PostgreSQL service, where the user may not be
-  allowed to create databases; it then needs its database created beforehand
+- The Prompt and Identity images running against a managed PostgreSQL service, where the user may
+  not be allowed to create databases; they then need their databases created beforehand
+- That Identity's port stays unreachable from outside the Instance in Kubernetes; the internal API
+  key resolution relies on it until service tokens exist
 - pg-boss under sustained load, in a container and on a managed PostgreSQL service
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
@@ -494,8 +539,8 @@ The Prompt service step added these checks on 2026-11-07.
 
 Done on 2026-11-06: one thin path through the whole system in both deployments. An OTLP span goes
 through ingestion and storage, can be read through the API and appears in the UI. Until the Identity
-service exists, Telemetry and Prompt resolve API keys from the `STATIC_API_KEYS` environment
-variable, parsed by `packages/service-runtime`.
+service existed, Telemetry and Prompt resolved API keys from a `STATIC_API_KEYS` environment
+variable; since step 2 they ask Identity.
 
 The remaining steps and their order are in [roadmap.md](roadmap.md).
 
@@ -507,3 +552,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0004: AGPLv3 for the platform, Apache 2.0 for instrumentation code](adr/0004-agpl-for-the-platform-apache-for-instrumentation.md)
 - [ADR 0005: Playwright browser tests with layout rules](adr/0005-playwright-browser-tests-with-layout-rules.md)
 - [ADR 0006: Public API routes in the shared contracts](adr/0006-public-api-routes-in-shared-contracts.md)
+- [ADR 0007: Prefixed API keys resolved through Identity](adr/0007-prefixed-api-keys-resolved-through-identity.md)

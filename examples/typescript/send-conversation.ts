@@ -4,10 +4,10 @@
  * Each step gets its own Correlation ID; both steps share one Session ID. The application owns
  * both values: the platform never generates them.
  *
- *   deno task send-conversation
+ *   API_KEY=<your Project API key> deno task send-conversation
  *
- * Environment: OTLP_HTTP_URL (default http://127.0.0.1:4318) and API_KEY
- * (default local-development-key, the local image's built-in key).
+ * Environment: API_KEY (required), the key of the Project to send to, and OTLP_HTTP_URL (default
+ * http://127.0.0.1:4318).
  */
 import { runWithTelemetryIds, TelemetryIdsSpanProcessor } from "@extispex/telemetry-ids";
 import { context } from "@opentelemetry/api";
@@ -17,7 +17,14 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchSpanProcessor, TracerProvider } from "@opentelemetry/sdk-trace";
 
 const otlpHttpUrl = Deno.env.get("OTLP_HTTP_URL") ?? "http://127.0.0.1:4318";
-const apiKey = Deno.env.get("API_KEY") ?? "local-development-key";
+const apiKey = Deno.env.get("API_KEY");
+if (!apiKey) {
+  console.error(
+    "Set API_KEY to a Project API key. A new instance logs the key of its first Project on first " +
+      "start; more keys are created under Projects in the UI.",
+  );
+  Deno.exit(1);
+}
 
 // Baggage only flows between spans when a context manager is registered.
 context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());

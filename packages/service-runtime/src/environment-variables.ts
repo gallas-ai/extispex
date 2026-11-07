@@ -29,17 +29,16 @@ export function readPortEnvironmentVariable(variableName: string, defaultPort: n
   return port;
 }
 
-/** Parses `first-key=first-value,second-key=second-value` into a map. */
-export function parseKeyValueList(listText: string, variableName: string): Map<string, string> {
-  const parsedEntries = new Map<string, string>();
-  for (const entryText of listText.split(",").map((entry) => entry.trim()).filter(Boolean)) {
-    const separatorIndex = entryText.indexOf("=");
-    if (separatorIndex <= 0 || separatorIndex === entryText.length - 1) {
-      throw new InvalidConfigurationError(
-        `Environment variable ${variableName} must contain key=value pairs separated by commas.`,
-      );
-    }
-    parsedEntries.set(entryText.slice(0, separatorIndex), entryText.slice(separatorIndex + 1));
+/** Reads a secret such as a key, which must be long enough not to be guessed. */
+export function readSecretEnvironmentVariable(
+  variableName: string,
+  minimumLength: number,
+): string | undefined {
+  const variableValue = readOptionalEnvironmentVariable(variableName);
+  if (variableValue !== undefined && variableValue.length < minimumLength) {
+    throw new InvalidConfigurationError(
+      `Environment variable ${variableName} must be at least ${minimumLength} characters long.`,
+    );
   }
-  return parsedEntries;
+  return variableValue;
 }

@@ -3,7 +3,9 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import {
   authenticateProject,
+  ProjectResolutionUnavailableError,
   type ProjectResolver,
+  RETRY_AFTER_SECONDS,
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import {
@@ -16,8 +18,6 @@ import {
 } from "./otlp-protocol.ts";
 import type { OtlpExportTraceRequest } from "./otlp-trace-types.ts";
 import type { TraceIngestion } from "./trace-ingestion.ts";
-
-const RETRY_AFTER_SECONDS = "5";
 
 type PayloadEncoding = "protobuf" | "json";
 
@@ -58,10 +58,23 @@ export function registerOtlpHttpRoutes(
         }.`,
       );
     }
-    const projectId = await authenticateProject(
-      dependencies.projectResolver,
-      context.req.header("authorization"),
-    );
+    let projectId: string | null;
+    try {
+      projectId = await authenticateProject(
+        dependencies.projectResolver,
+        context.req.header("authorization"),
+      );
+    } catch (error) {
+      if (!(error instanceof ProjectResolutionUnavailableError)) throw error;
+      dependencies.logger.warn("API key could not be checked", { error });
+      context.header("retry-after", RETRY_AFTER_SECONDS);
+      return respondWithError(
+        context,
+        503,
+        "identity_unavailable",
+        "The API key could not be checked. Retry later.",
+      );
+    }
     if (projectId === null) {
       return respondWithError(
         context,

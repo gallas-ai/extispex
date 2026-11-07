@@ -3025,3 +3025,255 @@ textarea {
 .label-row-current {
   background: var(--color-accent-softer);
 }
+
+/* ---------------------------------------------------------------------------------------------
+   Projects and API keys
+   ------------------------------------------------------------------------------------------- */
+
+.projects-page {
+  max-width: 960px;
+}
+
+.button-danger-solid {
+  background: var(--color-danger);
+  color: #ffffff;
+  box-shadow: var(--shadow-small);
+}
+
+.button-danger-solid:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 88%, #000000);
+}
+
+.panel-form {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px 16px;
+}
+
+.panel-form .form-problem {
+  margin-top: 6px;
+}
+
+.panel-form .inline-form .button {
+  flex: none;
+}
+
+.panel-empty-text {
+  padding: 14px 16px 18px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-subtle);
+  font-size: 13px;
+}
+
+.admin-key-panel {
+  width: min(520px, 100%);
+  margin: 24px auto 0;
+  padding: 28px;
+}
+
+.admin-key-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-medium);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+
+.admin-key-title {
+  margin-top: 16px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.admin-key-lead {
+  margin-top: 6px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.admin-key-lead code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.admin-key-form {
+  display: grid;
+  gap: 4px;
+  margin-top: 20px;
+}
+
+.admin-key-form .button {
+  justify-self: start;
+  margin-top: 12px;
+}
+
+.project-list-panel {
+  overflow: hidden;
+}
+
+.clickable-row {
+  cursor: pointer;
+  transition: background-color 80ms;
+}
+
+.clickable-row:hover {
+  background: var(--color-surface-hover);
+}
+
+.project-cell-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.project-cell-name:hover {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+}
+
+.project-table td:first-child {
+  white-space: normal;
+}
+
+.project-title {
+  overflow-wrap: anywhere;
+}
+
+.page-subtitle code {
+  font-size: 12px;
+}
+
+.api-keys-panel {
+  container-type: inline-size;
+  overflow: hidden;
+}
+
+.new-api-key {
+  display: grid;
+  gap: 10px;
+  margin: 0 16px 16px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 40%, var(--color-border));
+  border-radius: var(--radius-medium);
+  background: color-mix(in srgb, var(--color-success) 8%, var(--color-surface));
+}
+
+.new-api-key-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.new-api-key-title .icon {
+  flex: none;
+  color: var(--color-success);
+}
+
+.new-api-key-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+}
+
+.new-api-key-secret {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.new-api-key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.api-key-table {
+  border-top: 1px solid var(--color-border);
+}
+
+.api-key-name {
+  font-weight: 550;
+}
+
+.data-table td.api-key-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.api-key-prefix {
+  font-size: 12px;
+}
+
+.api-key-revoked .api-key-name,
+.api-key-revoked .api-key-prefix {
+  color: var(--color-text-subtle);
+  text-decoration: line-through;
+}
+
+.data-table .column-actions {
+  width: 1%;
+  text-align: right;
+}
+
+.status-text {
+  color: var(--color-text-subtle);
+  font-size: 12.5px;
+}
+
+.confirm-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.danger-panel {
+  border-color: var(--color-danger-border);
+}
+
+.danger-panel .panel-title {
+  color: var(--color-danger);
+}
+
+.danger-panel-text {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.danger-panel .confirm-actions {
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+@container (max-width: 560px) {
+  .api-key-table .column-created {
+    display: none;
+  }
+}
+
+@container (max-width: 400px) {
+  .api-key-table .column-key {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .panel-form .inline-form {
+    flex-direction: column;
+  }
+
+  .admin-key-panel {
+    padding: 20px;
+  }
+}

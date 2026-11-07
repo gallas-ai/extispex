@@ -1,7 +1,8 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
-  createStaticApiKeyProjectResolver,
   createStructuredLogger,
+  ProjectResolutionUnavailableError,
+  type ProjectResolver,
 } from "@extispex/service-runtime";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import type { ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
@@ -13,6 +14,14 @@ import {
 
 const API_KEY = "test-api-key";
 const OTHER_PROJECT_API_KEY = "other-project-api-key";
+
+/** Stands in for Identity: two keys, each in its own Project. */
+const testProjectResolver: ProjectResolver = {
+  resolveProjectId: (apiKey) =>
+    Promise.resolve(
+      ({ [API_KEY]: "project-one", [OTHER_PROJECT_API_KEY]: "project-two" })[apiKey] ?? null,
+    ),
+};
 const TRACE_ID = "5b8efff798038103d269b633813fc60c";
 const ROOT_SPAN_ID = "eee19b7ec3c1b174";
 const CHILD_SPAN_ID = "eee19b7ec3c1b175";
@@ -80,9 +89,7 @@ async function withTelemetryService(
     await database.orm.em.fork().execute("delete from spans");
     await testBody(createTelemetryService({
       database,
-      projectResolver: createStaticApiKeyProjectResolver(
-        `${API_KEY}=project-one,${OTHER_PROJECT_API_KEY}=project-two`,
-      ),
+      projectResolver: testProjectResolver,
       logger: createStructuredLogger("telemetry-test"),
     }));
   } finally {
@@ -267,6 +274,37 @@ defineTelemetryTest("requires a valid API key", async (telemetryService) => {
   const response = await sendRequest(telemetryService, "/v1/traces", { apiKey: "unknown-key" });
   assertEquals(response.status, 401);
   await response.body?.cancel();
+});
+
+Deno.test("asks clients to retry while API keys cannot be checked", async () => {
+  const database = await openTelemetryDatabase("sqlite::memory:");
+  try {
+    const telemetryService = createTelemetryService({
+      database,
+      projectResolver: {
+        resolveProjectId: () =>
+          Promise.reject(new ProjectResolutionUnavailableError("Identity is down.")),
+      },
+      logger: { ...createStructuredLogger("telemetry-test"), warn: () => {} },
+    });
+    for (
+      const response of [
+        await postJsonTraces(
+          telemetryService,
+          createJsonTraceRequest({
+            includeCorrelationIdOnChild: true,
+          }),
+        ),
+        await sendRequest(telemetryService, "/v1/traces"),
+      ]
+    ) {
+      assertEquals(response.status, 503);
+      assertEquals(response.headers.get("retry-after"), "5");
+      assertEquals((await response.json()).error.code, "identity_unavailable");
+    }
+  } finally {
+    await database.close();
+  }
 });
 
 defineTelemetryTest(
