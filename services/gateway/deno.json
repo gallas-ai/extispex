@@ -5,6 +5,7 @@
     ".": "./src/create-service.ts"
   },
   "imports": {
+    "@hono/zod-openapi": "npm:@hono/zod-openapi@^1.1.0",
     "@std/assert": "jsr:@std/assert@^1.0.0",
     "@std/http": "jsr:@std/http@^1.0.0",
     "hono": "npm:hono@^4.10.0"

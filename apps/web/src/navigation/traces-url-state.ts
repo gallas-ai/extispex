@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo } from "react";
+import { useLocation, useNavigate } from "react-router";
 
 /**
  * What the Traces page shows, kept in the query string so that a view can be shared as a link
@@ -47,28 +48,21 @@ export function useTracesUrlState(): [
   TracesUrlState,
   (changes: Partial<TracesUrlState>, historyMode: HistoryMode) => void,
 ] {
-  const [urlState, setUrlState] = useState(() => parseTracesUrlState(globalThis.location.search));
-
-  useEffect(() => {
-    const followBrowserNavigation = () =>
-      setUrlState(parseTracesUrlState(globalThis.location.search));
-    globalThis.addEventListener("popstate", followBrowserNavigation);
-    return () => globalThis.removeEventListener("popstate", followBrowserNavigation);
-  }, []);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const urlState = useMemo(() => parseTracesUrlState(location.search), [location.search]);
 
   const updateUrlState = useCallback(
     (changes: Partial<TracesUrlState>, historyMode: HistoryMode) => {
-      // The location is the source of truth, so several updates in one event compose correctly.
+      // The browser's location is updated as soon as the router navigates, so reading it here
+      // lets several updates in one event compose instead of overwriting each other.
       const nextState = { ...parseTracesUrlState(globalThis.location.search), ...changes };
-      const nextUrl = `${globalThis.location.pathname}${serializeTracesUrlState(nextState)}`;
-      if (historyMode === "push") {
-        globalThis.history.pushState(null, "", nextUrl);
-      } else {
-        globalThis.history.replaceState(null, "", nextUrl);
-      }
-      setUrlState(nextState);
+      navigate(
+        { pathname: globalThis.location.pathname, search: serializeTracesUrlState(nextState) },
+        { replace: historyMode === "replace" },
+      );
     },
-    [],
+    [navigate],
   );
 
   return [urlState, updateUrlState];

@@ -125,6 +125,19 @@ export async function assertNoHorizontalOverflow(page: Page, situation: string):
   }
 }
 
+/**
+ * Forgets the console errors that the browser logs for failed requests with these statuses, for
+ * steps that provoke an error response on purpose.
+ */
+export function forgetExpectedRequestFailures(uiSession: UiSession, statusCodes: number[]): void {
+  const expectedErrors = uiSession.pageErrors.filter((pageError) =>
+    statusCodes.some((statusCode) => pageError.includes(`status of ${statusCode}`))
+  );
+  for (const expectedError of expectedErrors) {
+    uiSession.pageErrors.splice(uiSession.pageErrors.indexOf(expectedError), 1);
+  }
+}
+
 export function assertNoPageErrors(uiSession: UiSession): void {
   assert(uiSession.pageErrors.length === 0, uiSession.pageErrors.join("\n"));
 }

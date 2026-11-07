@@ -4,16 +4,17 @@
 
 Self-hosted observability and evaluation for GenAI applications and agents. Your application sends
 OpenTelemetry traces; Extispex stores them, lets you find them by your own Correlation ID or Session
-ID, and shows them in a web UI.
+ID, and shows them in a web UI. It also keeps your prompts as immutable versions with movable labels
+such as `production`.
 
 > **Why "Extispex"?** An _extispex_ was a Roman diviner, from Latin _exta_ (entrails) and _specio_
 > (I look): the one who looks inside. By examining the inner organs of a sacrifice, an extispex
 > judged whether an undertaking would end well. Looking inside and judging the outcome is tracing
 > and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
 
-**Status:** early development. The trace pipeline works end to end. Logs, metrics, evaluations,
-prompts and identity management are designed in [docs/architecture.md](docs/architecture.md) but not
-built yet.
+**Status:** early development. The trace pipeline and versioned prompts work end to end. Logs,
+metrics, evaluations and identity management are designed in
+[docs/architecture.md](docs/architecture.md) but not built yet.
 
 ## Try it locally
 
@@ -48,6 +49,25 @@ The [`telemetry-ids` package](packages/telemetry-ids/) and the
 [Python example](examples/python/send_conversation.py) show a span processor that adds both
 attributes to every span.
 
+## Storing prompts
+
+Create a prompt in the UI under **Prompts**, or through the REST API. Every change is a new,
+immutable version, and a Prompt Label such as `production` points to the version your application
+uses:
+
+```sh
+curl -X POST localhost:8080/v1/prompts -H 'authorization: Bearer local-development-key' \
+  -H 'content-type: application/json' -d '{
+    "name": "support-agent", "type": "chat", "labels": ["production"],
+    "messages": [{ "role": "system", "content": "You help customers of {{company}}." }],
+    "modelParameters": { "model": "gpt-4.1", "temperature": 0.2 }
+  }'
+curl localhost:8080/v1/prompts/support-agent/labels/production \
+  -H 'authorization: Bearer local-development-key'
+```
+
+The full API, including comparing two versions, is described at `/v1/openapi.json`.
+
 ## Container images
 
 Images are published to the GitHub Container Registry as `ghcr.io/gallas-ai/extispex-<service>`. The
@@ -60,7 +80,7 @@ all-in-one image takes the bare name because it is the one to try first.
 | `ghcr.io/gallas-ai/extispex-telemetry`         | Telemetry service: OTLP ingestion, queries | Built   |
 | `ghcr.io/gallas-ai/extispex-evaluation`        | Evaluation service API                     | Planned |
 | `ghcr.io/gallas-ai/extispex-evaluation-worker` | Evaluation worker                          | Planned |
-| `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Planned |
+| `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Built   |
 | `ghcr.io/gallas-ai/extispex-identity`          | Identity service                           | Planned |
 
 ## Development
@@ -94,8 +114,10 @@ deno task test              # unit, service and architecture tests
 deno task build:web && deno task test:e2e  # end-to-end tests
 ```
 
-To include PostgreSQL in `deno task test`, set `TELEMETRY_TEST_POSTGRES_URL`. To run the services
-separately against PostgreSQL, use `docker compose -f deploy/compose/compose.yaml up --build`.
+To include PostgreSQL in `deno task test`, set `TEST_POSTGRES_URL` to a server, such as
+`postgresql://extispex:extispex@localhost:5432/extispex`; each service's tests create their own
+database `<service>_test` there. To run the services separately against PostgreSQL, use
+`docker compose -f deploy/compose/compose.yaml up --build`.
 
 ## Documentation
 

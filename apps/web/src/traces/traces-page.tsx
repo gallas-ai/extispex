@@ -1,8 +1,10 @@
 import type { TraceSummary } from "@extispex/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listTraces, TelemetryApiError, type TraceFilters } from "../api/telemetry-api.ts";
+import { isApiKeyRejection } from "../api/api-request.ts";
+import { listTraces, type TraceFilters } from "../api/telemetry-api.ts";
 import { useTracesUrlState } from "../navigation/traces-url-state.ts";
-import { AlertIcon, InboxIcon, RefreshIcon } from "../ui/icons.tsx";
+import { InboxIcon, RefreshIcon } from "../ui/icons.tsx";
+import { LoadError } from "../ui/load-error.tsx";
 import { useNow } from "../ui/use-now.ts";
 import { TraceDetail } from "./trace-detail.tsx";
 import { TraceFilterBar } from "./trace-filters.tsx";
@@ -46,11 +48,10 @@ export function TracesPage({ apiKey, onDisconnect }: TracesPageProps) {
       setTraceListState({ status: "loaded", traces, loadedAtUnixMilliseconds: Date.now() });
     } catch (error) {
       if (requestNumber !== latestRequestNumber.current) return;
-      const statusCode = error instanceof TelemetryApiError ? error.statusCode : null;
       setTraceListState({
         status: "failed",
         message: (error as Error).message,
-        isApiKeyRejected: statusCode === 401 || statusCode === 403,
+        isApiKeyRejected: isApiKeyRejection(error),
       });
     } finally {
       if (requestNumber === latestRequestNumber.current) setIsRefreshing(false);
@@ -146,7 +147,8 @@ export function TracesPage({ apiKey, onDisconnect }: TracesPageProps) {
         <section className="panel trace-list-panel" aria-label="Trace list">
           {traceListState.status === "loading" && <TraceTableSkeleton />}
           {traceListState.status === "failed" && (
-            <ErrorState
+            <LoadError
+              subject="Traces"
               message={traceListState.message}
               isApiKeyRejected={traceListState.isApiKeyRejected}
               onRetry={() => loadTraces(false)}
@@ -253,38 +255,6 @@ function EmptyState(
       </p>
       <pre className="code-block">deno task send-conversation</pre>
       <p className="text-subtle">The example sends a two-step conversation to the local image.</p>
-    </div>
-  );
-}
-
-interface ErrorStateProps {
-  message: string;
-  isApiKeyRejected: boolean;
-  onRetry: () => void;
-  onDisconnect: () => void;
-}
-
-function ErrorState({ message, isApiKeyRejected, onRetry, onDisconnect }: ErrorStateProps) {
-  return (
-    <div className="empty-state empty-state-error" role="alert">
-      <span className="empty-state-icon">
-        <AlertIcon size={22} />
-      </span>
-      <h2>{isApiKeyRejected ? "The API key was not accepted" : "Traces could not be loaded"}</h2>
-      <p>{message}</p>
-      <div className="button-row">
-        {isApiKeyRejected
-          ? (
-            <button type="button" className="button button-primary" onClick={onDisconnect}>
-              Use a different key
-            </button>
-          )
-          : (
-            <button type="button" className="button button-primary" onClick={onRetry}>
-              Try again
-            </button>
-          )}
-      </div>
     </div>
   );
 }

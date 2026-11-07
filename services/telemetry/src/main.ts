@@ -1,4 +1,5 @@
 import {
+  createStaticApiKeyProjectResolver,
   createStructuredLogger,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
@@ -7,7 +8,6 @@ import {
 } from "@extispex/service-runtime";
 import {
   bindOtlpGrpcServer,
-  createStaticApiKeyProjectResolver,
   createTelemetryService,
   type GrpcTlsFiles,
   openTelemetryDatabase,

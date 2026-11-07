@@ -34,10 +34,12 @@
     "npm:@types/react-dom@19": "19.3.0_@types+react@19.3.0",
     "npm:@types/react@19": "19.3.0",
     "npm:@vitejs/plugin-react@5": "5.2.0_vite@7.3.7",
+    "npm:diff@9.0.0": "9.0.0",
     "npm:hono@^4.10.0": "4.13.16",
     "npm:playwright-core@1.64.1": "1.64.1",
     "npm:protobufjs@^7.5.0": "7.6.6",
     "npm:react-dom@19": "19.3.1_react@19.3.1",
+    "npm:react-router@8.5.1": "8.5.1_@types+react@19.3.0_@types+react-dom@19.3.0__@types+react@19.3.0_react@19.3.1_react-dom@19.3.1__react@19.3.1",
     "npm:react@19": "19.3.1",
     "npm:vite@*": "7.3.7",
     "npm:vite@7": "7.3.7",
@@ -620,6 +622,9 @@
     "@protobufjs/utf8@1.1.2": {
       "integrity": "sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug=="
     },
+    "@remix-run/route-pattern@0.22.1": {
+      "integrity": "sha512-czdGJWh09Lapvcqt7Vb09KlrU2PhRJ8xQaI+AItTuD9aDJ5MAgxnS38lnys6Ll+6RJEqPiaUqTwIQhVLwFvv+w=="
+    },
     "@rolldown/pluginutils@1.0.0-rc.3": {
       "integrity": "sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q=="
     },
@@ -868,6 +873,9 @@
     "convert-source-map@2.0.0": {
       "integrity": "sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg=="
     },
+    "cookie-es@3.1.1": {
+      "integrity": "sha512-UaXxwISYJPTr9hwQxMFYZ7kNhSXboMXP+Z3TRX6f1/NyaGPfuNUZOWP1pUEb75B2HjfklIYLVRfWiFZJyC6Npg=="
+    },
     "csstype@3.2.3": {
       "integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="
     },
@@ -876,6 +884,9 @@
       "dependencies": [
         "ms"
       ]
+    },
+    "diff@9.0.0": {
+      "integrity": "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="
     },
     "electron-to-chromium@1.5.476": {
       "integrity": "sha512-LnPnRZ0esKB9NjsSIaC+mffW+5dAtBui6kbK5f9Qykblj4Q33cn6yIhuCcTVjwpvL3YJPqqQ4IlsNyriGNpyFQ=="
@@ -1112,6 +1123,22 @@
     "react-refresh@0.18.0": {
       "integrity": "sha512-QgT5//D3jfjJb6Gsjxv0Slpj23ip+HtOpnNgnb2S5zU3CB26G/IDPGoy4RJB42wzFE46DRsstbW6tKHoKbhAxw=="
     },
+    "react-router@8.5.1_@types+react@19.3.0_@types+react-dom@19.3.0__@types+react@19.3.0_react@19.3.1_react-dom@19.3.1__react@19.3.1": {
+      "integrity": "sha512-5u1eQ46QjuXjNfEnLwzrnou1Bm5dquO3xjVYkkMYCudtkicD2AQHtx+fvXzPATtPJx8TW6DR1x1TDRqsfHyZBw==",
+      "dependencies": [
+        "@remix-run/route-pattern",
+        "@types/react",
+        "@types/react-dom",
+        "cookie-es",
+        "react",
+        "react-dom"
+      ],
+      "optionalPeers": [
+        "@types/react",
+        "@types/react-dom",
+        "react-dom"
+      ]
+    },
     "react@19.3.1": {
       "integrity": "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="
     },
@@ -1264,6 +1291,7 @@
           "npm:@types/react@19",
           "npm:@vitejs/plugin-react@5",
           "npm:react-dom@19",
+          "npm:react-router@8.5.1",
           "npm:react@19",
           "npm:vite@7"
         ]
@@ -1279,7 +1307,23 @@
       },
       "packages/contracts": {
         "dependencies": [
+          "npm:@hono/zod-openapi@^1.1.0",
           "npm:zod@^4.1.0"
+        ]
+      },
+      "packages/service-runtime": {
+        "dependencies": [
+          "npm:@hono/zod-openapi@^1.1.0",
+          "npm:hono@^4.10.0"
+        ]
+      },
+      "packages/service-storage": {
+        "dependencies": [
+          "npm:@mikro-orm/core@7.2.7",
+          "npm:@mikro-orm/migrations@7.2.7",
+          "npm:@mikro-orm/postgresql@7.2.7",
+          "npm:@mikro-orm/sql@7.2.7",
+          "npm:@mikro-orm/sqlite@7.2.7"
         ]
       },
       "packages/telemetry-ids": {
@@ -1292,6 +1336,18 @@
         "dependencies": [
           "jsr:@std/assert@1",
           "jsr:@std/http@1",
+          "npm:@hono/zod-openapi@^1.1.0",
+          "npm:hono@^4.10.0"
+        ]
+      },
+      "services/prompt": {
+        "dependencies": [
+          "jsr:@std/assert@1",
+          "npm:@hono/zod-openapi@^1.1.0",
+          "npm:@mikro-orm/core@7.2.7",
+          "npm:@mikro-orm/migrations@7.2.7",
+          "npm:@mikro-orm/sql@7.2.7",
+          "npm:diff@9.0.0",
           "npm:hono@^4.10.0"
         ]
       },
@@ -1302,9 +1358,7 @@
           "npm:@hono/zod-openapi@^1.1.0",
           "npm:@mikro-orm/core@7.2.7",
           "npm:@mikro-orm/migrations@7.2.7",
-          "npm:@mikro-orm/postgresql@7.2.7",
           "npm:@mikro-orm/sql@7.2.7",
-          "npm:@mikro-orm/sqlite@7.2.7",
           "npm:hono@^4.10.0",
           "npm:protobufjs@^7.5.0",
           "npm:zod@^4.1.0"

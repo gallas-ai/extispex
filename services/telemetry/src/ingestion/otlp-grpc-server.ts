@@ -1,6 +1,9 @@
 import * as grpc from "@grpc/grpc-js";
-import type { StructuredLogger } from "@extispex/service-runtime";
-import { authenticateProject, type ProjectResolver } from "../projects/project-authentication.ts";
+import {
+  authenticateProject,
+  type ProjectResolver,
+  type StructuredLogger,
+} from "@extispex/service-runtime";
 import {
   decodeProtobufTraceRequest,
   encodeProtobufTraceResponse,

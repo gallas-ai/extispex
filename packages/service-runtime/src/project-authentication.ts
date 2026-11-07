@@ -1,4 +1,4 @@
-import { parseKeyValueList } from "@extispex/service-runtime";
+import { parseKeyValueList } from "./environment-variables.ts";
 
 /** Finds the Project that an API key belongs to. */
 export interface ProjectResolver {

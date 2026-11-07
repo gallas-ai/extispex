@@ -9,8 +9,8 @@ working session that ends with a merged pull request and green CI. Terms are def
 | Step | Session                                                                                                | Status |
 | ---- | ------------------------------------------------------------------------------------------------------ | ------ |
 | 0    | First trace pipeline and CI on GitHub                                                                  | Done   |
-| 1    | [Prompt service](#1-prompt-service)                                                                    | Next   |
-| 2    | [Projects and API keys](#2-projects-and-api-keys)                                                      |        |
+| 1    | [Prompt service](#1-prompt-service)                                                                    | Done   |
+| 2    | [Projects and API keys](#2-projects-and-api-keys)                                                      | Next   |
 | 3    | [Users, Groups, Roles and tokens](#3-users-groups-roles-and-tokens)                                    |        |
 | 4    | [Datasets and Client-Driven Execution](#4-datasets-and-client-driven-execution)                        |        |
 | 5    | [Trace completion and Telemetry Evaluator](#5-trace-completion-and-telemetry-evaluator)                |        |

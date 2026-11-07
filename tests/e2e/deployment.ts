@@ -2,7 +2,8 @@
  * Starts the deployment under test. `E2E_DEPLOYMENT` selects it:
  *
  * - `all-in-one` (default): the local image's process, with SQLite.
- * - `services`: Telemetry and Gateway as separate processes; needs `E2E_TELEMETRY_DATABASE_URL`.
+ * - `services`: every service as a separate process on PostgreSQL; needs `E2E_POSTGRES_URL`, a
+ *   server on which each service uses its own database `<service>_e2e`, created on first start.
  * - `external`: an already running deployment described by `E2E_GATEWAY_URL`,
  *   `E2E_OTLP_HTTP_URL`, `E2E_OTLP_GRPC_ADDRESS`, `E2E_API_KEY` and optionally
  *   `E2E_GRPC_ROOT_CERTIFICATE_FILE`.
@@ -73,23 +74,29 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
 }
 
 async function startServicesDeployment(): Promise<RunningDeployment> {
-  const databaseUrl = Deno.env.get("E2E_TELEMETRY_DATABASE_URL");
-  if (!databaseUrl) {
-    throw new Error("E2E_TELEMETRY_DATABASE_URL is required for the services deployment.");
+  const postgresServerUrl = Deno.env.get("E2E_POSTGRES_URL");
+  if (!postgresServerUrl) {
+    throw new Error("E2E_POSTGRES_URL is required for the services deployment.");
   }
   const workingDirectory = await Deno.makeTempDir({ prefix: "extispex-e2e-" });
   const tlsFiles = await createSelfSignedCertificate(workingDirectory);
-  const [otlpHttpPort, otlpGrpcPort, gatewayPort] = await reserveFreePorts(3);
+  const [otlpHttpPort, otlpGrpcPort, promptPort, gatewayPort] = await reserveFreePorts(4);
   const telemetryProcess = startDenoProcess("telemetry", "services/telemetry/src/main.ts", {
-    TELEMETRY_DATABASE_URL: databaseUrl,
+    TELEMETRY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "telemetry_e2e"),
     STATIC_API_KEYS: `${E2E_API_KEY}=e2e-project`,
     TELEMETRY_HTTP_PORT: String(otlpHttpPort),
     TELEMETRY_GRPC_PORT: String(otlpGrpcPort),
     TELEMETRY_GRPC_TLS_CERTIFICATE_FILE: tlsFiles.certificateFile,
     TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE: tlsFiles.privateKeyFile,
   });
+  const promptProcess = startDenoProcess("prompt", "services/prompt/src/main.ts", {
+    PROMPT_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "prompt_e2e"),
+    STATIC_API_KEYS: `${E2E_API_KEY}=e2e-project`,
+    PROMPT_PORT: String(promptPort),
+  });
   const gatewayProcess = startDenoProcess("gateway", "services/gateway/src/main.ts", {
     TELEMETRY_URL: `http://127.0.0.1:${otlpHttpPort}`,
+    PROMPT_URL: `http://127.0.0.1:${promptPort}`,
     GATEWAY_PORT: String(gatewayPort),
     WEB_ASSETS_DIRECTORY: `${REPOSITORY_ROOT}apps/web/dist`,
   });
@@ -100,15 +107,22 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     grpcRootCertificate: await Deno.readFile(tlsFiles.certificateFile),
     apiKey: E2E_API_KEY,
     stop: async () => {
-      await Promise.all([gatewayProcess.stop(), telemetryProcess.stop()]);
+      await Promise.all([gatewayProcess.stop(), promptProcess.stop(), telemetryProcess.stop()]);
       await Deno.remove(workingDirectory, { recursive: true });
     },
   };
   await waitUntilHealthy(
-    [deployment.gatewayUrl, deployment.otlpHttpUrl],
-    [telemetryProcess, gatewayProcess],
+    [deployment.gatewayUrl, deployment.otlpHttpUrl, `http://127.0.0.1:${promptPort}`],
+    [telemetryProcess, promptProcess, gatewayProcess],
   );
   return deployment;
+}
+
+/** The same PostgreSQL server and credentials with another database. */
+function replaceDatabaseName(serverUrl: string, databaseName: string): string {
+  const databaseUrl = new URL(serverUrl);
+  databaseUrl.pathname = `/${databaseName}`;
+  return databaseUrl.toString();
 }
 
 function readExternalDeployment(): RunningDeployment {
