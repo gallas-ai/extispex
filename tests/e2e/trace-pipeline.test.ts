@@ -8,6 +8,7 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import { OTLPTraceExporter as GrpcTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
 import { OTLPTraceExporter as JsonTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { OTLPTraceExporter as ProtobufTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+import { CompressionAlgorithm } from "@opentelemetry/otlp-exporter-base";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchSpanProcessor, type SpanExporter, TracerProvider } from "@opentelemetry/sdk-trace";
 import { type RunningDeployment, startDeployment } from "./deployment.ts";
@@ -18,6 +19,7 @@ context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
 async function sendConversationStep(
   spanExporter: SpanExporter,
   telemetryIds: { correlationId: string; sessionId: string },
+  llmInputMessages = "[]",
 ): Promise<void> {
   const tracerProvider = new TracerProvider({
     resource: resourceFromAttributes({ "service.name": "e2e-support-bot" }),
@@ -33,6 +35,7 @@ async function sendConversationStep(
       tracer.startActiveSpan("handle-message", async (rootSpan) => {
         await tracer.startActiveSpan("chat model-one", (llmSpan) => {
           llmSpan.setAttribute("gen_ai.request.model", "model-one");
+          llmSpan.setAttribute("gen_ai.input.messages", llmInputMessages);
           llmSpan.end();
         });
         await tracer.startActiveSpan("tool find_order", (toolSpan) => toolSpan.end());
@@ -74,6 +77,23 @@ async function assertConversationStepStored(deployment: RunningDeployment, corre
   assertEquals(llmSpan?.correlationId, correlationId);
 }
 
+function createGrpcExporter(
+  deployment: RunningDeployment,
+  compression: CompressionAlgorithm = CompressionAlgorithm.NONE,
+): GrpcTraceExporter {
+  const grpcMetadata = new grpc.Metadata();
+  grpcMetadata.set("authorization", `Bearer ${deployment.apiKey}`);
+  const usesTls = deployment.grpcRootCertificate !== null;
+  return new GrpcTraceExporter({
+    url: `${usesTls ? "https" : "http"}://${deployment.otlpGrpcAddress}`,
+    credentials: usesTls
+      ? grpc.credentials.createSsl(Buffer.from(deployment.grpcRootCertificate as Uint8Array))
+      : grpc.credentials.createInsecure(),
+    metadata: grpcMetadata,
+    compression,
+  });
+}
+
 function uniqueId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -108,21 +128,52 @@ Deno.test("trace pipeline", async (testContext) => {
 
     await testContext.step("stores spans sent over OTLP/gRPC", async () => {
       const correlationId = uniqueId("grpc");
-      const grpcMetadata = new grpc.Metadata();
-      grpcMetadata.set("authorization", `Bearer ${deployment.apiKey}`);
-      const usesTls = deployment.grpcRootCertificate !== null;
       await sendConversationStep(
-        new GrpcTraceExporter({
-          url: `${usesTls ? "https" : "http"}://${deployment.otlpGrpcAddress}`,
-          credentials: usesTls
-            ? grpc.credentials.createSsl(Buffer.from(deployment.grpcRootCertificate as Uint8Array))
-            : grpc.credentials.createInsecure(),
-          metadata: grpcMetadata,
+        createGrpcExporter(deployment),
+        { correlationId, sessionId: uniqueId("session") },
+      );
+      await assertConversationStepStored(deployment, correlationId);
+    });
+
+    // The OpenTelemetry Collector compresses with gzip unless it is configured otherwise.
+    await testContext.step("stores spans sent over OTLP/HTTP protobuf with gzip", async () => {
+      const correlationId = uniqueId("protobuf-gzip");
+      await sendConversationStep(
+        new ProtobufTraceExporter({
+          url: `${deployment.otlpHttpUrl}/v1/traces`,
+          headers: authorizationHeaders,
+          compression: CompressionAlgorithm.GZIP,
         }),
         { correlationId, sessionId: uniqueId("session") },
       );
       await assertConversationStepStored(deployment, correlationId);
     });
+
+    await testContext.step("stores spans sent over OTLP/gRPC with gzip", async () => {
+      const correlationId = uniqueId("grpc-gzip");
+      await sendConversationStep(
+        createGrpcExporter(deployment, CompressionAlgorithm.GZIP),
+        { correlationId, sessionId: uniqueId("session") },
+      );
+      await assertConversationStepStored(deployment, correlationId);
+    });
+
+    await testContext.step(
+      "accepts an OTLP/gRPC batch above the gRPC default of 4 MiB",
+      async () => {
+        const correlationId = uniqueId("grpc-large");
+        const largeInputMessages = JSON.stringify([{
+          role: "user",
+          parts: [{ type: "text", content: "a".repeat(5 * 1024 * 1024) }],
+        }]);
+        await sendConversationStep(
+          createGrpcExporter(deployment, CompressionAlgorithm.GZIP),
+          { correlationId, sessionId: uniqueId("session") },
+          largeInputMessages,
+        );
+        await assertConversationStepStored(deployment, correlationId);
+      },
+    );
 
     await testContext.step("groups the traces of one Session", async () => {
       const sessionId = uniqueId("session");

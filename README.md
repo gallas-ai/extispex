@@ -49,6 +49,21 @@ The [`telemetry-ids` package](packages/telemetry-ids/) and the
 [Python example](examples/python/send_conversation.py) show a span processor that adds both
 attributes to every span.
 
+Requests may be compressed with gzip or deflate, over HTTP (`Content-Encoding`) and gRPC alike.
+Other encodings, such as zstd or snappy, are refused with `415` on HTTP. One export request may hold
+up to 32 MiB after decompression on both protocols, and a larger one is refused with `413` on HTTP
+or `RESOURCE_EXHAUSTED` on gRPC. The OpenTelemetry Collector's `otlp` and `otlphttp` exporters
+compress with gzip by default, so they work unchanged:
+
+```yaml
+exporters:
+  otlphttp/extispex:
+    endpoint: http://localhost:4318
+    compression: gzip # the default; deflate works too
+    headers:
+      authorization: Bearer ${env:EXTISPEX_API_KEY}
+```
+
 ## Storing prompts
 
 Create a prompt in the UI under **Prompts**, or through the REST API. Every change is a new,

@@ -11,6 +11,7 @@
     "@opentelemetry/exporter-trace-otlp-grpc": "npm:@opentelemetry/exporter-trace-otlp-grpc@^0.300.0",
     "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.300.0",
     "@opentelemetry/exporter-trace-otlp-proto": "npm:@opentelemetry/exporter-trace-otlp-proto@^0.300.0",
+    "@opentelemetry/otlp-exporter-base": "npm:@opentelemetry/otlp-exporter-base@^0.300.0",
     "@opentelemetry/resources": "npm:@opentelemetry/resources@^3.0.0",
     "@opentelemetry/sdk-trace": "npm:@opentelemetry/sdk-trace@^3.0.0",
     "@std/assert": "jsr:@std/assert@^1.0.0",

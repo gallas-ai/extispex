@@ -103,6 +103,15 @@ flowchart LR
 
 - OTLP is accepted as protobuf or JSON over HTTP and as protobuf over gRPC. OTLP/gRPC does not carry
   JSON, so JSON means HTTP only.
+- Both protocols accept gzip and deflate, the encodings that OpenTelemetry SDKs and the Collector
+  offer by default. OTLP/HTTP decompresses with `DecompressionStream` and answers any other
+  `Content-Encoding` with `415` and an `Accept-Encoding` header. grpc-js decompresses OTLP/gRPC
+  messages before the handler sees them.
+- One export request may hold up to 32 MiB after decompression on both protocols, so a batch that
+  one protocol accepts is never refused by the other. OTLP/HTTP counts bytes while it decompresses
+  and stops at the limit, so a small compressed body cannot fill the memory. grpc-js also checks
+  `grpc.max_receive_message_length` after decompression; its default of 4 MiB is raised to the same
+  limit.
 - OTLP traffic goes directly to Telemetry and bypasses the Gateway because of its volume and gRPC.
 - The API key on the request determines the Project.
 - A batch is acknowledged only after it is stored. If the database cannot keep up, Telemetry returns

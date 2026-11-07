@@ -7,6 +7,7 @@ import {
 import {
   decodeProtobufTraceRequest,
   encodeProtobufTraceResponse,
+  MAXIMUM_OTLP_PAYLOAD_BYTES,
   OtlpPayloadError,
 } from "./otlp-protocol.ts";
 import type { TraceExportOutcome } from "./otlp-trace-types.ts";
@@ -40,7 +41,10 @@ const traceServiceDefinition: grpc.ServiceDefinition<grpc.UntypedServiceImplemen
 };
 
 export function createOtlpGrpcServer(dependencies: OtlpGrpcServerDependencies): grpc.Server {
-  const grpcServer = new grpc.Server();
+  // grpc-js applies this limit after decompression, so it also bounds gzip and deflate messages.
+  const grpcServer = new grpc.Server({
+    "grpc.max_receive_message_length": MAXIMUM_OTLP_PAYLOAD_BYTES,
+  });
   grpcServer.addService(traceServiceDefinition, {
     export: async (
       call: grpc.ServerUnaryCall<RawPayload, TraceExportOutcome>,

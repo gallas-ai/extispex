@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
   createStaticApiKeyProjectResolver,
   createStructuredLogger,
@@ -109,6 +109,82 @@ function postJsonTraces(telemetryService: TelemetryService, payload: unknown) {
     body: JSON.stringify(payload),
   });
 }
+
+async function compressBody(body: string, contentEncoding: CompressionFormat) {
+  const compressedStream = new Blob([body]).stream().pipeThrough(
+    new CompressionStream(contentEncoding),
+  );
+  return new Uint8Array(await new Response(compressedStream).arrayBuffer());
+}
+
+for (const contentEncoding of ["gzip", "deflate"] as const) {
+  defineTelemetryTest(`stores OTLP/JSON spans sent with ${contentEncoding}`, async (service) => {
+    const payload = createJsonTraceRequest({ includeCorrelationIdOnChild: true });
+    const ingestionResponse = await sendRequest(service, "/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-encoding": contentEncoding },
+      body: await compressBody(JSON.stringify(payload), contentEncoding),
+    });
+    assertEquals(ingestionResponse.status, 200, await ingestionResponse.clone().text());
+    await ingestionResponse.body?.cancel();
+
+    const detailResponse = await sendRequest(service, `/v1/traces/${TRACE_ID}`);
+    const traceDetail = await detailResponse.json() as TraceDetailResponse;
+    assertEquals(traceDetail.spans.length, 2);
+  });
+}
+
+const MAXIMUM_PAYLOAD_BYTES = 32 * 1024 * 1024;
+
+/** A gzip body that is small on the wire and decompresses to `decompressedBytes` of zeros. */
+function createGzipBomb(decompressedBytes: number) {
+  const chunkBytes = 1024 * 1024;
+  const progress = { generatedBytes: 0 };
+  const zeroStream = new ReadableStream<BufferSource>({
+    pull(controller) {
+      if (progress.generatedBytes >= decompressedBytes) {
+        controller.close();
+        return;
+      }
+      progress.generatedBytes += chunkBytes;
+      controller.enqueue(new Uint8Array(chunkBytes));
+    },
+  });
+  return { body: zeroStream.pipeThrough(new CompressionStream("gzip")), progress };
+}
+
+defineTelemetryTest(
+  "stops reading a compressed payload once it decompresses past the limit",
+  async (telemetryService) => {
+    const gzipBomb = createGzipBomb(2 * MAXIMUM_PAYLOAD_BYTES);
+    const response = await sendRequest(telemetryService, "/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "application/x-protobuf", "content-encoding": "gzip" },
+      body: gzipBomb.body,
+    });
+    assertEquals(response.status, 413);
+    assertEquals((await response.json()).error.code, "payload_too_large");
+    const readAheadAllowance = 8 * 1024 * 1024;
+    assert(
+      gzipBomb.progress.generatedBytes <= MAXIMUM_PAYLOAD_BYTES + readAheadAllowance,
+      `read ${gzipBomb.progress.generatedBytes} decompressed bytes`,
+    );
+  },
+);
+
+defineTelemetryTest(
+  "answers an unsupported Content-Encoding with the encodings it accepts",
+  async (telemetryService) => {
+    const response = await sendRequest(telemetryService, "/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-encoding": "zstd" },
+      body: new Uint8Array([0x28, 0xb5, 0x2f, 0xfd]),
+    });
+    assertEquals(response.status, 415);
+    assertEquals(response.headers.get("accept-encoding"), "gzip, deflate");
+    assertEquals((await response.json()).error.code, "unsupported_content_encoding");
+  },
+);
 
 defineTelemetryTest(
   "stores OTLP/JSON spans and finds the trace by Correlation ID",

@@ -11,15 +11,19 @@ import {
   decodeJsonTraceRequest,
   decodeProtobufTraceRequest,
   encodeProtobufTraceResponse,
+  MAXIMUM_OTLP_PAYLOAD_BYTES,
   OtlpPayloadError,
 } from "./otlp-protocol.ts";
 import type { OtlpExportTraceRequest } from "./otlp-trace-types.ts";
 import type { TraceIngestion } from "./trace-ingestion.ts";
 
-const MAXIMUM_PAYLOAD_BYTES = 32 * 1024 * 1024;
 const RETRY_AFTER_SECONDS = "5";
 
 type PayloadEncoding = "protobuf" | "json";
+
+/** Content encodings OTLP/HTTP accepts besides an uncompressed body. */
+const SUPPORTED_CONTENT_ENCODINGS = ["gzip", "deflate"] as const;
+type ContentEncoding = typeof SUPPORTED_CONTENT_ENCODINGS[number] | "identity";
 
 export interface OtlpHttpRouteDependencies {
   traceIngestion: TraceIngestion;
@@ -42,6 +46,18 @@ export function registerOtlpHttpRoutes(
         "Use application/x-protobuf or application/json.",
       );
     }
+    const contentEncoding = detectContentEncoding(context.req.header("content-encoding"));
+    if (contentEncoding === null) {
+      context.header("accept-encoding", SUPPORTED_CONTENT_ENCODINGS.join(", "));
+      return respondWithError(
+        context,
+        415,
+        "unsupported_content_encoding",
+        `Send the body uncompressed or with Content-Encoding ${
+          SUPPORTED_CONTENT_ENCODINGS.join(" or ")
+        }.`,
+      );
+    }
     const projectId = await authenticateProject(
       dependencies.projectResolver,
       context.req.header("authorization"),
@@ -56,7 +72,7 @@ export function registerOtlpHttpRoutes(
     }
     let exportRequest: OtlpExportTraceRequest;
     try {
-      const payload = await readPayload(context.req.raw);
+      const payload = await readPayload(context.req.raw, contentEncoding);
       exportRequest = payloadEncoding === "protobuf"
         ? decodeProtobufTraceRequest(payload)
         : decodeJsonTraceRequest(new TextDecoder().decode(payload));
@@ -108,32 +124,61 @@ function detectPayloadEncoding(contentType: string | undefined): PayloadEncoding
   return null;
 }
 
+function detectContentEncoding(contentEncoding: string | undefined): ContentEncoding | null {
+  const normalizedEncoding = contentEncoding?.trim().toLowerCase() || "identity";
+  if (normalizedEncoding === "identity") {
+    return "identity";
+  }
+  return SUPPORTED_CONTENT_ENCODINGS.find((encoding) => encoding === normalizedEncoding) ?? null;
+}
+
 class PayloadTooLargeError extends Error {
   override name = "PayloadTooLargeError";
 }
 
-async function readPayload(request: Request): Promise<Uint8Array> {
+async function readPayload(
+  request: Request,
+  contentEncoding: ContentEncoding,
+): Promise<Uint8Array> {
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (declaredLength > MAXIMUM_PAYLOAD_BYTES) {
-    throw new PayloadTooLargeError(`Payload exceeds ${MAXIMUM_PAYLOAD_BYTES} bytes.`);
+  if (declaredLength > MAXIMUM_OTLP_PAYLOAD_BYTES) {
+    throw new PayloadTooLargeError(`Payload exceeds ${MAXIMUM_OTLP_PAYLOAD_BYTES} bytes.`);
   }
-  const isGzipped = request.headers.get("content-encoding")?.toLowerCase() === "gzip";
   const bodyStream = request.body ?? new Blob([]).stream();
-  const decodedStream = isGzipped
-    ? bodyStream.pipeThrough(new DecompressionStream("gzip"))
-    : bodyStream;
+  const decodedStream = contentEncoding === "identity"
+    ? bodyStream
+    : bodyStream.pipeThrough(new DecompressionStream(contentEncoding));
   try {
-    const payload = new Uint8Array(await new Response(decodedStream).arrayBuffer());
-    if (payload.byteLength > MAXIMUM_PAYLOAD_BYTES) {
-      throw new PayloadTooLargeError(`Payload exceeds ${MAXIMUM_PAYLOAD_BYTES} bytes.`);
-    }
-    return payload;
+    return await readWithinLimit(decodedStream);
   } catch (error) {
     if (error instanceof PayloadTooLargeError) {
       throw error;
     }
     throw new OtlpPayloadError(`Payload could not be read: ${(error as Error).message}`);
   }
+}
+
+/**
+ * Collects the decoded payload and stops at the limit, so that a small compressed body cannot
+ * decompress into unbounded memory.
+ */
+async function readWithinLimit(decodedStream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const payloadChunks: Uint8Array[] = [];
+  let payloadBytes = 0;
+  for await (const payloadChunk of decodedStream) {
+    payloadBytes += payloadChunk.byteLength;
+    if (payloadBytes > MAXIMUM_OTLP_PAYLOAD_BYTES) {
+      throw new PayloadTooLargeError(`Payload exceeds ${MAXIMUM_OTLP_PAYLOAD_BYTES} bytes.`);
+    }
+    payloadChunks.push(payloadChunk);
+  }
+  const payload = new Uint8Array(payloadBytes);
+  let writeOffset = 0;
+  for (const payloadChunk of payloadChunks) {
+    payload.set(payloadChunk, writeOffset);
+    writeOffset += payloadChunk.byteLength;
+  }
+  return payload;
 }
 
 function respondWithError(

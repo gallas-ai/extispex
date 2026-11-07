@@ -2,6 +2,12 @@ import protobuf from "protobufjs";
 import otlpTraceDescriptor from "./generated/otlp-trace-descriptor.json" with { type: "json" };
 import type { OtlpExportTraceRequest, TraceExportOutcome } from "./otlp-trace-types.ts";
 
+/**
+ * The largest decoded OTLP export request accepted over HTTP and gRPC. Compressed bodies are
+ * measured after decompression.
+ */
+export const MAXIMUM_OTLP_PAYLOAD_BYTES = 32 * 1024 * 1024;
+
 export class OtlpPayloadError extends Error {
   override name = "OtlpPayloadError";
 }
