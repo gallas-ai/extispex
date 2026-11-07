@@ -68,6 +68,7 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
       - run: deno install --frozen
+      - run: deno task install:browser --with-deps
       - run: deno task build:web
       - run: deno task test:e2e
         env:
@@ -83,6 +84,7 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
       - run: deno install --frozen
+      - run: deno task install:browser --with-deps
       - name: Build images
         run: |
           docker build -f deploy/docker/all-in-one.Dockerfile -t ghcr.io/gallas-ai/extispex:ci .

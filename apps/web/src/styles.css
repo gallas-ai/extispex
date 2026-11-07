@@ -246,12 +246,13 @@ kbd {
   }
 }
 
+/* Turned off rather than shortened: a short duration on every element would animate all of them. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition: none !important;
   }
 }
 
@@ -1163,21 +1164,23 @@ kbd {
   font-size: 12px;
 }
 
-/* With a trace open, the IDs and span count are in the detail, so the list keeps the essentials. */
-.traces-page-with-detail .column-session,
-.traces-page-with-detail .column-correlation,
-.traces-page-with-detail .column-spans {
-  display: none;
+/*
+ * Columns give way as the list panel narrows. Beside an open trace the list is at most 520px, so
+ * only the trace, its duration and its start remain; the IDs are in the trace detail.
+ */
+@container (max-width: 520px) {
+  .data-table th,
+  .data-table td,
+  .data-table th:first-child,
+  .data-table td:first-child,
+  .data-table th:last-child,
+  .data-table td:last-child {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
 }
 
-.traces-page-with-detail .data-table th,
-.traces-page-with-detail .data-table td {
-  padding-right: 8px;
-  padding-left: 8px;
-}
-
-/* Columns also give way as the list panel narrows on small screens. */
-@container (max-width: 880px) {
+@container (max-width: 1160px) {
   .column-correlation {
     display: none;
   }

@@ -94,6 +94,7 @@ flowchart LR
 | Persistence            | MikroORM, with PostgreSQL in production and SQLite in the local image, see [ADR 0002](adr/0002-postgresql-and-sqlite-instead-of-mongodb.md) |
 | Job queue              | pg-boss in production and a small SQLite queue in the local image, see [ADR 0001](adr/0001-pg-boss-for-evaluation-job-queue.md)             |
 | UI                     | React, Vite, ECharts                                                                                                                        |
+| Browser tests          | `playwright-core` with headless Chromium, see [ADR 0005](adr/0005-playwright-browser-tests-with-layout-rules.md)                            |
 | Delivery               | Docker images, Helm chart, GitHub Actions                                                                                                   |
 
 ## 4. Telemetry
@@ -371,6 +372,7 @@ Import rules, enforced in CI:
 This repository's GitHub Actions pipeline runs on every pull request. It checks lint, formatting,
 types and import rules, runs unit tests on SQLite and PostgreSQL, runs e2e tests in both
 deployments, and builds the container images and runs the e2e tests against the `all-in-one` image.
+The e2e tests include browser tests of the web UI's main flows and layout rules.
 
 Performance tests follow one rule: they run only where GitHub Actions is free.
 
@@ -408,6 +410,7 @@ repository.
 | Import rules                                                   | Cross-member relative imports and service-to-service imports fail `tests/architecture` |
 | Naming rule                                                    | Single-letter names fail `deno lint` through the plugin in `tests/architecture`        |
 | TypeScript and Python examples                                 | Both send a two-step conversation that appears under one Session ID                    |
+| Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 
 ### What has not been verified
 
@@ -416,7 +419,7 @@ repository.
 - pg-boss under sustained load, in a container and on a managed PostgreSQL service
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
-- The web UI in a browser: e2e tests check only that the Gateway serves it
+- The web UI's colours, spacing and typography, and browsers other than Chromium
 
 ### First implementation step
 

@@ -447,12 +447,12 @@ deployments.
 - pg-boss under sustained load, as ADR 0001 asks.
 - An architecture test that modules inside a service import each other only through their public
   entry points.
-- A browser test of the main UI flows, which so far are checked only by the Gateway serving the UI.
+- Done early: browser tests of the main UI flows in `tests/e2e/web-ui.test.ts`, see
+  [ADR 0005](adr/0005-playwright-browser-tests-with-layout-rules.md).
 
 **Decisions to make first:**
 
 - Where results are stored between nightly runs and what counts as a regression.
-- The browser test tool.
 
 **Done when:** the nightly workflow runs and fails on a deliberate regression, and both new
 architecture checks run in CI.
