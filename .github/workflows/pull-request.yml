@@ -15,6 +15,9 @@ concurrency:
 env:
   DENO_VERSION: v2.9.5
 
+# Each job's name is a required status check in the `Protect main` ruleset. Renaming, adding or
+# removing a job, or changing a matrix, needs the ruleset updated in the same change; see
+# docs/repository-settings.md.
 jobs:
   static-checks-and-unit-tests:
     name: Static checks and unit tests
