@@ -86,3 +86,18 @@ separately against PostgreSQL, use `docker compose -f deploy/compose/compose.yam
   verified
 - [docs/adr/](docs/adr/): records of decisions that would otherwise be surprising
 - [docs/business.md](docs/business.md): the original requirements, in Czech
+
+## License
+
+Extispex is free software under the [GNU Affero General Public License v3.0](LICENSE). You may run,
+study, change and share it, including commercially. If you distribute Extispex, or let others use a
+modified version over a network, you must make the complete source of that version available under
+the same licence.
+
+The code you add to your own application is under the more permissive
+[Apache License 2.0](packages/telemetry-ids/LICENSE), so using it does not affect how you license
+your application: the [`telemetry-ids` package](packages/telemetry-ids/) and the
+[examples](examples/). See
+[ADR 0004](docs/adr/0004-agpl-for-the-platform-apache-for-instrumentation.md) for the reasons.
+
+Copyright © 2026 Milan Gallas.

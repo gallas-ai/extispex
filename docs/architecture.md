@@ -429,3 +429,4 @@ service exists, Telemetry resolves API keys from the `STATIC_API_KEYS` environme
 - [ADR 0001: pg-boss for the Evaluation job queue](adr/0001-pg-boss-for-evaluation-job-queue.md)
 - [ADR 0002: PostgreSQL and SQLite instead of MongoDB](adr/0002-postgresql-and-sqlite-instead-of-mongodb.md)
 - [ADR 0003: Independent services without a broker](adr/0003-independent-services-without-a-broker.md)
+- [ADR 0004: AGPLv3 for the platform, Apache 2.0 for instrumentation code](adr/0004-agpl-for-the-platform-apache-for-instrumentation.md)

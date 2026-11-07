@@ -2,6 +2,8 @@
 # Build from the repository root:
 #   docker build -f deploy/docker/telemetry.Dockerfile -t ghcr.io/gallas-ai/extispex-telemetry .
 FROM denoland/deno:debian-2.9.5
+LABEL org.opencontainers.image.source="https://github.com/gallas-ai/extispex" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 
 WORKDIR /app
 ENV DENO_DIR=/deno-dir \
