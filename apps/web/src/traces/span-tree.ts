@@ -3,6 +3,7 @@ import type { Span } from "@extispex/contracts";
 export interface SpanTreeRow {
   span: Span;
   depth: number;
+  childCount: number;
 }
 
 /**
@@ -29,10 +30,31 @@ export function buildSpanTreeRows(spans: Span[]): SpanTreeRow[] {
   const treeRows: SpanTreeRow[] = [];
   const appendSubtree = (parentKey: string | null, depth: number) => {
     for (const childSpan of childrenByParentId.get(parentKey) ?? []) {
-      treeRows.push({ span: childSpan, depth });
+      const childCount = childrenByParentId.get(childSpan.spanId)?.length ?? 0;
+      treeRows.push({ span: childSpan, depth, childCount });
       appendSubtree(childSpan.spanId, depth + 1);
     }
   };
   appendSubtree(null, 0);
   return treeRows;
+}
+
+/** Drops the descendants of collapsed spans, keeping the collapsed spans themselves. */
+export function hideCollapsedSubtrees(
+  treeRows: SpanTreeRow[],
+  collapsedSpanIds: ReadonlySet<string>,
+): SpanTreeRow[] {
+  const visibleRows: SpanTreeRow[] = [];
+  let hiddenBelowDepth: number | null = null;
+  for (const treeRow of treeRows) {
+    if (hiddenBelowDepth !== null && treeRow.depth > hiddenBelowDepth) {
+      continue;
+    }
+    hiddenBelowDepth = null;
+    visibleRows.push(treeRow);
+    if (collapsedSpanIds.has(treeRow.span.spanId)) {
+      hiddenBelowDepth = treeRow.depth;
+    }
+  }
+  return visibleRows;
 }

@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { ApiKeyField } from "./api-key/api-key-field.tsx";
+import { ApiKeyMenu } from "./api-key/api-key-menu.tsx";
 import { readStoredApiKey, storeApiKey } from "./api-key/api-key-storage.ts";
+import { ConnectProject } from "./api-key/connect-project.tsx";
+import { ThemeSwitcher } from "./theme/theme-switcher.tsx";
 import { TracesPage } from "./traces/traces-page.tsx";
+import { ActivityIcon, BrandMark } from "./ui/icons.tsx";
 
 export function App() {
   const [apiKey, setApiKey] = useState(readStoredApiKey);
@@ -13,30 +16,31 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div className="app-title">
-          <span className="app-name">Extispex</span>
-          <nav className="app-navigation" aria-label="Sections">
-            <span className="navigation-item navigation-item-active">Traces</span>
-          </nav>
+      <header className="top-bar">
+        <div className="top-bar-start">
+          <a className="brand" href="/" aria-label="Extispex home">
+            <BrandMark size={26} />
+            <span className="brand-name">Extispex</span>
+          </a>
+          {apiKey !== "" && (
+            <nav className="primary-navigation" aria-label="Sections">
+              <a className="navigation-link" href="/" aria-current="page">
+                <ActivityIcon size={15} />
+                Traces
+              </a>
+            </nav>
+          )}
         </div>
-        <ApiKeyField apiKey={apiKey} onApiKeyChange={updateApiKey} />
+        <div className="top-bar-end">
+          {apiKey !== "" && <ApiKeyMenu apiKey={apiKey} onApiKeyChange={updateApiKey} />}
+          <ThemeSwitcher />
+        </div>
       </header>
       <main className="app-content">
-        {apiKey === "" ? <MissingApiKeyNotice /> : <TracesPage apiKey={apiKey} />}
+        {apiKey === ""
+          ? <ConnectProject onConnect={updateApiKey} />
+          : <TracesPage apiKey={apiKey} onDisconnect={() => updateApiKey("")} />}
       </main>
     </div>
-  );
-}
-
-function MissingApiKeyNotice() {
-  return (
-    <section className="empty-state">
-      <h1>Enter an API key to see traces</h1>
-      <p>
-        The key decides which Project you see. The local image uses{" "}
-        <code>local-development-key</code> unless <code>STATIC_API_KEYS</code> is set.
-      </p>
-    </section>
   );
 }

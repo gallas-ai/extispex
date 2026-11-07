@@ -1254,6 +1254,7 @@
     "members": {
       "apps/web": {
         "dependencies": [
+          "jsr:@std/assert@1",
           "npm:@types/react-dom@19",
           "npm:@types/react@19",
           "npm:@vitejs/plugin-react@5",

@@ -3,7 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Extispex</title>
+    <script>
+    // Applies a stored light or dark choice before the first paint; see theme-preference.ts.
+    try {
+      const storedTheme = localStorage.getItem("extispex.theme");
+      if (storedTheme === "light" || storedTheme === "dark") {
+        document.documentElement.dataset.theme = storedTheme;
+      }
+    } catch {
+      // Without storage the page follows the system theme.
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>

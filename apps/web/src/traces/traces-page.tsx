@@ -1,153 +1,337 @@
 import type { TraceSummary } from "@extispex/contracts";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { listTraces, type TraceFilters } from "../api/telemetry-api.ts";
-import { formatDuration, formatUnixNanoseconds } from "./trace-formatting.ts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listTraces, TelemetryApiError, type TraceFilters } from "../api/telemetry-api.ts";
+import { useTracesUrlState } from "../navigation/traces-url-state.ts";
+import { AlertIcon, InboxIcon, RefreshIcon } from "../ui/icons.tsx";
+import { useNow } from "../ui/use-now.ts";
 import { TraceDetail } from "./trace-detail.tsx";
+import { TraceFilterBar } from "./trace-filters.tsx";
+import { formatRelativeTime } from "./trace-formatting.ts";
+import { TraceTable, TraceTableSkeleton } from "./trace-table.tsx";
+
+const LIVE_REFRESH_INTERVAL_MILLISECONDS = 5_000;
 
 interface TracesPageProps {
   apiKey: string;
+  onDisconnect: () => void;
 }
 
 type TraceListState =
   | { status: "loading" }
-  | { status: "loaded"; traces: TraceSummary[] }
-  | { status: "failed"; message: string };
+  | { status: "loaded"; traces: TraceSummary[]; loadedAtUnixMilliseconds: number }
+  | { status: "failed"; message: string; isApiKeyRejected: boolean };
 
-const EMPTY_FILTERS: TraceFilters = { correlationId: "", sessionId: "" };
-
-export function TracesPage({ apiKey }: TracesPageProps) {
-  const [draftFilters, setDraftFilters] = useState(EMPTY_FILTERS);
-  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
+export function TracesPage({ apiKey, onDisconnect }: TracesPageProps) {
+  const [urlState, updateUrlState] = useTracesUrlState();
+  const appliedFilters = useMemo<TraceFilters>(
+    () => ({ correlationId: urlState.correlationId, sessionId: urlState.sessionId }),
+    [urlState.correlationId, urlState.sessionId],
+  );
   const [traceListState, setTraceListState] = useState<TraceListState>({ status: "loading" });
-  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLive, setIsLive] = useState(false);
+  const latestRequestNumber = useRef(0);
+  const correlationIdInputRef = useRef<HTMLInputElement>(null);
 
-  const loadTraces = useCallback(async () => {
-    setTraceListState({ status: "loading" });
+  const loadTraces = useCallback(async (keepCurrentRows: boolean) => {
+    const requestNumber = ++latestRequestNumber.current;
+    if (keepCurrentRows) {
+      setIsRefreshing(true);
+    } else {
+      setTraceListState({ status: "loading" });
+    }
     try {
       const { traces } = await listTraces(apiKey, appliedFilters);
-      setTraceListState({ status: "loaded", traces });
+      if (requestNumber !== latestRequestNumber.current) return;
+      setTraceListState({ status: "loaded", traces, loadedAtUnixMilliseconds: Date.now() });
     } catch (error) {
-      setTraceListState({ status: "failed", message: (error as Error).message });
+      if (requestNumber !== latestRequestNumber.current) return;
+      const statusCode = error instanceof TelemetryApiError ? error.statusCode : null;
+      setTraceListState({
+        status: "failed",
+        message: (error as Error).message,
+        isApiKeyRejected: statusCode === 401 || statusCode === 403,
+      });
+    } finally {
+      if (requestNumber === latestRequestNumber.current) setIsRefreshing(false);
     }
   }, [apiKey, appliedFilters]);
 
   useEffect(() => {
-    loadTraces();
+    loadTraces(false);
   }, [loadTraces]);
 
-  const applyFilters = (submitEvent: FormEvent) => {
-    submitEvent.preventDefault();
-    setSelectedTraceId(null);
-    setAppliedFilters({
-      correlationId: draftFilters.correlationId.trim(),
-      sessionId: draftFilters.sessionId.trim(),
-    });
-  };
+  useEffect(() => {
+    if (!isLive) return;
+    const liveRefreshTimer = setInterval(
+      () => loadTraces(true),
+      LIVE_REFRESH_INTERVAL_MILLISECONDS,
+    );
+    return () => clearInterval(liveRefreshTimer);
+  }, [isLive, loadTraces]);
+
+  const loadedTraces = traceListState.status === "loaded" ? traceListState.traces : [];
+
+  const selectTrace = useCallback(
+    (traceId: string) => {
+      if (traceId === urlState.traceId) return;
+      // Replacing while a trace is open keeps Back meaning "close the trace", not "previous one".
+      updateUrlState({ traceId, spanId: null }, urlState.traceId === null ? "push" : "replace");
+    },
+    [updateUrlState, urlState.traceId],
+  );
+  const closeTrace = useCallback(
+    () => updateUrlState({ traceId: null, spanId: null }, "push"),
+    [updateUrlState],
+  );
+  const applyFilters = useCallback(
+    (filters: TraceFilters) => updateUrlState({ ...filters, traceId: null, spanId: null }, "push"),
+    [updateUrlState],
+  );
+
+  useTracesKeyboardShortcuts({
+    traces: loadedTraces,
+    selectedTraceId: urlState.traceId,
+    onSelectTrace: selectTrace,
+    onCloseTrace: closeTrace,
+    onFocusSearch: () => correlationIdInputRef.current?.focus(),
+  });
+
+  const hasAppliedFilters = appliedFilters.correlationId !== "" || appliedFilters.sessionId !== "";
 
   return (
-    <div className="traces-layout">
-      <section className="trace-list-panel" aria-label="Traces">
-        <form className="trace-filters" onSubmit={applyFilters}>
-          <label>
-            Correlation ID
+    <div className={`traces-page${urlState.traceId !== null ? " traces-page-with-detail" : ""}`}>
+      <div className="page-header">
+        <div className="page-heading">
+          <h1>Traces</h1>
+          <TraceCountSummary traceListState={traceListState} hasFilters={hasAppliedFilters} />
+        </div>
+        <div className="page-actions">
+          <LastUpdated traceListState={traceListState} />
+          <label className="toggle" title="Refresh every 5 seconds">
             <input
-              id="correlation-id-filter"
-              value={draftFilters.correlationId}
+              type="checkbox"
+              role="switch"
+              checked={isLive}
               onChange={(changeEvent) =>
-                setDraftFilters({ ...draftFilters, correlationId: changeEvent.target.value })}
+                setIsLive(changeEvent.target.checked)}
             />
+            <span className="toggle-track" aria-hidden="true">
+              <span className="toggle-thumb" />
+            </span>
+            <span className="toggle-label">
+              {isLive && <span className="live-dot" aria-hidden="true" />}
+              Live
+            </span>
           </label>
-          <label>
-            Session ID
-            <input
-              id="session-id-filter"
-              value={draftFilters.sessionId}
-              onChange={(changeEvent) =>
-                setDraftFilters({ ...draftFilters, sessionId: changeEvent.target.value })}
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => loadTraces(traceListState.status === "loaded")}
+            disabled={isRefreshing || traceListState.status === "loading"}
+          >
+            <RefreshIcon size={14} className={isRefreshing ? "spinning" : undefined} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <TraceFilterBar
+        appliedFilters={appliedFilters}
+        onApplyFilters={applyFilters}
+        correlationIdInputRef={correlationIdInputRef}
+      />
+
+      <div className="traces-workspace">
+        <section className="panel trace-list-panel" aria-label="Trace list">
+          {traceListState.status === "loading" && <TraceTableSkeleton />}
+          {traceListState.status === "failed" && (
+            <ErrorState
+              message={traceListState.message}
+              isApiKeyRejected={traceListState.isApiKeyRejected}
+              onRetry={() => loadTraces(false)}
+              onDisconnect={onDisconnect}
             />
-          </label>
-          <button type="submit">Search</button>
-          <button type="button" className="secondary-button" onClick={loadTraces}>Refresh</button>
-        </form>
-        <TraceTable
-          traceListState={traceListState}
-          selectedTraceId={selectedTraceId}
-          onSelectTrace={setSelectedTraceId}
-        />
-      </section>
-      {selectedTraceId !== null && (
-        <TraceDetail
-          key={selectedTraceId}
-          apiKey={apiKey}
-          traceId={selectedTraceId}
-          onClose={() => setSelectedTraceId(null)}
-        />
-      )}
+          )}
+          {traceListState.status === "loaded" && traceListState.traces.length === 0 && (
+            <EmptyState
+              hasFilters={hasAppliedFilters}
+              onClearFilters={() => applyFilters({ correlationId: "", sessionId: "" })}
+            />
+          )}
+          {traceListState.status === "loaded" && traceListState.traces.length > 0 && (
+            <>
+              <TraceTable
+                traces={traceListState.traces}
+                selectedTraceId={urlState.traceId}
+                onSelectTrace={selectTrace}
+                onFilterBySession={(sessionId) => applyFilters({ correlationId: "", sessionId })}
+              />
+              <p className="table-footer">
+                <span>
+                  <kbd>j</kbd> <kbd>k</kbd> move · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close ·
+                  {" "}
+                  <kbd>/</kbd> search
+                </span>
+              </p>
+            </>
+          )}
+        </section>
+
+        {urlState.traceId !== null && (
+          <>
+            <div className="drawer-backdrop" onClick={closeTrace} aria-hidden="true" />
+            <TraceDetail
+              key={urlState.traceId}
+              apiKey={apiKey}
+              traceId={urlState.traceId}
+              selectedSpanId={urlState.spanId}
+              onSelectSpan={(spanId) => updateUrlState({ spanId }, "replace")}
+              onFilterBySession={(sessionId) => applyFilters({ correlationId: "", sessionId })}
+              onFilterByCorrelationId={(correlationId) =>
+                applyFilters({ correlationId, sessionId: "" })}
+              onClose={closeTrace}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-interface TraceTableProps {
-  traceListState: TraceListState;
-  selectedTraceId: string | null;
-  onSelectTrace: (traceId: string) => void;
+function TraceCountSummary(
+  { traceListState, hasFilters }: { traceListState: TraceListState; hasFilters: boolean },
+) {
+  if (traceListState.status !== "loaded") {
+    return <p className="page-subtitle">&nbsp;</p>;
+  }
+  const traceCount = traceListState.traces.length;
+  return (
+    <p className="page-subtitle">
+      {traceCount === 1 ? "1 trace" : `${traceCount} traces`}
+      {hasFilters ? " matching the filters" : ", newest first"}
+    </p>
+  );
 }
 
-function TraceTable({ traceListState, selectedTraceId, onSelectTrace }: TraceTableProps) {
-  if (traceListState.status === "loading") {
-    return <p className="status-message">Loading traces…</p>;
-  }
-  if (traceListState.status === "failed") {
-    return <p className="status-message status-message-error">{traceListState.message}</p>;
-  }
-  if (traceListState.traces.length === 0) {
+function LastUpdated({ traceListState }: { traceListState: TraceListState }) {
+  const nowUnixMilliseconds = useNow(5_000);
+  if (traceListState.status !== "loaded") return null;
+  return (
+    <span className="last-updated">
+      Updated {formatRelativeTime(traceListState.loadedAtUnixMilliseconds, nowUnixMilliseconds)}
+    </span>
+  );
+}
+
+function EmptyState(
+  { hasFilters, onClearFilters }: { hasFilters: boolean; onClearFilters: () => void },
+) {
+  if (hasFilters) {
     return (
-      <p className="status-message">
-        No traces match. Send spans with a <code>correlation.id</code>{" "}
-        attribute to OTLP port 4318 or 4317.
-      </p>
+      <div className="empty-state">
+        <span className="empty-state-icon">
+          <InboxIcon size={22} />
+        </span>
+        <h2>No traces match these filters</h2>
+        <p>Correlation and Session IDs must match exactly, including case.</p>
+        <button type="button" className="button button-secondary" onClick={onClearFilters}>
+          Clear filters
+        </button>
+      </div>
     );
   }
   return (
-    <div className="table-scroll">
-      <table className="trace-table">
-        <thead>
-          <tr>
-            <th>Trace</th>
-            <th>Service</th>
-            <th>Correlation ID</th>
-            <th>Session ID</th>
-            <th className="numeric-column">Spans</th>
-            <th className="numeric-column">Duration</th>
-            <th>Started</th>
-          </tr>
-        </thead>
-        <tbody>
-          {traceListState.traces.map((trace) => (
-            <tr
-              key={trace.traceId}
-              className={trace.traceId === selectedTraceId ? "selected-row" : undefined}
-              onClick={() => onSelectTrace(trace.traceId)}
-            >
-              <td>
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() => onSelectTrace(trace.traceId)}
-                >
-                  {trace.rootSpanName ?? "Root span not received"}
-                </button>
-              </td>
-              <td>{trace.serviceName ?? "—"}</td>
-              <td className="identifier-cell">{trace.correlationId}</td>
-              <td className="identifier-cell">{trace.sessionId ?? "—"}</td>
-              <td className="numeric-column">{trace.spanCount}</td>
-              <td className="numeric-column">{formatDuration(trace.durationMilliseconds)}</td>
-              <td>{formatUnixNanoseconds(trace.startTimeUnixNano)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="empty-state">
+      <span className="empty-state-icon">
+        <InboxIcon size={22} />
+      </span>
+      <h2>No traces yet</h2>
+      <p>
+        Send OpenTelemetry spans to OTLP port <code>4318</code> (HTTP) or <code>4317</code>{" "}
+        (gRPC) with your API key. Every span needs a <code>correlation.id</code> attribute.
+      </p>
+      <pre className="code-block">deno task send-conversation</pre>
+      <p className="text-subtle">The example sends a two-step conversation to the local image.</p>
     </div>
   );
+}
+
+interface ErrorStateProps {
+  message: string;
+  isApiKeyRejected: boolean;
+  onRetry: () => void;
+  onDisconnect: () => void;
+}
+
+function ErrorState({ message, isApiKeyRejected, onRetry, onDisconnect }: ErrorStateProps) {
+  return (
+    <div className="empty-state empty-state-error" role="alert">
+      <span className="empty-state-icon">
+        <AlertIcon size={22} />
+      </span>
+      <h2>{isApiKeyRejected ? "The API key was not accepted" : "Traces could not be loaded"}</h2>
+      <p>{message}</p>
+      <div className="button-row">
+        {isApiKeyRejected
+          ? (
+            <button type="button" className="button button-primary" onClick={onDisconnect}>
+              Use a different key
+            </button>
+          )
+          : (
+            <button type="button" className="button button-primary" onClick={onRetry}>
+              Try again
+            </button>
+          )}
+      </div>
+    </div>
+  );
+}
+
+interface TracesKeyboardShortcutsOptions {
+  traces: TraceSummary[];
+  selectedTraceId: string | null;
+  onSelectTrace: (traceId: string) => void;
+  onCloseTrace: () => void;
+  onFocusSearch: () => void;
+}
+
+/** `j`/`k` move between traces, `Escape` closes the open trace and `/` jumps to the search. */
+function useTracesKeyboardShortcuts(
+  { traces, selectedTraceId, onSelectTrace, onCloseTrace, onFocusSearch }:
+    TracesKeyboardShortcutsOptions,
+) {
+  useEffect(() => {
+    const handleShortcut = (keyboardEvent: KeyboardEvent) => {
+      if (keyboardEvent.defaultPrevented || keyboardEvent.metaKey || keyboardEvent.ctrlKey) return;
+      const focusedElement = document.activeElement;
+      const isTyping = focusedElement instanceof HTMLInputElement ||
+        focusedElement instanceof HTMLTextAreaElement;
+      if (keyboardEvent.key === "Escape") {
+        if (isTyping) {
+          (focusedElement as HTMLElement).blur();
+        } else if (selectedTraceId !== null) {
+          onCloseTrace();
+        }
+        return;
+      }
+      if (isTyping) return;
+      if (keyboardEvent.key === "/") {
+        keyboardEvent.preventDefault();
+        onFocusSearch();
+        return;
+      }
+      if ((keyboardEvent.key === "j" || keyboardEvent.key === "k") && traces.length > 0) {
+        const selectedIndex = traces.findIndex((trace) => trace.traceId === selectedTraceId);
+        const nextIndex = selectedIndex === -1 ? 0 : Math.min(
+          Math.max(selectedIndex + (keyboardEvent.key === "j" ? 1 : -1), 0),
+          traces.length - 1,
+        );
+        onSelectTrace(traces[nextIndex].traceId);
+      }
+    };
+    globalThis.addEventListener("keydown", handleShortcut);
+    return () => globalThis.removeEventListener("keydown", handleShortcut);
+  }, [traces, selectedTraceId, onSelectTrace, onCloseTrace, onFocusSearch]);
 }

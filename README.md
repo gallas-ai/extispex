@@ -67,10 +67,28 @@ all-in-one image takes the bare name because it is the one to try first.
 
 You need [Deno](https://deno.com/) 2.9 or later. Docker is needed only for the container images.
 
+Run Extispex from source:
+
 ```sh
 deno install                # install dependencies
-deno task start:all-in-one  # run everything locally on ports 4317, 4318 and 8080
-deno task dev:web           # UI with hot reload on port 5173, using the running gateway
+deno task build:web         # build the UI into apps/web/dist, which port 8080 serves
+deno task start:all-in-one  # run everything locally on ports 4317, 4318 and 8080, with SQLite in apps/all-in-one/data
+```
+
+Open <http://localhost:8080> and enter the API key `local-development-key`. In a second terminal,
+send a sample conversation and search for the Session ID it prints:
+
+```sh
+cd examples/typescript && deno task send-conversation
+```
+
+To work on the UI, run `deno task dev:web` next to the running instance and open
+<http://localhost:5173>. It reloads on every change and uses the API on port 8080. After changing
+the UI, rebuild it with `deno task build:web` before relying on port 8080.
+
+Before you push:
+
+```sh
 deno task check             # format, lint and type checks
 deno task test              # unit, service and architecture tests
 deno task build:web && deno task test:e2e  # end-to-end tests
