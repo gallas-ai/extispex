@@ -169,6 +169,53 @@ export const HashIcon = (props: IconProps) => (
   </StrokeIcon>
 );
 
+export const PromptIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    <path d="M10 9H8M16 13H8M16 17H8" />
+  </StrokeIcon>
+);
+
+export const PlusIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="M5 12h14M12 5v14" />
+  </StrokeIcon>
+);
+
+export const TagIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+    <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
+  </StrokeIcon>
+);
+
+export const CompareIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <circle cx="18" cy="18" r="3" />
+    <circle cx="6" cy="6" r="3" />
+    <path d="M13 6h3a2 2 0 0 1 2 2v7M11 18H8a2 2 0 0 1-2-2V9" />
+  </StrokeIcon>
+);
+
+export const ArrowLeftIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="m12 19-7-7 7-7M19 12H5" />
+  </StrokeIcon>
+);
+
+export const SwapIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4" />
+  </StrokeIcon>
+);
+
+export const TrashIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+  </StrokeIcon>
+);
+
 /** The Extispex mark: an eye looking into a trace. */
 export function BrandMark({ size = 24 }: { size?: number }) {
   return (

@@ -11,7 +11,10 @@ import { createGatewayService } from "./create-service.ts";
 const logger = createStructuredLogger("gateway");
 
 const gatewayService = createGatewayService({
-  telemetryClient: createHttpServiceClient(readRequiredEnvironmentVariable("TELEMETRY_URL")),
+  serviceClients: {
+    telemetry: createHttpServiceClient(readRequiredEnvironmentVariable("TELEMETRY_URL")),
+    prompt: createHttpServiceClient(readRequiredEnvironmentVariable("PROMPT_URL")),
+  },
   webAssetsDirectory: readOptionalEnvironmentVariable("WEB_ASSETS_DIRECTORY") ?? null,
   logger,
 });

@@ -1,0 +1,15 @@
+{
+  "name": "@extispex/service-storage",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/mod.ts",
+    "./testing": "./src/test-databases.ts"
+  },
+  "imports": {
+    "@mikro-orm/core": "npm:@mikro-orm/core@7.2.7",
+    "@mikro-orm/migrations": "npm:@mikro-orm/migrations@7.2.7",
+    "@mikro-orm/postgresql": "npm:@mikro-orm/postgresql@7.2.7",
+    "@mikro-orm/sql": "npm:@mikro-orm/sql@7.2.7",
+    "@mikro-orm/sqlite": "npm:@mikro-orm/sqlite@7.2.7"
+  }
+}

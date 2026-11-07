@@ -1,8 +1,11 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { createStructuredLogger } from "@extispex/service-runtime";
-import type { ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
 import {
   createStaticApiKeyProjectResolver,
+  createStructuredLogger,
+} from "@extispex/service-runtime";
+import { listTestDatabases } from "@extispex/service-storage/testing";
+import type { ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
+import {
   createTelemetryService,
   openTelemetryDatabase,
   type TelemetryService,
@@ -57,19 +60,14 @@ function createJsonTraceRequest(options: { includeCorrelationIdOnChild: boolean 
   };
 }
 
-/** SQLite always runs; PostgreSQL runs when TELEMETRY_TEST_POSTGRES_URL is set. */
-const testDatabaseUrls = ["sqlite::memory:"];
-const postgresTestUrl = Deno.env.get("TELEMETRY_TEST_POSTGRES_URL");
-if (postgresTestUrl) {
-  testDatabaseUrls.push(postgresTestUrl);
-}
-
 type TelemetryTestBody = (telemetryService: TelemetryService) => Promise<void>;
 
 function defineTelemetryTest(testName: string, testBody: TelemetryTestBody): void {
-  for (const databaseUrl of testDatabaseUrls) {
-    const databaseLabel = databaseUrl.startsWith("sqlite:") ? "sqlite" : "postgresql";
-    Deno.test(`${testName} (${databaseLabel})`, () => withTelemetryService(databaseUrl, testBody));
+  for (const testDatabase of listTestDatabases("telemetry")) {
+    Deno.test(
+      `${testName} (${testDatabase.label})`,
+      () => withTelemetryService(testDatabase.url, testBody),
+    );
   }
 }
 

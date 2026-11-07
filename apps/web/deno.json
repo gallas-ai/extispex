@@ -11,6 +11,7 @@
     "@vitejs/plugin-react": "npm:@vitejs/plugin-react@^5.0.0",
     "react": "npm:react@^19.0.0",
     "react-dom": "npm:react-dom@^19.0.0",
+    "react-router": "npm:react-router@8.5.1",
     "vite": "npm:vite@^7.0.0"
   },
   "compilerOptions": {

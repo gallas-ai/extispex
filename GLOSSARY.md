@@ -76,8 +76,14 @@ structured decision.
 
 ### Prompts
 
-**Prompt Version**: An immutable, automatically numbered revision of a prompt, including its model
-parameters. _Avoid_: Revision, draft
+**Prompt**: A named prompt within a Project, kept as a series of Prompt Versions. Its name is unique
+in the Project, identifies it in the API and never changes.
+
+**Prompt Version**: An immutable, automatically numbered revision of a prompt: its text or chat
+messages and its model parameters. _Avoid_: Revision, draft
+
+**Prompt Variable**: A placeholder written as `{{name}}` in a Prompt Version's text, replaced by a
+value when the prompt is used. It is only replaced, never evaluated. _Avoid_: Parameter, placeholder
 
 **Prompt Label**: A movable name, such as `production`, that points to one Prompt Version. _Avoid_:
 Tag, alias

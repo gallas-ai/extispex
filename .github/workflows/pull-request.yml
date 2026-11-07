@@ -18,17 +18,17 @@ env:
 jobs:
   static-checks-and-unit-tests:
     name: Static checks and unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: telemetry
-          POSTGRES_PASSWORD: telemetry
-          POSTGRES_DB: telemetry_test
+          POSTGRES_USER: extispex
+          POSTGRES_PASSWORD: extispex
+          POSTGRES_DB: extispex
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U telemetry"
+          --health-cmd "pg_isready -U extispex"
           --health-interval 2s --health-timeout 5s --health-retries 30
     steps:
       - uses: actions/checkout@v5
@@ -42,11 +42,12 @@ jobs:
       - name: Unit, service and architecture tests on SQLite and PostgreSQL
         run: deno task test
         env:
-          TELEMETRY_TEST_POSTGRES_URL: postgresql://telemetry:telemetry@localhost:5432/telemetry_test
+          # Each service's tests create their own database <service>_test on this server.
+          TEST_POSTGRES_URL: postgresql://extispex:extispex@localhost:5432/extispex
 
   end-to-end-tests:
     name: End-to-end tests (${{ matrix.deployment }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -55,12 +56,12 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: telemetry
-          POSTGRES_PASSWORD: telemetry
-          POSTGRES_DB: telemetry_e2e
+          POSTGRES_USER: extispex
+          POSTGRES_PASSWORD: extispex
+          POSTGRES_DB: extispex
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U telemetry"
+          --health-cmd "pg_isready -U extispex"
           --health-interval 2s --health-timeout 5s --health-retries 30
     steps:
       - uses: actions/checkout@v5
@@ -73,11 +74,12 @@ jobs:
       - run: deno task test:e2e
         env:
           E2E_DEPLOYMENT: ${{ matrix.deployment }}
-          E2E_TELEMETRY_DATABASE_URL: postgresql://telemetry:telemetry@localhost:5432/telemetry_e2e
+          # Each service creates its own database <service>_e2e on this server.
+          E2E_POSTGRES_URL: postgresql://extispex:extispex@localhost:5432/extispex
 
   container-images:
     name: Container images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: denoland/setup-deno@v2
@@ -90,6 +92,7 @@ jobs:
           docker build -f deploy/docker/all-in-one.Dockerfile -t ghcr.io/gallas-ai/extispex:ci .
           docker build -f deploy/docker/telemetry.Dockerfile -t ghcr.io/gallas-ai/extispex-telemetry:ci .
           docker build -f deploy/docker/gateway.Dockerfile -t ghcr.io/gallas-ai/extispex-gateway:ci .
+          docker build -f deploy/docker/prompt.Dockerfile -t ghcr.io/gallas-ai/extispex-prompt:ci .
       - name: Start the all-in-one image as an arbitrary user, as OpenShift does
         run: |
           mkdir -p "$RUNNER_TEMP/certs"

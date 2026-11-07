@@ -93,7 +93,7 @@ flowchart LR
 | gRPC                   | `@grpc/grpc-js`                                                                                                                             |
 | Persistence            | MikroORM, with PostgreSQL in production and SQLite in the local image, see [ADR 0002](adr/0002-postgresql-and-sqlite-instead-of-mongodb.md) |
 | Job queue              | pg-boss in production and a small SQLite queue in the local image, see [ADR 0001](adr/0001-pg-boss-for-evaluation-job-queue.md)             |
-| UI                     | React, Vite, ECharts                                                                                                                        |
+| UI                     | React, React Router in declarative mode, Vite, ECharts                                                                                      |
 | Browser tests          | `playwright-core` with headless Chromium, see [ADR 0005](adr/0005-playwright-browser-tests-with-layout-rules.md)                            |
 | Delivery               | Docker images, Helm chart, GitHub Actions                                                                                                   |
 
@@ -229,6 +229,53 @@ Prompt Versions are immutable and numbered automatically. Prompt Labels such as 
 move between versions. Versions can be compared by text and model parameters. Evaluators and LLM
 Summaries reference a specific version, so a run can be repeated.
 
+### What a Prompt Version holds
+
+A prompt is identified by its name, which is unique within its Project and never changes, so an
+application reads `GET /v1/prompts/support-agent/labels/production`. A version holds either one text
+or a list of chat messages with the roles `system`, `user` and `assistant`, as Langfuse and MLflow's
+prompt registry do.
+
+```json
+{
+  "type": "chat",
+  "messages": [
+    { "role": "system", "content": "You help customers of {{company}}." },
+    { "role": "user", "content": "{{question}}" }
+  ],
+  "modelParameters": {
+    "model": "gpt-4.1",
+    "temperature": 0.2,
+    "maxOutputTokens": 800,
+    "topP": null,
+    "providerOptions": { "response_format": { "type": "json_object" } }
+  },
+  "variables": ["company", "question"],
+  "commitMessage": "Shorter system prompt"
+}
+```
+
+- **Prompt Variables** are written `{{name}}`, as in Langfuse, MLflow and the OpenAI and Anthropic
+  consoles. They are only replaced by values: there are no conditions or loops, so a template cannot
+  run logic. The service lists each version's variables when it stores it.
+- **Model parameters** have typed fields for what every LLM provider understands: `model`,
+  `temperature`, `maxOutputTokens` and `topP`. The Grading Evaluator maps them to each provider in
+  step 7. Anything provider-specific goes into `providerOptions`, stored as given. Unknown fields
+  outside `providerOptions` are rejected, so that a misspelt parameter is not silently dropped.
+- **Numbering:** adding a version increments a counter on the prompt in the same transaction, so
+  concurrent additions get distinct numbers on both databases.
+- **Comparison:** `GET /v1/prompts/{name}/compare?fromVersion=1&toVersion=2` first matches whole
+  messages, so that an inserted message does not make every later one look changed, then compares
+  messages that differ at the same position with the same role line by line. Model parameters are
+  compared one by one, including each provider option.
+
+### Public API document
+
+The public API's routes are defined in `packages/contracts`. Each service attaches its handlers to
+those definitions, and the Gateway builds its forwarding table and the combined OpenAPI document at
+`/v1/openapi.json` from the same list, see
+[ADR 0006](adr/0006-public-api-routes-in-shared-contracts.md).
+
 ## 7. Access and security
 
 ### Identity
@@ -342,7 +389,8 @@ Approved on 2026-11-06. The repository is one Deno workspace.
 ├── packages/
 │   ├── contracts/                   # API schemas for each service
 │   ├── service-client/              # HTTP and in-process clients
-│   ├── service-runtime/             # Shared config, logging and token verification
+│   ├── service-runtime/             # Shared config, logging, HTTP app and token verification
+│   ├── service-storage/             # Opening a service's database and running its migrations
 │   └── telemetry-ids/               # Public helper for Correlation ID and session.id
 ├── examples/
 │   ├── typescript/
@@ -411,11 +459,23 @@ repository.
 | Naming rule                                                    | Single-letter names fail `deno lint` through the plugin in `tests/architecture`        |
 | TypeScript and Python examples                                 | Both send a two-step conversation that appears under one Session ID                    |
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
+| `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
+
+The Prompt service step added these checks on 2026-11-07.
+
+| Tested                                          | Result                                                                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Prompt service on SQLite and PostgreSQL         | Creating, versioning, labelling and comparing work on both, and five concurrent additions get five distinct numbers      |
+| A database per service on one PostgreSQL server | Each service creates its own database on first start, in tests, e2e and Docker Compose                                   |
+| Combined OpenAPI document                       | The Gateway serves Telemetry and Prompt paths in one OpenAPI 3.1 document built from the contracts, without calling them |
+| Prompt flows through the Gateway                | REST and browser e2e tests pass in all-in-one, in separate services and against Docker Compose                           |
+| React Router 8 in declarative mode              | Keyboard selection on the Traces page needs `useTransitions={false}`, otherwise the URL state lags one key press         |
 
 ### What has not been verified
 
 - The capacity target of 5,000 spans per second
-- `better-sqlite3` on Linux x64; the first CI run on GitHub covers it
+- The Prompt service's image running against a managed PostgreSQL service, where the user may not be
+  allowed to create databases; it then needs its database created beforehand
 - pg-boss under sustained load, in a container and on a managed PostgreSQL service
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
@@ -425,7 +485,8 @@ repository.
 
 Done on 2026-11-06: one thin path through the whole system in both deployments. An OTLP span goes
 through ingestion and storage, can be read through the API and appears in the UI. Until the Identity
-service exists, Telemetry resolves API keys from the `STATIC_API_KEYS` environment variable.
+service exists, Telemetry and Prompt resolve API keys from the `STATIC_API_KEYS` environment
+variable, parsed by `packages/service-runtime`.
 
 The remaining steps and their order are in [roadmap.md](roadmap.md).
 
@@ -435,3 +496,5 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0002: PostgreSQL and SQLite instead of MongoDB](adr/0002-postgresql-and-sqlite-instead-of-mongodb.md)
 - [ADR 0003: Independent services without a broker](adr/0003-independent-services-without-a-broker.md)
 - [ADR 0004: AGPLv3 for the platform, Apache 2.0 for instrumentation code](adr/0004-agpl-for-the-platform-apache-for-instrumentation.md)
+- [ADR 0005: Playwright browser tests with layout rules](adr/0005-playwright-browser-tests-with-layout-rules.md)
+- [ADR 0006: Public API routes in the shared contracts](adr/0006-public-api-routes-in-shared-contracts.md)

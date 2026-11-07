@@ -3,8 +3,10 @@
  * Services call each other through their request handlers instead of the network.
  */
 import { createGatewayService } from "@extispex/gateway-service";
+import { createPromptService, openPromptDatabase } from "@extispex/prompt-service";
 import { createInProcessServiceClient } from "@extispex/service-client";
 import {
+  createStaticApiKeyProjectResolver,
   createStructuredLogger,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
@@ -12,7 +14,6 @@ import {
 } from "@extispex/service-runtime";
 import {
   bindOtlpGrpcServer,
-  createStaticApiKeyProjectResolver,
   createTelemetryService,
   type GrpcTlsFiles,
   openTelemetryDatabase,
@@ -43,8 +44,18 @@ const telemetryService = createTelemetryService({
   logger: createStructuredLogger("telemetry"),
 });
 
+const promptDatabase = await openPromptDatabase(`sqlite:${dataDirectory}/prompt.sqlite`);
+const promptService = createPromptService({
+  database: promptDatabase,
+  projectResolver,
+  logger: createStructuredLogger("prompt"),
+});
+
 const gatewayService = createGatewayService({
-  telemetryClient: createInProcessServiceClient(telemetryService.handleRequest),
+  serviceClients: {
+    telemetry: createInProcessServiceClient(telemetryService.handleRequest),
+    prompt: createInProcessServiceClient(promptService.handleRequest),
+  },
   webAssetsDirectory: readOptionalEnvironmentVariable("WEB_ASSETS_DIRECTORY") ??
     new URL("../../web/dist", import.meta.url).pathname,
   logger: createStructuredLogger("gateway"),
@@ -81,7 +92,7 @@ runOnTerminationSignal(logger, async () => {
     otlpHttpServer.shutdown(),
     shutdownOtlpGrpcServer(grpcServer),
   ]);
-  await telemetryDatabase.close();
+  await Promise.all([telemetryDatabase.close(), promptDatabase.close()]);
 });
 
 function readGrpcTlsFiles(): GrpcTlsFiles | null {

@@ -1,0 +1,50 @@
+import { createRoute } from "@hono/zod-openapi";
+import { z } from "zod";
+import {
+  apiKeySecurity,
+  commonErrorResponses,
+  describeErrorResponse,
+} from "../openapi-route-parts.ts";
+import {
+  listTracesQuerySchema,
+  listTracesResponseSchema,
+  traceDetailResponseSchema,
+} from "./trace-contracts.ts";
+
+export const listTracesRoute = createRoute({
+  method: "get",
+  path: "/v1/traces",
+  summary: "List traces, newest first, optionally filtered by Correlation ID or Session ID.",
+  tags: ["Traces"],
+  security: apiKeySecurity,
+  request: { query: listTracesQuerySchema },
+  responses: {
+    200: {
+      description: "Matching traces.",
+      content: { "application/json": { schema: listTracesResponseSchema } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+export const getTraceRoute = createRoute({
+  method: "get",
+  path: "/v1/traces/{traceId}",
+  summary: "Get all stored spans of one trace.",
+  tags: ["Traces"],
+  security: apiKeySecurity,
+  request: {
+    params: z.object({ traceId: z.string().regex(/^[0-9a-f]{32}$/) }),
+  },
+  responses: {
+    200: {
+      description: "The trace and its spans.",
+      content: { "application/json": { schema: traceDetailResponseSchema } },
+    },
+    ...commonErrorResponses,
+    404: describeErrorResponse("No spans are stored for this trace."),
+  },
+});
+
+/** The Telemetry endpoints reachable through the Gateway. OTLP ingestion bypasses it. */
+export const telemetryPublicRoutes = [listTracesRoute, getTraceRoute];

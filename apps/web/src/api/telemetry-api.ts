@@ -1,11 +1,5 @@
-import type { ErrorResponse, ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
-
-export class TelemetryApiError extends Error {
-  override name = "TelemetryApiError";
-  constructor(message: string, readonly statusCode: number) {
-    super(message);
-  }
-}
+import type { ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
+import { requestJson } from "./api-request.ts";
 
 export interface TraceFilters {
   correlationId: string;
@@ -21,16 +15,4 @@ export function listTraces(apiKey: string, filters: TraceFilters): Promise<ListT
 
 export function getTrace(apiKey: string, traceId: string): Promise<TraceDetailResponse> {
   return requestJson(apiKey, `/v1/traces/${encodeURIComponent(traceId)}`);
-}
-
-async function requestJson<ResponseBody>(apiKey: string, path: string): Promise<ResponseBody> {
-  const response = await fetch(path, { headers: { authorization: `Bearer ${apiKey}` } });
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => null) as ErrorResponse | null;
-    throw new TelemetryApiError(
-      errorBody?.error.message ?? `The request failed with status ${response.status}.`,
-      response.status,
-    );
-  }
-  return await response.json() as ResponseBody;
 }

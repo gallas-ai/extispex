@@ -1,8 +1,11 @@
-import type { StructuredLogger } from "@extispex/service-runtime";
 import { createErrorResponse } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
-import { authenticateProject, type ProjectResolver } from "../projects/project-authentication.ts";
+import {
+  authenticateProject,
+  type ProjectResolver,
+  type StructuredLogger,
+} from "@extispex/service-runtime";
 import {
   createJsonTraceResponse,
   decodeJsonTraceRequest,
