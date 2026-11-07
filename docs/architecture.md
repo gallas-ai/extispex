@@ -424,6 +424,8 @@ Done on 2026-11-06: one thin path through the whole system in both deployments. 
 through ingestion and storage, can be read through the API and appears in the UI. Until the Identity
 service exists, Telemetry resolves API keys from the `STATIC_API_KEYS` environment variable.
 
+The remaining steps and their order are in [roadmap.md](roadmap.md).
+
 ## 12. Decision records
 
 - [ADR 0001: pg-boss for the Evaluation job queue](adr/0001-pg-boss-for-evaluation-job-queue.md)
