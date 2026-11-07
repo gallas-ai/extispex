@@ -1,8 +1,15 @@
-# Evaluation Telemetry
+# Extispex
+
+**Read your LLM calls from the inside.**
 
 Self-hosted observability and evaluation for GenAI applications and agents. Your application sends
-OpenTelemetry traces; the platform stores them, lets you find them by your own Correlation ID or
-Session ID, and shows them in a web UI.
+OpenTelemetry traces; Extispex stores them, lets you find them by your own Correlation ID or Session
+ID, and shows them in a web UI.
+
+> **Why "Extispex"?** An _extispex_ was a Roman diviner, from Latin _exta_ (entrails) and _specio_
+> (I look): the one who looks inside. By examining the inner organs of a sacrifice, an extispex
+> judged whether an undertaking would end well. Looking inside and judging the outcome is tracing
+> and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
 
 **Status:** early development. The trace pipeline works end to end. Logs, metrics, evaluations,
 prompts and identity management are designed in [docs/architecture.md](docs/architecture.md) but not
@@ -10,12 +17,13 @@ built yet.
 
 ## Try it locally
 
-The `all-in-one` image runs everything in one container and stores data in SQLite.
+The all-in-one image `ghcr.io/gallas-ai/extispex` runs everything in one container and stores data
+in SQLite.
 
 ```sh
-docker build -f deploy/docker/all-in-one.Dockerfile -t evaluation-telemetry/all-in-one .
-docker run -p 4317:4317 -p 4318:4318 -p 8080:8080 -v evaluation-telemetry-data:/data \
-  evaluation-telemetry/all-in-one
+docker build -f deploy/docker/all-in-one.Dockerfile -t ghcr.io/gallas-ai/extispex .
+docker run -p 4317:4317 -p 4318:4318 -p 8080:8080 -v extispex-data:/data \
+  ghcr.io/gallas-ai/extispex
 ```
 
 | Port | Purpose                                              |
@@ -39,6 +47,21 @@ Spans may also carry `session.id` to group several traces into one conversation.
 The [`telemetry-ids` package](packages/telemetry-ids/) and the
 [Python example](examples/python/send_conversation.py) show a span processor that adds both
 attributes to every span.
+
+## Container images
+
+Images are published to the GitHub Container Registry as `ghcr.io/gallas-ai/extispex-<service>`. The
+all-in-one image takes the bare name because it is the one to try first.
+
+| Image                                          | Runs                                       | Status  |
+| ---------------------------------------------- | ------------------------------------------ | ------- |
+| `ghcr.io/gallas-ai/extispex`                   | Every service in one process, with SQLite  | Built   |
+| `ghcr.io/gallas-ai/extispex-gateway`           | Gateway and web UI                         | Built   |
+| `ghcr.io/gallas-ai/extispex-telemetry`         | Telemetry service: OTLP ingestion, queries | Built   |
+| `ghcr.io/gallas-ai/extispex-evaluation`        | Evaluation service API                     | Planned |
+| `ghcr.io/gallas-ai/extispex-evaluation-worker` | Evaluation worker                          | Planned |
+| `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Planned |
+| `ghcr.io/gallas-ai/extispex-identity`          | Identity service                           | Planned |
 
 ## Development
 

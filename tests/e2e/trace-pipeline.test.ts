@@ -1,9 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import type { ListTracesResponse, TraceDetailResponse } from "@evaluation-telemetry/contracts";
-import {
-  runWithTelemetryIds,
-  TelemetryIdsSpanProcessor,
-} from "@evaluation-telemetry/telemetry-ids";
+import type { ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
+import { runWithTelemetryIds, TelemetryIdsSpanProcessor } from "@extispex/telemetry-ids";
 import * as grpc from "@grpc/grpc-js";
 import { Buffer } from "node:buffer";
 import { context } from "@opentelemetry/api";

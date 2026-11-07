@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { createStructuredLogger } from "@evaluation-telemetry/service-runtime";
+import { createStructuredLogger } from "@extispex/service-runtime";
 import { createGatewayService } from "../src/create-service.ts";
 
 const logger = createStructuredLogger("gateway-test");

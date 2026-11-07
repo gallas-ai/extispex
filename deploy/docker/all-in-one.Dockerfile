@@ -1,6 +1,6 @@
 # Local deployment: every service in one process, with SQLite files in /data.
 # Build from the repository root:
-#   docker build -f deploy/docker/all-in-one.Dockerfile -t evaluation-telemetry/all-in-one .
+#   docker build -f deploy/docker/all-in-one.Dockerfile -t ghcr.io/gallas-ai/extispex .
 FROM denoland/deno:debian-2.9.5
 
 WORKDIR /app

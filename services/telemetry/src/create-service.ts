@@ -1,6 +1,6 @@
-import { createErrorResponse } from "@evaluation-telemetry/contracts";
-import type { ServiceRequestHandler } from "@evaluation-telemetry/service-client";
-import type { StructuredLogger } from "@evaluation-telemetry/service-runtime";
+import { createErrorResponse } from "@extispex/contracts";
+import type { ServiceRequestHandler } from "@extispex/service-client";
+import type { StructuredLogger } from "@extispex/service-runtime";
 import type * as grpc from "@grpc/grpc-js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { createOtlpGrpcServer } from "./ingestion/otlp-grpc-server.ts";
@@ -71,7 +71,7 @@ export function createTelemetryService(
   });
   app.doc31("/openapi.json", {
     openapi: "3.1.0",
-    info: { title: "Evaluation Telemetry: Telemetry API", version: "1" },
+    info: { title: "Extispex: Telemetry API", version: "1" },
   });
   app.notFound((context) =>
     context.json(createErrorResponse("not_found", "No such endpoint."), 404)

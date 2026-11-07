@@ -9,10 +9,7 @@
  * Environment: OTLP_HTTP_URL (default http://127.0.0.1:4318) and API_KEY
  * (default local-development-key, the local image's built-in key).
  */
-import {
-  runWithTelemetryIds,
-  TelemetryIdsSpanProcessor,
-} from "@evaluation-telemetry/telemetry-ids";
+import { runWithTelemetryIds, TelemetryIdsSpanProcessor } from "@extispex/telemetry-ids";
 import { context } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";

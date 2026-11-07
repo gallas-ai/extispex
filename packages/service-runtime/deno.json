@@ -1,5 +1,5 @@
 {
-  "name": "@evaluation-telemetry/service-runtime",
+  "name": "@extispex/service-runtime",
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts"

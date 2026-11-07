@@ -85,9 +85,9 @@ jobs:
       - run: deno install --frozen
       - name: Build images
         run: |
-          docker build -f deploy/docker/all-in-one.Dockerfile -t evaluation-telemetry/all-in-one:ci .
-          docker build -f deploy/docker/telemetry.Dockerfile -t evaluation-telemetry/telemetry:ci .
-          docker build -f deploy/docker/gateway.Dockerfile -t evaluation-telemetry/gateway:ci .
+          docker build -f deploy/docker/all-in-one.Dockerfile -t ghcr.io/gallas-ai/extispex:ci .
+          docker build -f deploy/docker/telemetry.Dockerfile -t ghcr.io/gallas-ai/extispex-telemetry:ci .
+          docker build -f deploy/docker/gateway.Dockerfile -t ghcr.io/gallas-ai/extispex-gateway:ci .
       - name: Start the all-in-one image as an arbitrary user, as OpenShift does
         run: |
           mkdir -p "$RUNNER_TEMP/certs"
@@ -101,7 +101,7 @@ jobs:
             -e STATIC_API_KEYS=e2e-api-key=e2e-project \
             -e TELEMETRY_GRPC_TLS_CERTIFICATE_FILE=/certs/cert.pem \
             -e TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE=/certs/key.pem \
-            evaluation-telemetry/all-in-one:ci
+            ghcr.io/gallas-ai/extispex:ci
           for attempt in $(seq 1 30); do
             curl -sf http://127.0.0.1:8080/health && exit 0
             sleep 1

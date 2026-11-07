@@ -10,7 +10,7 @@ import { relative } from "@std/path";
 
 const REPOSITORY_ROOT = new URL("../../", import.meta.url).pathname;
 const SOURCE_DIRECTORIES = ["apps", "packages", "services", "tests", "examples"];
-const SERVICE_PACKAGE_PATTERN = /^@evaluation-telemetry\/[a-z-]+-service(\/|$)/;
+const SERVICE_PACKAGE_PATTERN = /^@extispex\/[a-z-]+-service(\/|$)/;
 const MEMBERS_ALLOWED_TO_IMPORT_SERVICES = new Set(["apps/all-in-one"]);
 const IMPORT_SPECIFIER_PATTERN =
   /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;

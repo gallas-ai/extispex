@@ -1,5 +1,5 @@
 {
-  "name": "@evaluation-telemetry/architecture-tests",
+  "name": "@extispex/architecture-tests",
   "version": "0.1.0",
   "exports": {
     "./descriptive-names-lint-plugin": "./descriptive-names-lint-plugin.ts"

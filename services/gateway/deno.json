@@ -1,5 +1,5 @@
 {
-  "name": "@evaluation-telemetry/gateway-service",
+  "name": "@extispex/gateway-service",
   "version": "0.1.0",
   "exports": {
     ".": "./src/create-service.ts"

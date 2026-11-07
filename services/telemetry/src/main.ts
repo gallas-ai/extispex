@@ -4,7 +4,7 @@ import {
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
   runOnTerminationSignal,
-} from "@evaluation-telemetry/service-runtime";
+} from "@extispex/service-runtime";
 import {
   bindOtlpGrpcServer,
   createStaticApiKeyProjectResolver,

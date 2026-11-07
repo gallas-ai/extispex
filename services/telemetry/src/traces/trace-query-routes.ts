@@ -4,7 +4,7 @@ import {
   listTracesQuerySchema,
   listTracesResponseSchema,
   traceDetailResponseSchema,
-} from "@evaluation-telemetry/contracts";
+} from "@extispex/contracts";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import { authenticateProject, type ProjectResolver } from "../projects/project-authentication.ts";
 import type { SpanRepository } from "../storage/span-repository.ts";

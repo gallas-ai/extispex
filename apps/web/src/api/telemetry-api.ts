@@ -1,8 +1,4 @@
-import type {
-  ErrorResponse,
-  ListTracesResponse,
-  TraceDetailResponse,
-} from "@evaluation-telemetry/contracts";
+import type { ErrorResponse, ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
 
 export class TelemetryApiError extends Error {
   override name = "TelemetryApiError";

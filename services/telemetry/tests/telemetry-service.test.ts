@@ -1,6 +1,6 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { createStructuredLogger } from "@evaluation-telemetry/service-runtime";
-import type { ListTracesResponse, TraceDetailResponse } from "@evaluation-telemetry/contracts";
+import { createStructuredLogger } from "@extispex/service-runtime";
+import type { ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
 import {
   createStaticApiKeyProjectResolver,
   createTelemetryService,

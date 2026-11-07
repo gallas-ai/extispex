@@ -1,7 +1,4 @@
-import {
-  CORRELATION_ID_ATTRIBUTE,
-  SESSION_ID_ATTRIBUTE,
-} from "@evaluation-telemetry/telemetry-ids/attributes";
+import { CORRELATION_ID_ATTRIBUTE, SESSION_ID_ATTRIBUTE } from "@extispex/telemetry-ids/attributes";
 import type { IncomingSpan, SpanRejection } from "./span-normalization.ts";
 
 export interface CorrelatedSpan extends IncomingSpan {

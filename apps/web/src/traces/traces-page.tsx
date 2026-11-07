@@ -1,4 +1,4 @@
-import type { TraceSummary } from "@evaluation-telemetry/contracts";
+import type { TraceSummary } from "@extispex/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { listTraces, type TraceFilters } from "../api/telemetry-api.ts";
 import { formatDuration, formatUnixNanoseconds } from "./trace-formatting.ts";

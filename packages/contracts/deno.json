@@ -1,5 +1,5 @@
 {
-  "name": "@evaluation-telemetry/contracts",
+  "name": "@extispex/contracts",
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts"

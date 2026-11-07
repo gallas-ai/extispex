@@ -15,7 +15,7 @@ export function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="app-title">
-          <span className="app-name">Evaluation Telemetry</span>
+          <span className="app-name">Extispex</span>
           <nav className="app-navigation" aria-label="Sections">
             <span className="navigation-item navigation-item-active">Traces</span>
           </nav>

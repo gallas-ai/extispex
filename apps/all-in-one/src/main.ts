@@ -2,14 +2,14 @@
  * Local deployment: every service runs in this one process, each with its own SQLite file.
  * Services call each other through their request handlers instead of the network.
  */
-import { createGatewayService } from "@evaluation-telemetry/gateway-service";
-import { createInProcessServiceClient } from "@evaluation-telemetry/service-client";
+import { createGatewayService } from "@extispex/gateway-service";
+import { createInProcessServiceClient } from "@extispex/service-client";
 import {
   createStructuredLogger,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   runOnTerminationSignal,
-} from "@evaluation-telemetry/service-runtime";
+} from "@extispex/service-runtime";
 import {
   bindOtlpGrpcServer,
   createStaticApiKeyProjectResolver,
@@ -17,7 +17,7 @@ import {
   type GrpcTlsFiles,
   openTelemetryDatabase,
   shutdownOtlpGrpcServer,
-} from "@evaluation-telemetry/telemetry-service";
+} from "@extispex/telemetry-service";
 
 const DEFAULT_LOCAL_API_KEYS = "local-development-key=default";
 

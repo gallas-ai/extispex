@@ -1,6 +1,6 @@
 # Telemetry service: OTLP ingestion and trace queries.
 # Build from the repository root:
-#   docker build -f deploy/docker/telemetry.Dockerfile -t evaluation-telemetry/telemetry .
+#   docker build -f deploy/docker/telemetry.Dockerfile -t ghcr.io/gallas-ai/extispex-telemetry .
 FROM denoland/deno:debian-2.9.5
 
 WORKDIR /app

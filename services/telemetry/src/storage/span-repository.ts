@@ -1,4 +1,4 @@
-import type { ListTracesQuery, Span, TraceSummary } from "@evaluation-telemetry/contracts";
+import type { ListTracesQuery, Span, TraceSummary } from "@extispex/contracts";
 import type { EntityManager } from "@mikro-orm/sql";
 import type { CorrelatedSpan } from "../ingestion/correlation-policy.ts";
 import {

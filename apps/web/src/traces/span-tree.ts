@@ -1,4 +1,4 @@
-import type { Span } from "@evaluation-telemetry/contracts";
+import type { Span } from "@extispex/contracts";
 
 export interface SpanTreeRow {
   span: Span;

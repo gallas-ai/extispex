@@ -45,7 +45,7 @@ export async function startDeployment(): Promise<RunningDeployment> {
 }
 
 async function startAllInOneDeployment(): Promise<RunningDeployment> {
-  const workingDirectory = await Deno.makeTempDir({ prefix: "evaluation-telemetry-e2e-" });
+  const workingDirectory = await Deno.makeTempDir({ prefix: "extispex-e2e-" });
   const tlsFiles = await createSelfSignedCertificate(workingDirectory);
   const [otlpHttpPort, otlpGrpcPort, gatewayPort] = await reserveFreePorts(3);
   const allInOneProcess = startDenoProcess("all-in-one", "apps/all-in-one/src/main.ts", {
@@ -77,7 +77,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   if (!databaseUrl) {
     throw new Error("E2E_TELEMETRY_DATABASE_URL is required for the services deployment.");
   }
-  const workingDirectory = await Deno.makeTempDir({ prefix: "evaluation-telemetry-e2e-" });
+  const workingDirectory = await Deno.makeTempDir({ prefix: "extispex-e2e-" });
   const tlsFiles = await createSelfSignedCertificate(workingDirectory);
   const [otlpHttpPort, otlpGrpcPort, gatewayPort] = await reserveFreePorts(3);
   const telemetryProcess = startDenoProcess("telemetry", "services/telemetry/src/main.ts", {

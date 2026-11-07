@@ -1,5 +1,5 @@
 {
-  "name": "@evaluation-telemetry/e2e-tests",
+  "name": "@extispex/e2e-tests",
   "version": "0.1.0",
   "exports": {
     ".": "./deployment.ts"

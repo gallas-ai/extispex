@@ -1,6 +1,6 @@
-import { createErrorResponse } from "@evaluation-telemetry/contracts";
-import type { ServiceClient, ServiceRequestHandler } from "@evaluation-telemetry/service-client";
-import type { StructuredLogger } from "@evaluation-telemetry/service-runtime";
+import { createErrorResponse } from "@extispex/contracts";
+import type { ServiceClient, ServiceRequestHandler } from "@extispex/service-client";
+import type { StructuredLogger } from "@extispex/service-runtime";
 import { Hono } from "hono";
 import { serveDir, serveFile } from "@std/http/file-server";
 

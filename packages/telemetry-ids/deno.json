@@ -1,5 +1,5 @@
 {
-  "name": "@evaluation-telemetry/telemetry-ids",
+  "name": "@extispex/telemetry-ids",
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",

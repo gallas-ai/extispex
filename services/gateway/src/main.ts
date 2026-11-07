@@ -1,11 +1,11 @@
-import { createHttpServiceClient } from "@evaluation-telemetry/service-client";
+import { createHttpServiceClient } from "@extispex/service-client";
 import {
   createStructuredLogger,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
   runOnTerminationSignal,
-} from "@evaluation-telemetry/service-runtime";
+} from "@extispex/service-runtime";
 import { createGatewayService } from "./create-service.ts";
 
 const logger = createStructuredLogger("gateway");

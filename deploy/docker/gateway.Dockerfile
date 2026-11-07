@@ -1,6 +1,6 @@
 # Gateway: serves the web UI and forwards REST requests to the services.
 # Build from the repository root:
-#   docker build -f deploy/docker/gateway.Dockerfile -t evaluation-telemetry/gateway .
+#   docker build -f deploy/docker/gateway.Dockerfile -t ghcr.io/gallas-ai/extispex-gateway .
 FROM denoland/deno:debian-2.9.5
 
 WORKDIR /app

@@ -2,7 +2,7 @@
 # Start from the repository root:
 #   docker compose -f deploy/compose/compose.yaml up --build
 # Override host ports with OTLP_GRPC_HOST_PORT, OTLP_HTTP_HOST_PORT and GATEWAY_HOST_PORT.
-name: evaluation-telemetry
+name: extispex
 
 services:
   postgres:

@@ -1,4 +1,4 @@
-import type { SpanKind, SpanStatusCode } from "@evaluation-telemetry/contracts";
+import type { SpanKind, SpanStatusCode } from "@extispex/contracts";
 import type {
   OtlpAnyValue,
   OtlpExportTraceRequest,

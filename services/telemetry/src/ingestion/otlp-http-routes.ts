@@ -1,5 +1,5 @@
-import type { StructuredLogger } from "@evaluation-telemetry/service-runtime";
-import { createErrorResponse } from "@evaluation-telemetry/contracts";
+import type { StructuredLogger } from "@extispex/service-runtime";
+import { createErrorResponse } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { authenticateProject, type ProjectResolver } from "../projects/project-authentication.ts";

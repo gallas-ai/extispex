@@ -2,9 +2,9 @@
 
 **Status:** accepted on 2026-11-06, including the repository structure.
 
-Evaluation Telemetry is a self-hosted platform for observing and evaluating GenAI applications and
-agents. Terms in this document are defined in [GLOSSARY.md](../GLOSSARY.md). The original
-requirements are in [business.md](business.md).
+Extispex is a self-hosted platform for observing and evaluating GenAI applications and agents. Terms
+in this document are defined in [GLOSSARY.md](../GLOSSARY.md). The original requirements are in
+[business.md](business.md).
 
 ## 1. Scope
 

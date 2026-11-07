@@ -1,4 +1,4 @@
-import type { Span, TraceDetailResponse } from "@evaluation-telemetry/contracts";
+import type { Span, TraceDetailResponse } from "@extispex/contracts";
 import { useEffect, useMemo, useState } from "react";
 import { getTrace } from "../api/telemetry-api.ts";
 import { buildSpanTreeRows } from "./span-tree.ts";

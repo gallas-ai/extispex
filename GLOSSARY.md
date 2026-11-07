@@ -1,4 +1,4 @@
-# Evaluation Telemetry
+# Extispex
 
 A self-hosted platform for observing and evaluating GenAI applications and agents. It stores their
 telemetry and judges their behaviour against user-defined expectations.

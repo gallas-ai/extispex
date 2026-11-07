@@ -1,4 +1,4 @@
-import { parseKeyValueList } from "@evaluation-telemetry/service-runtime";
+import { parseKeyValueList } from "@extispex/service-runtime";
 
 /** Finds the Project that an API key belongs to. */
 export interface ProjectResolver {
