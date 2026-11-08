@@ -8,10 +8,12 @@ import type {
   PromptVersionComparison,
 } from "@extispex/contracts";
 import {
+  createRequestAuthenticator,
   createStructuredLogger,
-  ProjectResolutionUnavailableError,
+  IdentityUnavailableError,
   type ProjectResolver,
 } from "@extispex/service-runtime";
+import { createTestAccessTokens } from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import {
   createPromptService,
@@ -29,6 +31,13 @@ const testProjectResolver: ProjectResolver = {
       ({ [API_KEY]: "project-one", [OTHER_PROJECT_API_KEY]: "project-two" })[apiKey] ?? null,
     ),
 };
+
+/** Stands in for Identity's signing key, for access tokens with a Role. */
+const testAccessTokens = await createTestAccessTokens();
+const testRequestAuthenticator = createRequestAuthenticator({
+  projectResolver: testProjectResolver,
+  accessTokenVerifier: testAccessTokens.accessTokenVerifier,
+});
 
 const SUPPORT_AGENT_PROMPT = {
   name: "support-agent",
@@ -65,7 +74,7 @@ async function withPromptService(databaseUrl: string, testBody: PromptTestBody):
     let clockMilliseconds = Date.parse("2026-11-07T10:00:00Z");
     await testBody(createPromptService({
       database,
-      projectResolver: testProjectResolver,
+      requestAuthenticator: testRequestAuthenticator,
       logger: createStructuredLogger("prompt-test"),
       // Each request is one second later, so that ordering by time is deterministic.
       readCurrentTime: () => new Date(clockMilliseconds += 1_000),
@@ -402,15 +411,80 @@ definePromptTest("requires a valid API key", async (promptService) => {
   assertEquals((await response.json()).error.code, "unauthenticated");
 });
 
+definePromptTest(
+  "lets a viewer read and an editor change prompts with access tokens",
+  async (promptService) => {
+    await createSupportAgentPrompt(promptService);
+    const viewerToken = await testAccessTokens.issueAccessToken({
+      projectId: "project-one",
+      role: "viewer",
+    });
+    const editorToken = await testAccessTokens.issueAccessToken({
+      projectId: "project-one",
+      role: "editor",
+    });
+
+    const { prompts } = await expectJson<ListPromptsResponse>(
+      sendRequest(promptService, "GET", "/v1/prompts", { apiKey: viewerToken }),
+      200,
+    );
+    assertEquals(prompts.map((prompt) => prompt.name), ["support-agent"]);
+    for (
+      const [method, path, body] of [
+        ["POST", "/v1/prompts", { ...SUPPORT_AGENT_PROMPT, name: "viewer-prompt" }],
+        ["POST", "/v1/prompts/support-agent/versions", { type: "text", text: "Hi" }],
+        ["PUT", "/v1/prompts/support-agent/labels/production", { versionNumber: 1 }],
+        ["DELETE", "/v1/prompts/support-agent/labels/staging", undefined],
+      ] as const
+    ) {
+      const refusal = await expectJson<{ error: { code: string } }>(
+        sendRequest(promptService, method, path, { apiKey: viewerToken, body }),
+        403,
+      );
+      assertEquals(refusal.error.code, "forbidden", `${method} ${path}`);
+    }
+
+    await expectJson<PromptLabel>(
+      sendRequest(promptService, "PUT", "/v1/prompts/support-agent/labels/production", {
+        apiKey: editorToken,
+        body: { versionNumber: 1 },
+      }),
+      200,
+    );
+  },
+);
+
+definePromptTest("keeps an access token to its own Project", async (promptService) => {
+  await createSupportAgentPrompt(promptService);
+  const otherProjectToken = await testAccessTokens.issueAccessToken({
+    projectId: "project-two",
+    role: "admin",
+  });
+  const { prompts } = await expectJson<ListPromptsResponse>(
+    sendRequest(promptService, "GET", "/v1/prompts", { apiKey: otherProjectToken }),
+    200,
+  );
+  assertEquals(prompts, []);
+  // A token without a Project only manages access.
+  await expectJson(
+    sendRequest(promptService, "GET", "/v1/prompts", {
+      apiKey: await testAccessTokens.issueAccessToken({}),
+    }),
+    401,
+  );
+});
+
 Deno.test("asks clients to retry while API keys cannot be checked", async () => {
   const database = await openPromptDatabase("sqlite::memory:");
   try {
     const promptService = createPromptService({
       database,
-      projectResolver: {
-        resolveProjectId: () =>
-          Promise.reject(new ProjectResolutionUnavailableError("Identity is down.")),
-      },
+      requestAuthenticator: createRequestAuthenticator({
+        projectResolver: {
+          resolveProjectId: () => Promise.reject(new IdentityUnavailableError("Identity is down.")),
+        },
+        accessTokenVerifier: testAccessTokens.accessTokenVerifier,
+      }),
       logger: { ...createStructuredLogger("prompt-test"), warn: () => {} },
     });
     const response = await sendRequest(promptService, "GET", "/v1/prompts");

@@ -1,31 +1,47 @@
+import { MINIMUM_PASSWORD_LENGTH } from "@extispex/contracts";
 import {
   createStructuredLogger,
   InvalidConfigurationError,
+  readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
   readSecretEnvironmentVariable,
   runOnTerminationSignal,
 } from "@extispex/service-runtime";
 import {
+  createFirstAdministratorIfNone,
   createFirstProjectIfNone,
   createIdentityService,
   MINIMUM_CONFIGURED_KEY_LENGTH,
   openIdentityDatabase,
+  parseServiceClients,
 } from "./create-service.ts";
 
 const logger = createStructuredLogger("identity");
 
-const instanceAdminKey = readSecretEnvironmentVariable(
-  "INSTANCE_ADMIN_KEY",
-  MINIMUM_CONFIGURED_KEY_LENGTH,
+const areLocalAccountsEnabled = readLocalAccountsSetting();
+const serviceClientSecrets = parseServiceClients(
+  readOptionalEnvironmentVariable("SERVICE_CLIENTS"),
 );
-if (instanceAdminKey === undefined) {
-  throw new InvalidConfigurationError("Environment variable INSTANCE_ADMIN_KEY is required.");
-}
 const bootstrapProjectApiKey = readSecretEnvironmentVariable(
   "BOOTSTRAP_PROJECT_API_KEY",
   MINIMUM_CONFIGURED_KEY_LENGTH,
 );
+const bootstrapAdminEmail = readOptionalEnvironmentVariable("BOOTSTRAP_ADMIN_EMAIL");
+const bootstrapAdminPassword = readSecretEnvironmentVariable(
+  "BOOTSTRAP_ADMIN_PASSWORD",
+  MINIMUM_PASSWORD_LENGTH,
+);
+if ((bootstrapAdminEmail === undefined) !== (bootstrapAdminPassword === undefined)) {
+  throw new InvalidConfigurationError(
+    "Set both BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD, or neither.",
+  );
+}
+if (bootstrapAdminEmail !== undefined && !areLocalAccountsEnabled) {
+  throw new InvalidConfigurationError(
+    "BOOTSTRAP_ADMIN_EMAIL creates a local account, which needs LOCAL_ACCOUNTS=enabled.",
+  );
+}
 
 const database = await openIdentityDatabase(
   readRequiredEnvironmentVariable("IDENTITY_DATABASE_URL"),
@@ -39,8 +55,25 @@ if (bootstrapProjectApiKey !== undefined) {
     });
   }
 }
+// After the first Project, so that the first administrator gets the Role admin in it.
+if (bootstrapAdminEmail !== undefined && bootstrapAdminPassword !== undefined) {
+  const firstAdministrator = await createFirstAdministratorIfNone(database, {
+    email: bootstrapAdminEmail,
+    password: bootstrapAdminPassword,
+  });
+  if (firstAdministrator !== null) {
+    logger.info("Created the first administrator with BOOTSTRAP_ADMIN_EMAIL", {
+      email: firstAdministrator.email,
+    });
+  }
+}
 
-const identityService = createIdentityService({ database, instanceAdminKey, logger });
+const identityService = createIdentityService({
+  database,
+  areLocalAccountsEnabled,
+  serviceClientSecrets,
+  logger,
+});
 
 const httpServer = Deno.serve(
   {
@@ -54,3 +87,17 @@ runOnTerminationSignal(logger, async () => {
   await httpServer.shutdown();
   await database.close();
 });
+
+/**
+ * `LOCAL_ACCOUNTS=enabled` lets users sign in with a password stored by Identity. It is off by
+ * default here: production signs users in through the company's identity provider.
+ */
+function readLocalAccountsSetting(): boolean {
+  const configuredValue = readOptionalEnvironmentVariable("LOCAL_ACCOUNTS") ?? "disabled";
+  if (configuredValue !== "enabled" && configuredValue !== "disabled") {
+    throw new InvalidConfigurationError(
+      `LOCAL_ACCOUNTS must be "enabled" or "disabled", got "${configuredValue}".`,
+    );
+  }
+  return configuredValue === "enabled";
+}

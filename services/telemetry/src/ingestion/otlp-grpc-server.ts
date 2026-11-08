@@ -1,8 +1,9 @@
 import * as grpc from "@grpc/grpc-js";
+import { isRoleAtLeast } from "@extispex/contracts";
 import {
-  authenticateProject,
-  ProjectResolutionUnavailableError,
-  type ProjectResolver,
+  IdentityUnavailableError,
+  type ProjectAccess,
+  type RequestAuthenticator,
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import {
@@ -16,7 +17,7 @@ import type { TraceIngestion } from "./trace-ingestion.ts";
 
 export interface OtlpGrpcServerDependencies {
   traceIngestion: TraceIngestion;
-  projectResolver: ProjectResolver;
+  requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
 }
 
@@ -52,26 +53,36 @@ export function createOtlpGrpcServer(dependencies: OtlpGrpcServerDependencies): 
       respond: grpc.sendUnaryData<TraceExportOutcome>,
     ) => {
       const authorizationHeader = call.metadata.get("authorization")[0]?.toString();
-      let projectId: string | null;
+      let projectAccess: ProjectAccess | null;
       try {
-        projectId = await authenticateProject(dependencies.projectResolver, authorizationHeader);
+        projectAccess = await dependencies.requestAuthenticator.authenticateRequest(
+          authorizationHeader,
+        );
       } catch (error) {
-        if (!(error instanceof ProjectResolutionUnavailableError)) throw error;
-        dependencies.logger.warn("API key could not be checked", { error });
+        if (!(error instanceof IdentityUnavailableError)) throw error;
+        dependencies.logger.warn("Credentials could not be checked", { error });
         // OTLP exporters retry UNAVAILABLE, so the spans are not lost while Identity is down.
         respond({
           code: grpc.status.UNAVAILABLE,
-          details: "The API key could not be checked. Retry later.",
+          details: "The credentials could not be checked. Retry later.",
         });
         return;
       }
-      if (projectId === null) {
+      if (projectAccess === null) {
         respond({
           code: grpc.status.UNAUTHENTICATED,
           details: "A valid API key is required in the authorization metadata as a Bearer token.",
         });
         return;
       }
+      if (!isRoleAtLeast(projectAccess.role, "editor")) {
+        respond({
+          code: grpc.status.PERMISSION_DENIED,
+          details: "Sending telemetry takes the Role editor in the Project, as an API key has.",
+        });
+        return;
+      }
+      const { projectId } = projectAccess;
       try {
         const exportRequest = decodeProtobufTraceRequest(call.request);
         respond(null, await dependencies.traceIngestion.ingestTraces(projectId, exportRequest));

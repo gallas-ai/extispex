@@ -1,6 +1,6 @@
 import type { TraceSummary } from "@extispex/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isApiKeyRejection } from "../api/api-request.ts";
+import { type ApiCredentials, isSignInRequired } from "../api/api-request.ts";
 import { listTraces, type TraceFilters } from "../api/telemetry-api.ts";
 import { useTracesUrlState } from "../navigation/traces-url-state.ts";
 import { InboxIcon, RefreshIcon } from "../ui/icons.tsx";
@@ -14,16 +14,16 @@ import { TraceTable, TraceTableSkeleton } from "./trace-table.tsx";
 const LIVE_REFRESH_INTERVAL_MILLISECONDS = 5_000;
 
 interface TracesPageProps {
-  apiKey: string;
-  onDisconnect: () => void;
+  credentials: ApiCredentials;
+  onSignInRequired: () => void;
 }
 
 type TraceListState =
   | { status: "loading" }
   | { status: "loaded"; traces: TraceSummary[]; loadedAtUnixMilliseconds: number }
-  | { status: "failed"; message: string; isApiKeyRejected: boolean };
+  | { status: "failed"; message: string; isSignInRequired: boolean };
 
-export function TracesPage({ apiKey, onDisconnect }: TracesPageProps) {
+export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
   const [urlState, updateUrlState] = useTracesUrlState();
   const appliedFilters = useMemo<TraceFilters>(
     () => ({ correlationId: urlState.correlationId, sessionId: urlState.sessionId }),
@@ -43,7 +43,7 @@ export function TracesPage({ apiKey, onDisconnect }: TracesPageProps) {
       setTraceListState({ status: "loading" });
     }
     try {
-      const { traces } = await listTraces(apiKey, appliedFilters);
+      const { traces } = await listTraces(credentials, appliedFilters);
       if (requestNumber !== latestRequestNumber.current) return;
       setTraceListState({ status: "loaded", traces, loadedAtUnixMilliseconds: Date.now() });
     } catch (error) {
@@ -51,12 +51,12 @@ export function TracesPage({ apiKey, onDisconnect }: TracesPageProps) {
       setTraceListState({
         status: "failed",
         message: (error as Error).message,
-        isApiKeyRejected: isApiKeyRejection(error),
+        isSignInRequired: isSignInRequired(error),
       });
     } finally {
       if (requestNumber === latestRequestNumber.current) setIsRefreshing(false);
     }
-  }, [apiKey, appliedFilters]);
+  }, [credentials, appliedFilters]);
 
   useEffect(() => {
     loadTraces(false);
@@ -150,9 +150,9 @@ export function TracesPage({ apiKey, onDisconnect }: TracesPageProps) {
             <LoadError
               subject="Traces"
               message={traceListState.message}
-              isApiKeyRejected={traceListState.isApiKeyRejected}
+              isSignInRequired={traceListState.isSignInRequired}
               onRetry={() => loadTraces(false)}
-              onDisconnect={onDisconnect}
+              onSignInRequired={onSignInRequired}
             />
           )}
           {traceListState.status === "loaded" && traceListState.traces.length === 0 && (
@@ -185,7 +185,7 @@ export function TracesPage({ apiKey, onDisconnect }: TracesPageProps) {
             <div className="drawer-backdrop" onClick={closeTrace} aria-hidden="true" />
             <TraceDetail
               key={urlState.traceId}
-              apiKey={apiKey}
+              credentials={credentials}
               traceId={urlState.traceId}
               selectedSpanId={urlState.spanId}
               onSelectSpan={(spanId) => updateUrlState({ spanId }, "replace")}

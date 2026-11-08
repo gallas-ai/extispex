@@ -1,7 +1,18 @@
 import { openServiceDatabase, type ServiceDatabase } from "@extispex/service-storage";
 import { Migration0001CreateProjects as PostgresMigration0001 } from "./migrations/postgres/migration-0001-create-projects.ts";
+import { Migration0002CreateAccess as PostgresMigration0002 } from "./migrations/postgres/migration-0002-create-access.ts";
 import { Migration0001CreateProjects as SqliteMigration0001 } from "./migrations/sqlite/migration-0001-create-projects.ts";
-import { ApiKeyRecord, ProjectRecord } from "./identity-entities.ts";
+import { Migration0002CreateAccess as SqliteMigration0002 } from "./migrations/sqlite/migration-0002-create-access.ts";
+import {
+  ApiKeyRecord,
+  GroupMemberRecord,
+  GroupRecord,
+  ProjectRecord,
+  RoleAssignmentRecord,
+  SigningKeyRecord,
+  SignInRecord,
+  UserRecord,
+} from "./identity-entities.ts";
 
 export type IdentityDatabase = ServiceDatabase;
 
@@ -14,10 +25,25 @@ export type IdentityDatabase = ServiceDatabase;
 export function openIdentityDatabase(databaseUrl: string): Promise<IdentityDatabase> {
   return openServiceDatabase({
     databaseUrl,
-    entities: [ProjectRecord, ApiKeyRecord],
+    entities: [
+      ProjectRecord,
+      ApiKeyRecord,
+      UserRecord,
+      GroupRecord,
+      GroupMemberRecord,
+      RoleAssignmentRecord,
+      SignInRecord,
+      SigningKeyRecord,
+    ],
     migrationsByDialect: {
-      postgresql: [{ name: "0001-create-projects", class: PostgresMigration0001 }],
-      sqlite: [{ name: "0001-create-projects", class: SqliteMigration0001 }],
+      postgresql: [
+        { name: "0001-create-projects", class: PostgresMigration0001 },
+        { name: "0002-create-access", class: PostgresMigration0002 },
+      ],
+      sqlite: [
+        { name: "0001-create-projects", class: SqliteMigration0001 },
+        { name: "0002-create-access", class: SqliteMigration0002 },
+      ],
     },
   });
 }

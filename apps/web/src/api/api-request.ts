@@ -8,28 +8,60 @@ export class ApiError extends Error {
   }
 }
 
-export function isApiKeyRejection(error: unknown): boolean {
-  return error instanceof ApiError && (error.statusCode === 401 || error.statusCode === 403);
+/** Whether the browser's sign-in has ended, so that the user must sign in again. */
+export function isSignInRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.statusCode === 401;
+}
+
+/**
+ * Where requests get their access token. The token lasts a few minutes, so the object stays the
+ * same while its tokens change, and pages do not reload when a token is renewed.
+ */
+export interface ApiCredentials {
+  /** A token that is valid now. */
+  readAccessToken(): Promise<string>;
+  /** A new token, after a request was refused with the current one. */
+  renewAccessToken(): Promise<string>;
 }
 
 interface ApiRequestOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
 }
 
-/** Calls the Gateway with the Project API key. Resolves to null for an empty response. */
+/**
+ * Calls the Gateway with an access token. A 401 gets one more try with a new token, in case the
+ * token expired on the way. Resolves to null for an empty response.
+ */
 export async function requestJson<ResponseBody>(
-  apiKey: string,
+  credentials: ApiCredentials,
   path: string,
-  { method = "GET", body }: ApiRequestOptions = {},
+  options: ApiRequestOptions = {},
 ): Promise<ResponseBody> {
-  const headers = new Headers({ authorization: `Bearer ${apiKey}` });
+  let response = await sendRequest(await credentials.readAccessToken(), path, options);
+  if (response.status === 401) {
+    await response.body?.cancel();
+    response = await sendRequest(await credentials.renewAccessToken(), path, options);
+  }
+  return await readJsonResponse<ResponseBody>(response);
+}
+
+function sendRequest(
+  accessToken: string,
+  path: string,
+  { method = "GET", body }: ApiRequestOptions,
+): Promise<Response> {
+  const headers = new Headers({ authorization: `Bearer ${accessToken}` });
   if (body !== undefined) headers.set("content-type", "application/json");
-  const response = await fetch(path, {
+  return fetch(path, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+/** The response's JSON body, or an {@link ApiError} with the API's message. */
+export async function readJsonResponse<ResponseBody>(response: Response): Promise<ResponseBody> {
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null) as ErrorResponse | null;
     throw new ApiError(

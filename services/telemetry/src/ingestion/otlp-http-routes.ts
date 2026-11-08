@@ -1,10 +1,10 @@
-import { createErrorResponse } from "@extispex/contracts";
+import { createErrorResponse, isRoleAtLeast } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { Context } from "hono";
+import type { Context, Env } from "hono";
 import {
-  authenticateProject,
-  ProjectResolutionUnavailableError,
-  type ProjectResolver,
+  IdentityUnavailableError,
+  type ProjectAccess,
+  type RequestAuthenticator,
   RETRY_AFTER_SECONDS,
   type StructuredLogger,
 } from "@extispex/service-runtime";
@@ -27,13 +27,13 @@ type ContentEncoding = typeof SUPPORTED_CONTENT_ENCODINGS[number] | "identity";
 
 export interface OtlpHttpRouteDependencies {
   traceIngestion: TraceIngestion;
-  projectResolver: ProjectResolver;
+  requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
 }
 
 /** Registers the OTLP/HTTP trace endpoint, accepting protobuf and JSON payloads. */
-export function registerOtlpHttpRoutes(
-  app: OpenAPIHono,
+export function registerOtlpHttpRoutes<Environment extends Env>(
+  app: OpenAPIHono<Environment>,
   dependencies: OtlpHttpRouteDependencies,
 ): void {
   app.post("/v1/traces", async (context) => {
@@ -58,24 +58,23 @@ export function registerOtlpHttpRoutes(
         }.`,
       );
     }
-    let projectId: string | null;
+    let projectAccess: ProjectAccess | null;
     try {
-      projectId = await authenticateProject(
-        dependencies.projectResolver,
+      projectAccess = await dependencies.requestAuthenticator.authenticateRequest(
         context.req.header("authorization"),
       );
     } catch (error) {
-      if (!(error instanceof ProjectResolutionUnavailableError)) throw error;
-      dependencies.logger.warn("API key could not be checked", { error });
+      if (!(error instanceof IdentityUnavailableError)) throw error;
+      dependencies.logger.warn("Credentials could not be checked", { error });
       context.header("retry-after", RETRY_AFTER_SECONDS);
       return respondWithError(
         context,
         503,
         "identity_unavailable",
-        "The API key could not be checked. Retry later.",
+        "The credentials could not be checked. Retry later.",
       );
     }
-    if (projectId === null) {
+    if (projectAccess === null) {
       return respondWithError(
         context,
         401,
@@ -83,6 +82,15 @@ export function registerOtlpHttpRoutes(
         "A valid API key is required in the Authorization header as a Bearer token.",
       );
     }
+    if (!isRoleAtLeast(projectAccess.role, "editor")) {
+      return respondWithError(
+        context,
+        403,
+        "forbidden",
+        "Sending telemetry takes the Role editor in the Project, as an API key has.",
+      );
+    }
+    const { projectId } = projectAccess;
     let exportRequest: OtlpExportTraceRequest;
     try {
       const payload = await readPayload(context.req.raw, contentEncoding);
@@ -196,7 +204,7 @@ async function readWithinLimit(decodedStream: ReadableStream<Uint8Array>): Promi
 
 function respondWithError(
   context: Context,
-  statusCode: 400 | 401 | 413 | 415 | 503,
+  statusCode: 400 | 401 | 403 | 413 | 415 | 503,
   errorCode: string,
   errorMessage: string,
 ): Response {

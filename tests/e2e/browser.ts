@@ -10,11 +10,7 @@ import {
   type Locator,
   type Page,
 } from "playwright-core";
-import type { RunningDeployment } from "./deployment.ts";
-
-/** Kept in step with apps/web/src/api-key/api-key-storage.ts. */
-const API_KEY_STORAGE_KEY = "extispex.api-key";
-const INSTANCE_ADMIN_KEY_STORAGE_KEY = "extispex.instance-admin-key";
+import type { LocalAccount, RunningDeployment } from "./deployment.ts";
 
 export async function launchBrowser(): Promise<Browser> {
   try {
@@ -39,10 +35,8 @@ export interface UiSession {
 interface OpenUiOptions {
   width: number;
   height?: number;
-  /** The key stored before the page loads; null opens the UI without one. */
-  apiKey: string | null;
-  /** The Instance admin key stored before the page loads, for the Projects pages. */
-  instanceAdminKey?: string | null;
+  /** The account signed in before the page loads; null opens the UI signed out. */
+  account: LocalAccount | null;
   colorScheme?: "light" | "dark";
   path?: string;
 }
@@ -50,8 +44,7 @@ interface OpenUiOptions {
 export async function openUi(
   browser: Browser,
   deployment: RunningDeployment,
-  { width, height = 900, apiKey, instanceAdminKey = null, colorScheme = "light", path = "/" }:
-    OpenUiOptions,
+  { width, height = 900, account, colorScheme = "light", path = "/" }: OpenUiOptions,
 ): Promise<UiSession> {
   const context = await browser.newContext({
     baseURL: deployment.gatewayUrl,
@@ -61,30 +54,16 @@ export async function openUi(
     timezoneId: "UTC",
     reducedMotion: "reduce",
   });
-  const storedKeys: [string, string][] = [];
-  if (apiKey !== null) storedKeys.push([API_KEY_STORAGE_KEY, apiKey]);
-  if (instanceAdminKey !== null) {
-    storedKeys.push([INSTANCE_ADMIN_KEY_STORAGE_KEY, instanceAdminKey]);
-  }
-  if (storedKeys.length > 0) {
-    await context.addInitScript(
-      (keysToStore) => {
-        // Only on the first load, so that a test can still disconnect and reload.
-        if (sessionStorage.getItem("e2e-keys-seeded") === null) {
-          for (const [storageKey, storedValue] of keysToStore) {
-            localStorage.setItem(storageKey, storedValue);
-          }
-          sessionStorage.setItem("e2e-keys-seeded", "yes");
-        }
-      },
-      storedKeys,
-    );
+  if (account !== null) {
+    // The context's requests share its cookies, so the page starts signed in.
+    const signInResponse = await context.request.post("/v1/sign-in", { data: account });
+    assertEquals(signInResponse.status(), 200, await signInResponse.text());
   }
   const page = await context.newPage();
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(`page error: ${error.message}`));
   page.on("console", (message) => {
-    // A rejected API key is an expected 401 that the browser logs as a failed resource.
+    // An ended sign-in is an expected 401 that the browser logs as a failed resource.
     if (message.type() === "error" && !message.text().includes("401")) {
       pageErrors.push(`console error: ${message.text()}`);
     }

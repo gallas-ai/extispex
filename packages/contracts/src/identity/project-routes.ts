@@ -1,7 +1,9 @@
 import { createRoute } from "@hono/zod-openapi";
 import { z } from "zod";
-import { describeErrorResponse, instanceAdminKeySecurity } from "../openapi-route-parts.ts";
+import { accessTokenSecurity, describeErrorResponse } from "../openapi-route-parts.ts";
+import { accessRoutes } from "./access-routes.ts";
 import {
+  accessibleProjectSchema,
   createApiKeyRequestSchema,
   createdApiKeySchema,
   createProjectRequestSchema,
@@ -27,7 +29,8 @@ function jsonResponse<Schema extends z.ZodType>(description: string, schema: Sch
 
 const adminErrorResponses = {
   400: describeErrorResponse("The request is invalid."),
-  401: describeErrorResponse("The Instance admin key is missing or invalid."),
+  401: describeErrorResponse("The access token is missing, invalid or not a user's."),
+  403: describeErrorResponse("The user is not allowed to do this."),
 };
 
 const projectNotFound = describeErrorResponse("No Project with this ID exists, or it is deleted.");
@@ -35,9 +38,9 @@ const projectNotFound = describeErrorResponse("No Project with this ID exists, o
 export const createProjectRoute = createRoute({
   method: "post",
   path: "/v1/projects",
-  summary: "Create a Project.",
+  summary: "Create a Project. Takes an Instance admin.",
   tags: TAGS,
-  security: instanceAdminKeySecurity,
+  security: accessTokenSecurity,
   request: { body: jsonBody(createProjectRequestSchema) },
   responses: {
     201: jsonResponse("The new Project.", projectSchema),
@@ -49,11 +52,12 @@ export const createProjectRoute = createRoute({
 export const listProjectsRoute = createRoute({
   method: "get",
   path: "/v1/projects",
-  summary: "List the Instance's Projects by name. Deleted Projects are left out.",
+  summary: "List the Projects the user has a Role in, or every Project for an Instance admin, " +
+    "by name. Deleted Projects are left out.",
   tags: TAGS,
-  security: instanceAdminKeySecurity,
+  security: accessTokenSecurity,
   responses: {
-    200: jsonResponse("The Projects.", listProjectsResponseSchema),
+    200: jsonResponse("The Projects with the user's Role in each.", listProjectsResponseSchema),
     ...adminErrorResponses,
   },
 });
@@ -61,12 +65,12 @@ export const listProjectsRoute = createRoute({
 export const getProjectRoute = createRoute({
   method: "get",
   path: "/v1/projects/{projectId}",
-  summary: "Get a Project.",
+  summary: "Get a Project in which the user has a Role, or any Project for an Instance admin.",
   tags: TAGS,
-  security: instanceAdminKeySecurity,
+  security: accessTokenSecurity,
   request: { params: projectPathParameters },
   responses: {
-    200: jsonResponse("The Project.", projectSchema),
+    200: jsonResponse("The Project with the user's Role in it.", accessibleProjectSchema),
     ...adminErrorResponses,
     404: projectNotFound,
   },
@@ -75,9 +79,9 @@ export const getProjectRoute = createRoute({
 export const deleteProjectRoute = createRoute({
   method: "delete",
   path: "/v1/projects/{projectId}",
-  summary: "Delete a Project. Its API keys stop working within a minute.",
+  summary: "Delete a Project. Its API keys stop working within a minute. Takes an Instance admin.",
   tags: TAGS,
-  security: instanceAdminKeySecurity,
+  security: accessTokenSecurity,
   request: { params: projectPathParameters },
   responses: {
     204: { description: "The Project is deleted." },
@@ -89,9 +93,10 @@ export const deleteProjectRoute = createRoute({
 export const createApiKeyRoute = createRoute({
   method: "post",
   path: "/v1/projects/{projectId}/api-keys",
-  summary: "Create a Project API key. The response is the only time the key is shown.",
+  summary: "Create a Project API key, which acts as an `editor`. The response is the only time " +
+    "the key is shown. Takes the Project's `admin` or an Instance admin.",
   tags: TAGS,
-  security: instanceAdminKeySecurity,
+  security: accessTokenSecurity,
   request: { params: projectPathParameters, body: jsonBody(createApiKeyRequestSchema) },
   responses: {
     201: jsonResponse("The new key, including its secret value.", createdApiKeySchema),
@@ -103,9 +108,10 @@ export const createApiKeyRoute = createRoute({
 export const listApiKeysRoute = createRoute({
   method: "get",
   path: "/v1/projects/{projectId}/api-keys",
-  summary: "List a Project's API keys, newest first, including revoked ones.",
+  summary: "List a Project's API keys, newest first, including revoked ones. Takes the " +
+    "Project's `admin` or an Instance admin.",
   tags: TAGS,
-  security: instanceAdminKeySecurity,
+  security: accessTokenSecurity,
   request: { params: projectPathParameters },
   responses: {
     200: jsonResponse("The keys, without their secret values.", listApiKeysResponseSchema),
@@ -117,9 +123,10 @@ export const listApiKeysRoute = createRoute({
 export const revokeApiKeyRoute = createRoute({
   method: "delete",
   path: "/v1/projects/{projectId}/api-keys/{apiKeyId}",
-  summary: "Revoke an API key. It stops working within a minute and stays listed as revoked.",
+  summary: "Revoke an API key. It stops working within a minute and stays listed as revoked. " +
+    "Takes the Project's `admin` or an Instance admin.",
   tags: TAGS,
-  security: instanceAdminKeySecurity,
+  security: accessTokenSecurity,
   request: { params: apiKeyPathParameters },
   responses: {
     204: { description: "The key is revoked, now or earlier." },
@@ -130,6 +137,7 @@ export const revokeApiKeyRoute = createRoute({
 
 /** The Identity service's endpoints, all reachable through the Gateway. */
 export const identityPublicRoutes = [
+  ...accessRoutes,
   createProjectRoute,
   listProjectsRoute,
   getProjectRoute,

@@ -4,29 +4,27 @@ interface LoadErrorProps {
   /** What could not be loaded, for example "Traces". */
   subject: string;
   message: string;
-  isApiKeyRejected: boolean;
+  isSignInRequired: boolean;
   onRetry: () => void;
-  onDisconnect: () => void;
+  onSignInRequired: () => void;
 }
 
-/** A page-level error, offering another API key when the current one was refused. */
+/** A page-level error, offering to sign in again when the browser's sign-in has ended. */
 export function LoadError(
-  { subject, message, isApiKeyRejected, onRetry, onDisconnect }: LoadErrorProps,
+  { subject, message, isSignInRequired, onRetry, onSignInRequired }: LoadErrorProps,
 ) {
   return (
     <div className="empty-state empty-state-error" role="alert">
       <span className="empty-state-icon">
         <AlertIcon size={22} />
       </span>
-      <h2>
-        {isApiKeyRejected ? "The API key was not accepted" : `${subject} could not be loaded`}
-      </h2>
+      <h2>{isSignInRequired ? "Your sign-in has ended" : `${subject} could not be loaded`}</h2>
       <p>{message}</p>
       <div className="button-row">
-        {isApiKeyRejected
+        {isSignInRequired
           ? (
-            <button type="button" className="button button-primary" onClick={onDisconnect}>
-              Use a different key
+            <button type="button" className="button button-primary" onClick={onSignInRequired}>
+              Sign in again
             </button>
           )
           : (

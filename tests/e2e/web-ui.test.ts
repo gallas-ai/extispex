@@ -8,6 +8,7 @@ import type { Browser, Page } from "playwright-core";
 import {
   assertNoHorizontalOverflow,
   assertNoPageErrors,
+  forgetExpectedRequestFailures,
   launchBrowser,
   measureHorizontalOverflow,
   openUi,
@@ -59,30 +60,48 @@ Deno.test({
       const openBrowser = browser;
       const agentSessionPath = `/?sessionId=${encodeURIComponent(seededTraces.agentSessionId)}`;
 
-      await testContext.step("connects with an API key and shows it masked", async () => {
-        const uiSession = await openUi(openBrowser, deployment, { width: 1280, apiKey: null });
-        const { page } = uiSession;
-        await page.getByRole("heading", { name: "Connect to your Project" }).waitFor();
-        await page.getByLabel("API key", { exact: true }).fill(deployment.apiKey);
-        await page.getByRole("button", { name: "Connect" }).click();
-        await page.getByRole("heading", { name: "Traces", level: 1 }).waitFor();
-        assertEquals(
-          (await page.locator(".api-key-trigger").innerText()).trim(),
-          `••••${deployment.apiKey.slice(-4)}`,
-        );
-        assertNoPageErrors(uiSession);
-        await uiSession.close();
-      });
+      await testContext.step(
+        "signs in and shows the first Project with the user's Role",
+        async () => {
+          const uiSession = await openUi(openBrowser, deployment, { width: 1280, account: null });
+          const { page } = uiSession;
+          await page.getByRole("heading", { name: "Sign in to Extispex" }).waitFor();
+          await page.getByLabel("Email").fill(deployment.admin.email);
+          await page.getByLabel("Password", { exact: true }).fill(deployment.admin.password);
+          await page.getByRole("button", { name: "Sign in" }).click();
+          await page.getByRole("heading", { name: "Traces", level: 1 }).waitFor();
+          assertEquals(
+            (await page.locator(".project-switcher-trigger").innerText()).replace(/\s+/g, " ")
+              .trim(),
+            "Default admin",
+          );
+          // A reload keeps the browser signed in: the cookie gets a new access token.
+          await page.reload();
+          await page.getByRole("heading", { name: "Traces", level: 1 }).waitFor();
+          assertNoPageErrors(uiSession);
+          await uiSession.close();
+        },
+      );
 
-      await testContext.step("explains a rejected API key and offers another", async () => {
-        const uiSession = await openUi(openBrowser, deployment, {
-          width: 1280,
-          apiKey: "not-a-valid-key",
-        });
+      await testContext.step("explains a wrong password and signs out", async () => {
+        const uiSession = await openUi(openBrowser, deployment, { width: 1280, account: null });
         const { page } = uiSession;
-        await page.getByRole("heading", { name: "The API key was not accepted" }).waitFor();
-        await page.getByRole("button", { name: "Use a different key" }).click();
-        await page.getByRole("heading", { name: "Connect to your Project" }).waitFor();
+        await page.getByLabel("Email").fill(deployment.admin.email);
+        await page.getByLabel("Password", { exact: true }).fill("not-the-password");
+        await page.getByRole("button", { name: "Sign in" }).click();
+        assertStringIncludes(
+          await page.locator(".connect-form [role=alert]").innerText(),
+          "email address or password is wrong",
+        );
+        await page.getByLabel("Password", { exact: true }).fill(deployment.admin.password);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("heading", { name: "Traces", level: 1 }).waitFor();
+        await page.locator(".user-menu-trigger").click();
+        await page.getByRole("button", { name: "Sign out" }).click();
+        await page.getByRole("heading", { name: "Sign in to Extispex" }).waitFor();
+        await page.reload();
+        await page.getByRole("heading", { name: "Sign in to Extispex" }).waitFor();
+        forgetExpectedRequestFailures(uiSession, [401]);
         assertNoPageErrors(uiSession);
         await uiSession.close();
       });
@@ -99,7 +118,7 @@ Deno.test({
           async () => {
             const uiSession = await openUi(openBrowser, deployment, {
               width,
-              apiKey: deployment.apiKey,
+              account: deployment.admin,
               path: agentSessionPath,
             });
             const { page } = uiSession;
@@ -127,7 +146,7 @@ Deno.test({
           async () => {
             const uiSession = await openUi(openBrowser, deployment, {
               width,
-              apiKey: deployment.apiKey,
+              account: deployment.admin,
               path: agentSessionPath,
             });
             const { page } = uiSession;
@@ -159,7 +178,7 @@ Deno.test({
       await testContext.step("never scrolls sideways at any window width", async () => {
         const uiSession = await openUi(openBrowser, deployment, {
           width: SWEPT_WIDTHS[0],
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           path: agentSessionPath,
         });
         const { page } = uiSession;
@@ -185,7 +204,7 @@ Deno.test({
       await testContext.step("shows the span tree with the root span selected", async () => {
         const uiSession = await openUi(openBrowser, deployment, {
           width: 1440,
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           path: agentSessionPath,
         });
         const { page } = uiSession;
@@ -209,7 +228,7 @@ Deno.test({
       await testContext.step("shows a model span's tokens and its messages as JSON", async () => {
         const uiSession = await openUi(openBrowser, deployment, {
           width: 1440,
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           path: agentSessionPath,
         });
         const { page } = uiSession;
@@ -231,7 +250,7 @@ Deno.test({
       await testContext.step("shows a failed span's status message", async () => {
         const uiSession = await openUi(openBrowser, deployment, {
           width: 1440,
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           path: agentSessionPath,
         });
         const { page } = uiSession;
@@ -250,7 +269,7 @@ Deno.test({
         async () => {
           const uiSession = await openUi(openBrowser, deployment, {
             width: 1440,
-            apiKey: deployment.apiKey,
+            account: deployment.admin,
             path: agentSessionPath,
           });
           const { page } = uiSession;
@@ -281,7 +300,7 @@ Deno.test({
       await testContext.step("keeps the open trace in the URL and closes it", async () => {
         const uiSession = await openUi(openBrowser, deployment, {
           width: 1440,
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           path: agentSessionPath,
         });
         const { page } = uiSession;
@@ -317,7 +336,7 @@ Deno.test({
       await testContext.step("filters the list by a trace's Session", async () => {
         const uiSession = await openUi(openBrowser, deployment, {
           width: 1440,
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           path: `/?correlationId=${encodeURIComponent(seededTraces.otherCorrelationId)}`,
         });
         const { page } = uiSession;
@@ -344,7 +363,7 @@ Deno.test({
         const uiSession = await openUi(openBrowser, deployment, {
           width: 1000,
           height: 800,
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           path: agentSessionPath,
         });
         const { page } = uiSession;
@@ -366,7 +385,7 @@ Deno.test({
         const uiSession = await openUi(openBrowser, deployment, {
           width: 390,
           height: 844,
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           path: agentSessionPath,
         });
         const { page } = uiSession;
@@ -389,7 +408,7 @@ Deno.test({
       await testContext.step("switches between light and dark and remembers it", async () => {
         const uiSession = await openUi(openBrowser, deployment, {
           width: 1280,
-          apiKey: deployment.apiKey,
+          account: deployment.admin,
           colorScheme: "light",
           path: agentSessionPath,
         });

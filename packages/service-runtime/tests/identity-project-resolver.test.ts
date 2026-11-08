@@ -1,10 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import type { ServiceClient } from "@extispex/service-client";
-import {
-  authenticateProject,
-  createIdentityProjectResolver,
-  ProjectResolutionUnavailableError,
-} from "../src/project-authentication.ts";
+import { IdentityUnavailableError } from "../src/identity-unavailable-error.ts";
+import { createIdentityProjectResolver } from "../src/project-authentication.ts";
 
 /** Stands in for Identity: knows a fixed set of keys and counts the calls it receives. */
 interface FakeIdentity {
@@ -107,25 +104,15 @@ Deno.test("reports an unavailable Identity without caching it", async () => {
 
   await assertRejects(
     () => projectResolver.resolveProjectId("working-key"),
-    ProjectResolutionUnavailableError,
+    IdentityUnavailableError,
     "unreachable",
   );
   identityAnswer = () => Promise.resolve(new Response("overloaded", { status: 503 }));
   await assertRejects(
     () => projectResolver.resolveProjectId("working-key"),
-    ProjectResolutionUnavailableError,
+    IdentityUnavailableError,
     "status 503",
   );
   identityAnswer = () => Promise.resolve(Response.json({ projectId: "project-one" }));
   assertEquals(await projectResolver.resolveProjectId("working-key"), "project-one");
-});
-
-Deno.test("reads the API key from a bearer Authorization header", async () => {
-  const fakeIdentity = createFakeIdentity({ "working-key": "project-one" });
-  const projectResolver = createIdentityProjectResolver({ identityClient: fakeIdentity.client });
-  assertEquals(await authenticateProject(projectResolver, "Bearer working-key"), "project-one");
-  assertEquals(await authenticateProject(projectResolver, "bearer working-key"), "project-one");
-  assertEquals(await authenticateProject(projectResolver, "Basic working-key"), null);
-  assertEquals(await authenticateProject(projectResolver, undefined), null);
-  assertEquals(fakeIdentity.callCount, 1);
 });

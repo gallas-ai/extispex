@@ -11,27 +11,24 @@ import {
   movePromptLabelRoute,
   removePromptLabelRoute,
 } from "@extispex/contracts";
-import { authenticateProject, type ProjectResolver } from "@extispex/service-runtime";
+import {
+  type ProjectAccessEnvironment,
+  type RequestAuthenticator,
+  requireProjectAccess,
+} from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { PromptRepository } from "../storage/prompt-repository.ts";
 import { comparePromptVersions } from "./prompt-version-comparison.ts";
 import { createNewPromptVersion } from "./prompt-versions.ts";
 
 /** Hono context variables set by the authentication middleware. */
-export interface PromptServiceEnvironment {
-  Variables: { projectId: string };
-}
+export type PromptServiceEnvironment = ProjectAccessEnvironment;
 
 export interface PromptRouteDependencies {
   promptRepository: PromptRepository;
-  projectResolver: ProjectResolver;
+  requestAuthenticator: RequestAuthenticator;
   readCurrentTime: () => Date;
 }
-
-const unauthenticatedError = createErrorResponse(
-  "unauthenticated",
-  "A valid API key is required in the Authorization header as a Bearer token.",
-);
 
 function promptNotFoundError(promptName: string) {
   return createErrorResponse("not_found", `Prompt ${promptName} was not found.`);
@@ -54,22 +51,13 @@ export function registerPromptRoutes(
 ): void {
   const { promptRepository } = dependencies;
 
-  app.use("/v1/*", async (context, next) => {
-    const projectId = await authenticateProject(
-      dependencies.projectResolver,
-      context.req.header("authorization"),
-    );
-    if (projectId === null) {
-      return context.json(unauthenticatedError, 401);
-    }
-    context.set("projectId", projectId);
-    await next();
-  });
+  // Reading takes the Role viewer, and every change editor.
+  app.use("/v1/*", requireProjectAccess(dependencies.requestAuthenticator));
 
   app.openapi(createPromptRoute, async (context) => {
     const request = context.req.valid("json");
     const creation = await promptRepository.createPrompt(
-      context.get("projectId"),
+      context.get("projectAccess").projectId,
       { name: request.name, description: request.description?.trim() ?? "" },
       createNewPromptVersion(request),
       dependencies.readCurrentTime(),
@@ -84,20 +72,26 @@ export function registerPromptRoutes(
   });
 
   app.openapi(listPromptsRoute, async (context) => {
-    const prompts = await promptRepository.listPrompts(context.get("projectId"));
+    const prompts = await promptRepository.listPrompts(context.get("projectAccess").projectId);
     return context.json({ prompts }, 200);
   });
 
   app.openapi(getPromptRoute, async (context) => {
     const { promptName } = context.req.valid("param");
-    const prompt = await promptRepository.findPrompt(context.get("projectId"), promptName);
+    const prompt = await promptRepository.findPrompt(
+      context.get("projectAccess").projectId,
+      promptName,
+    );
     if (prompt === null) return context.json(promptNotFoundError(promptName), 404);
     return context.json(await promptRepository.readPromptSummary(prompt), 200);
   });
 
   app.openapi(createPromptVersionRoute, async (context) => {
     const { promptName } = context.req.valid("param");
-    const prompt = await promptRepository.findPrompt(context.get("projectId"), promptName);
+    const prompt = await promptRepository.findPrompt(
+      context.get("projectAccess").projectId,
+      promptName,
+    );
     if (prompt === null) return context.json(promptNotFoundError(promptName), 404);
     const version = await promptRepository.addVersion(
       prompt,
@@ -109,14 +103,20 @@ export function registerPromptRoutes(
 
   app.openapi(listPromptVersionsRoute, async (context) => {
     const { promptName } = context.req.valid("param");
-    const prompt = await promptRepository.findPrompt(context.get("projectId"), promptName);
+    const prompt = await promptRepository.findPrompt(
+      context.get("projectAccess").projectId,
+      promptName,
+    );
     if (prompt === null) return context.json(promptNotFoundError(promptName), 404);
     return context.json({ versions: await promptRepository.listVersions(prompt) }, 200);
   });
 
   app.openapi(getPromptVersionRoute, async (context) => {
     const { promptName, versionNumber } = context.req.valid("param");
-    const prompt = await promptRepository.findPrompt(context.get("projectId"), promptName);
+    const prompt = await promptRepository.findPrompt(
+      context.get("projectAccess").projectId,
+      promptName,
+    );
     if (prompt === null) return context.json(promptNotFoundError(promptName), 404);
     const version = await promptRepository.findVersion(prompt, versionNumber);
     if (version === null) {
@@ -127,7 +127,10 @@ export function registerPromptRoutes(
 
   app.openapi(getPromptVersionByLabelRoute, async (context) => {
     const { promptName, labelName } = context.req.valid("param");
-    const prompt = await promptRepository.findPrompt(context.get("projectId"), promptName);
+    const prompt = await promptRepository.findPrompt(
+      context.get("projectAccess").projectId,
+      promptName,
+    );
     if (prompt === null) return context.json(promptNotFoundError(promptName), 404);
     const version = await promptRepository.findVersionByLabel(prompt, labelName);
     if (version === null) return context.json(labelNotFoundError(promptName, labelName), 404);
@@ -137,7 +140,10 @@ export function registerPromptRoutes(
   app.openapi(movePromptLabelRoute, async (context) => {
     const { promptName, labelName } = context.req.valid("param");
     const { versionNumber } = context.req.valid("json");
-    const prompt = await promptRepository.findPrompt(context.get("projectId"), promptName);
+    const prompt = await promptRepository.findPrompt(
+      context.get("projectAccess").projectId,
+      promptName,
+    );
     if (prompt === null) return context.json(promptNotFoundError(promptName), 404);
     const label = await promptRepository.moveLabel(
       prompt,
@@ -153,7 +159,10 @@ export function registerPromptRoutes(
 
   app.openapi(removePromptLabelRoute, async (context) => {
     const { promptName, labelName } = context.req.valid("param");
-    const prompt = await promptRepository.findPrompt(context.get("projectId"), promptName);
+    const prompt = await promptRepository.findPrompt(
+      context.get("projectAccess").projectId,
+      promptName,
+    );
     if (prompt === null) return context.json(promptNotFoundError(promptName), 404);
     if (!await promptRepository.removeLabel(prompt, labelName)) {
       return context.json(labelNotFoundError(promptName, labelName), 404);
@@ -166,7 +175,10 @@ export function registerPromptRoutes(
     const { fromVersion: fromVersionNumber, toVersion: toVersionNumber } = context.req.valid(
       "query",
     );
-    const prompt = await promptRepository.findPrompt(context.get("projectId"), promptName);
+    const prompt = await promptRepository.findPrompt(
+      context.get("projectAccess").projectId,
+      promptName,
+    );
     if (prompt === null) return context.json(promptNotFoundError(promptName), 404);
     const [fromVersion, toVersion] = await Promise.all([
       promptRepository.findVersion(prompt, fromVersionNumber),

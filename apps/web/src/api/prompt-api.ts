@@ -8,74 +8,85 @@ import type {
   PromptVersion,
   PromptVersionComparison,
 } from "@extispex/contracts";
-import { requestJson } from "./api-request.ts";
+import { type ApiCredentials, requestJson } from "./api-request.ts";
 
 function promptPath(promptName: string): string {
   return `/v1/prompts/${encodeURIComponent(promptName)}`;
 }
 
-export function listPrompts(apiKey: string): Promise<ListPromptsResponse> {
-  return requestJson(apiKey, "/v1/prompts");
+export function listPrompts(credentials: ApiCredentials): Promise<ListPromptsResponse> {
+  return requestJson(credentials, "/v1/prompts");
 }
 
-export function getPrompt(apiKey: string, promptName: string): Promise<PromptSummary> {
-  return requestJson(apiKey, promptPath(promptName));
+export function getPrompt(credentials: ApiCredentials, promptName: string): Promise<PromptSummary> {
+  return requestJson(credentials, promptPath(promptName));
 }
 
-export function createPrompt(apiKey: string, request: CreatePromptRequest): Promise<PromptVersion> {
-  return requestJson(apiKey, "/v1/prompts", { method: "POST", body: request });
+export function createPrompt(
+  credentials: ApiCredentials,
+  request: CreatePromptRequest,
+): Promise<PromptVersion> {
+  return requestJson(credentials, "/v1/prompts", { method: "POST", body: request });
 }
 
 export function createPromptVersion(
-  apiKey: string,
+  credentials: ApiCredentials,
   promptName: string,
   request: CreatePromptVersionRequest,
 ): Promise<PromptVersion> {
-  return requestJson(apiKey, `${promptPath(promptName)}/versions`, {
+  return requestJson(credentials, `${promptPath(promptName)}/versions`, {
     method: "POST",
     body: request,
   });
 }
 
 export function listPromptVersions(
-  apiKey: string,
+  credentials: ApiCredentials,
   promptName: string,
 ): Promise<ListPromptVersionsResponse> {
-  return requestJson(apiKey, `${promptPath(promptName)}/versions`);
+  return requestJson(credentials, `${promptPath(promptName)}/versions`);
 }
 
 export function getPromptVersion(
-  apiKey: string,
+  credentials: ApiCredentials,
   promptName: string,
   versionNumber: number,
 ): Promise<PromptVersion> {
-  return requestJson(apiKey, `${promptPath(promptName)}/versions/${versionNumber}`);
+  return requestJson(credentials, `${promptPath(promptName)}/versions/${versionNumber}`);
 }
 
 export function movePromptLabel(
-  apiKey: string,
+  credentials: ApiCredentials,
   promptName: string,
   labelName: string,
   versionNumber: number,
 ): Promise<PromptLabel> {
-  return requestJson(apiKey, `${promptPath(promptName)}/labels/${encodeURIComponent(labelName)}`, {
-    method: "PUT",
-    body: { versionNumber },
-  });
+  return requestJson(
+    credentials,
+    `${promptPath(promptName)}/labels/${encodeURIComponent(labelName)}`,
+    {
+      method: "PUT",
+      body: { versionNumber },
+    },
+  );
 }
 
 export function removePromptLabel(
-  apiKey: string,
+  credentials: ApiCredentials,
   promptName: string,
   labelName: string,
 ): Promise<null> {
-  return requestJson(apiKey, `${promptPath(promptName)}/labels/${encodeURIComponent(labelName)}`, {
-    method: "DELETE",
-  });
+  return requestJson(
+    credentials,
+    `${promptPath(promptName)}/labels/${encodeURIComponent(labelName)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export function comparePromptVersions(
-  apiKey: string,
+  credentials: ApiCredentials,
   promptName: string,
   fromVersion: number,
   toVersion: number,
@@ -84,5 +95,5 @@ export function comparePromptVersions(
     fromVersion: String(fromVersion),
     toVersion: String(toVersion),
   });
-  return requestJson(apiKey, `${promptPath(promptName)}/compare?${searchParameters}`);
+  return requestJson(credentials, `${promptPath(promptName)}/compare?${searchParameters}`);
 }

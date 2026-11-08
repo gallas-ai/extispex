@@ -107,7 +107,8 @@ jobs:
           docker run -d --name all-in-one --user 1000870000:0 \
             -p 4317:4317 -p 4318:4318 -p 8080:8080 \
             -v "$RUNNER_TEMP/certs:/certs:ro" \
-            -e INSTANCE_ADMIN_KEY=extispex_admin_e2eInstanceAdminKey000000000000000 \
+            -e BOOTSTRAP_ADMIN_EMAIL=admin@e2e.extispex.test \
+            -e BOOTSTRAP_ADMIN_PASSWORD=e2e-admin-password \
             -e BOOTSTRAP_PROJECT_API_KEY=extispex_e2eProjectApiKey00000000000000000000000 \
             -e TELEMETRY_GRPC_TLS_CERTIFICATE_FILE=/certs/cert.pem \
             -e TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE=/certs/key.pem \
@@ -126,7 +127,8 @@ jobs:
           E2E_OTLP_HTTP_URL: http://127.0.0.1:4318
           E2E_OTLP_GRPC_ADDRESS: localhost:4317
           E2E_API_KEY: extispex_e2eProjectApiKey00000000000000000000000
-          E2E_INSTANCE_ADMIN_KEY: extispex_admin_e2eInstanceAdminKey000000000000000
+          E2E_ADMIN_EMAIL: admin@e2e.extispex.test
+          E2E_ADMIN_PASSWORD: e2e-admin-password
           E2E_GRPC_ROOT_CERTIFICATE_FILE: ${{ runner.temp }}/certs/cert.pem
       - name: Container logs
         if: failure()

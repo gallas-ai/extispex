@@ -25,6 +25,8 @@ export interface GatewayService {
 
 /** Forwarded request headers. Everything else stays at the gateway. */
 const FORWARDED_HEADER_NAMES = ["authorization", "accept", "content-type"];
+/** Identity also gets cookies, for the sign-in cookie; no other service sees them. */
+const IDENTITY_FORWARDED_HEADER_NAMES = [...FORWARDED_HEADER_NAMES, "cookie"];
 
 const SERVICE_DISPLAY_NAMES: Record<PublicApiServiceName, string> = {
   telemetry: "Telemetry",
@@ -86,7 +88,10 @@ function createForwarder(
   const serviceClient = dependencies.serviceClients[serviceName];
   const serviceDisplayName = SERVICE_DISPLAY_NAMES[serviceName];
   return async (request) => {
-    const forwardedRequest = await createForwardedRequest(request);
+    const forwardedRequest = await createForwardedRequest(
+      request,
+      serviceName === "identity" ? IDENTITY_FORWARDED_HEADER_NAMES : FORWARDED_HEADER_NAMES,
+    );
     try {
       return await serviceClient(forwardedRequest);
     } catch (error) {
@@ -107,14 +112,23 @@ export function convertOpenApiPathToHonoPath(openApiPath: string): string {
   return openApiPath.replaceAll(/\{([^}]+)\}/g, ":$1");
 }
 
-async function createForwardedRequest(request: Request): Promise<Request> {
+async function createForwardedRequest(
+  request: Request,
+  forwardedHeaderNames: string[],
+): Promise<Request> {
   const forwardedHeaders = new Headers();
-  for (const headerName of FORWARDED_HEADER_NAMES) {
+  for (const headerName of forwardedHeaderNames) {
     const headerValue = request.headers.get(headerName);
     if (headerValue !== null) {
       forwardedHeaders.set(headerName, headerValue);
     }
   }
+  // Identity marks the sign-in cookie Secure when the browser used HTTPS. A proxy in front of the
+  // Gateway that terminates TLS says so in this header already.
+  forwardedHeaders.set(
+    "x-forwarded-proto",
+    request.headers.get("x-forwarded-proto") ?? new URL(request.url).protocol.replace(":", ""),
+  );
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   return new Request(request.url, {
     method: request.method,

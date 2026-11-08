@@ -1,14 +1,21 @@
-import { assert, assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
 import type {
+  AccessibleProject,
+  AccessTokenResponse,
   ApiKey,
   CreatedApiKey,
+  Group,
   ListApiKeysResponse,
   ListProjectsResponse,
+  ListRoleAssignmentsResponse,
+  ListUsersResponse,
   Project,
+  User,
 } from "@extispex/contracts";
-import { createStructuredLogger } from "@extispex/service-runtime";
+import { createAccessTokenVerifier, createStructuredLogger } from "@extispex/service-runtime";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import {
+  createFirstAdministratorIfNone,
   createFirstProjectIfNone,
   createIdentityService,
   type IdentityDatabase,
@@ -16,11 +23,18 @@ import {
   openIdentityDatabase,
 } from "../src/create-service.ts";
 
-const INSTANCE_ADMIN_KEY = "test-instance-admin-key-with-enough-characters";
+const ADMIN_EMAIL = "admin@example.com";
+const ADMIN_PASSWORD = "first-admin-password";
+const USER_PASSWORD = "a-user-password";
+const EVALUATION_CLIENT_SECRET = "evaluation-client-secret-with-enough-characters";
+/** Fast hashes keep the tests quick; production uses 600,000 iterations. */
+const PASSWORD_HASH_ITERATIONS = 1_000;
 
 interface IdentityTestContext {
   identityService: IdentityService;
   database: IdentityDatabase;
+  /** The first administrator's sign-in, created for every test. */
+  admin: SignedInBrowser;
 }
 
 type IdentityTestBody = (testContext: IdentityTestContext) => Promise<void>;
@@ -34,36 +48,77 @@ function defineIdentityTest(testName: string, testBody: IdentityTestBody): void 
   }
 }
 
+const IDENTITY_TABLES = [
+  "sign_ins",
+  "group_members",
+  "role_assignments",
+  "groups",
+  "users",
+  "api_keys",
+  "projects",
+  "signing_keys",
+];
+
+function createTestIdentityService(
+  database: IdentityDatabase,
+  options: { areLocalAccountsEnabled?: boolean } = {},
+): IdentityService {
+  let clockMilliseconds = Date.parse("2026-11-07T10:00:00Z");
+  return createIdentityService({
+    database,
+    areLocalAccountsEnabled: options.areLocalAccountsEnabled ?? true,
+    serviceClientSecrets: new Map([["evaluation", EVALUATION_CLIENT_SECRET]]),
+    logger: createStructuredLogger("identity-test"),
+    passwordHashIterations: PASSWORD_HASH_ITERATIONS,
+    // Each reading of the clock is one second later, so that ordering by time is deterministic.
+    readCurrentTime: () => new Date(clockMilliseconds += 1_000),
+  });
+}
+
 async function withIdentityService(databaseUrl: string, testBody: IdentityTestBody) {
   const database = await openIdentityDatabase(databaseUrl);
   try {
-    await database.orm.em.fork().execute("delete from api_keys");
-    await database.orm.em.fork().execute("delete from projects");
-    let clockMilliseconds = Date.parse("2026-11-07T10:00:00Z");
+    for (const tableName of IDENTITY_TABLES) {
+      await database.orm.em.fork().execute(`delete from ${tableName}`);
+    }
+    await createFirstAdministratorIfNone(
+      database,
+      { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+      { passwordHashIterations: PASSWORD_HASH_ITERATIONS },
+    );
+    const identityService = createTestIdentityService(database);
     await testBody({
       database,
-      identityService: createIdentityService({
-        database,
-        instanceAdminKey: INSTANCE_ADMIN_KEY,
-        logger: createStructuredLogger("identity-test"),
-        // Each request is one second later, so that ordering by time is deterministic.
-        readCurrentTime: () => new Date(clockMilliseconds += 1_000),
-      }),
+      identityService,
+      admin: await signIn(identityService, ADMIN_EMAIL, ADMIN_PASSWORD),
     });
   } finally {
     await database.close();
   }
 }
 
+interface RequestOptions {
+  body?: unknown;
+  bearerToken?: string;
+  cookie?: string;
+  basicCredentials?: string;
+  headers?: Record<string, string>;
+}
+
 async function sendRequest(
   identityService: IdentityService,
   method: string,
   path: string,
-  options: { body?: unknown; bearerToken?: string | null } = {},
+  options: RequestOptions = {},
 ): Promise<Response> {
-  const headers = new Headers();
-  const bearerToken = options.bearerToken === undefined ? INSTANCE_ADMIN_KEY : options.bearerToken;
-  if (bearerToken !== null) headers.set("authorization", `Bearer ${bearerToken}`);
+  const headers = new Headers(options.headers);
+  if (options.bearerToken !== undefined) {
+    headers.set("authorization", `Bearer ${options.bearerToken}`);
+  }
+  if (options.basicCredentials !== undefined) {
+    headers.set("authorization", `Basic ${btoa(options.basicCredentials)}`);
+  }
+  if (options.cookie !== undefined) headers.set("cookie", options.cookie);
   if (options.body !== undefined) headers.set("content-type", "application/json");
   return await identityService.handleRequest(
     new Request(`http://identity.test${path}`, {
@@ -84,25 +139,106 @@ async function expectJson<ResponseBody>(
   return (responseText === "" ? null : JSON.parse(responseText)) as ResponseBody;
 }
 
-function createProject(identityService: IdentityService, name: string) {
-  return expectJson<Project>(
-    sendRequest(identityService, "POST", "/v1/projects", { body: { name } }),
+async function expectErrorCode(responsePromise: Promise<Response>, expectedStatus: number) {
+  return (await expectJson<{ error: { code: string } }>(responsePromise, expectedStatus)).error
+    .code;
+}
+
+/** A browser that signed in: its cookie, and access tokens it gets with it. */
+interface SignedInBrowser {
+  cookie: string;
+  /** An access token without a Project, which manages access. */
+  accessToken: string;
+  requestAccessToken(projectId?: string): Promise<Response>;
+  /** Sends a request with the access token without a Project. */
+  send(method: string, path: string, body?: unknown): Promise<Response>;
+}
+
+async function signIn(
+  identityService: IdentityService,
+  email: string,
+  password: string,
+): Promise<SignedInBrowser> {
+  const response = await sendRequest(identityService, "POST", "/v1/sign-in", {
+    body: { email, password },
+  });
+  await expectJson<User>(Promise.resolve(response), 200);
+  const cookie = response.headers.get("set-cookie")!.split(";")[0];
+  const requestAccessToken = (projectId?: string) =>
+    sendRequest(identityService, "POST", "/v1/sign-in/access-tokens", {
+      cookie,
+      body: projectId === undefined ? {} : { projectId },
+    });
+  const { accessToken } = await expectJson<AccessTokenResponse>(requestAccessToken(), 200);
+  return {
+    cookie,
+    accessToken,
+    requestAccessToken,
+    send: (method, path, body) =>
+      sendRequest(identityService, method, path, { bearerToken: accessToken, body }),
+  };
+}
+
+function createProject(admin: SignedInBrowser, name: string) {
+  return expectJson<Project>(admin.send("POST", "/v1/projects", { name }), 201);
+}
+
+function createApiKey(admin: SignedInBrowser, projectId: string, name: string) {
+  return expectJson<CreatedApiKey>(
+    admin.send("POST", `/v1/projects/${projectId}/api-keys`, { name }),
     201,
   );
 }
 
-function createApiKey(identityService: IdentityService, projectId: string, name: string) {
-  return expectJson<CreatedApiKey>(
-    sendRequest(identityService, "POST", `/v1/projects/${projectId}/api-keys`, { body: { name } }),
+function createUser(admin: SignedInBrowser, email: string, isInstanceAdmin = false) {
+  return expectJson<User>(
+    admin.send("POST", "/v1/users", {
+      email,
+      displayName: email.split("@")[0],
+      password: USER_PASSWORD,
+      isInstanceAdmin,
+    }),
     201,
   );
+}
+
+/** Creates a Group with the user in it and gives the Group the Role in the Project. */
+async function grantRole(
+  admin: SignedInBrowser,
+  user: User,
+  projectId: string,
+  role: string,
+  groupName = `${user.email} ${role}`,
+): Promise<Group> {
+  const group = await expectJson<Group>(admin.send("POST", "/v1/groups", { name: groupName }), 201);
+  await expectJson(admin.send("PUT", `/v1/groups/${group.id}/members/${user.id}`), 200);
+  await expectJson(
+    admin.send("PUT", `/v1/projects/${projectId}/role-assignments/${group.id}`, { role }),
+    200,
+  );
+  return group;
+}
+
+async function requestServiceToken(
+  identityService: IdentityService,
+  body: unknown,
+  basicCredentials = `evaluation:${EVALUATION_CLIENT_SECRET}`,
+) {
+  return await sendRequest(identityService, "POST", "/internal/v1/service-tokens", {
+    basicCredentials,
+    body,
+  });
 }
 
 /** The Project that Identity resolves the key to, as Telemetry and Prompt ask for it. */
 async function resolveApiKey(identityService: IdentityService, apiKey: string) {
+  const { accessToken } = await expectJson<AccessTokenResponse>(
+    requestServiceToken(identityService, {}),
+    200,
+  );
   const response = await sendRequest(identityService, "POST", "/internal/v1/api-keys/resolve", {
     body: { apiKey },
-    bearerToken: null,
+    bearerToken: accessToken,
   });
   const responseBody = await response.json();
   if (response.status === 404) return null;
@@ -110,62 +246,496 @@ async function resolveApiKey(identityService: IdentityService, apiKey: string) {
   return responseBody.projectId as string;
 }
 
-defineIdentityTest("creates and lists Projects by name", async ({ identityService }) => {
-  const checkoutProject = await createProject(identityService, "  checkout-bot ");
-  await createProject(identityService, "assistant");
+defineIdentityTest(
+  "signs in with a local account and keeps the cookie from scripts",
+  async ({ identityService }) => {
+    const response = await sendRequest(identityService, "POST", "/v1/sign-in", {
+      body: { email: "  Admin@Example.com ", password: ADMIN_PASSWORD },
+    });
+    const user = await expectJson<User>(Promise.resolve(response), 200);
+    assertEquals(user.email, ADMIN_EMAIL);
+    assertEquals(user.isInstanceAdmin, true);
+    assert(!JSON.stringify(user).includes("pbkdf2"));
+    const setCookie = response.headers.get("set-cookie")!;
+    assertMatch(setCookie, /^extispex_sign_in=[0-9A-Za-z]{43};/);
+    for (const attribute of ["HttpOnly", "SameSite=Strict", "Path=/v1/sign-in", "Max-Age=43200"]) {
+      assertStringIncludes(setCookie, attribute);
+    }
+    assert(!setCookie.includes("Secure"), "a plain HTTP request gets no Secure cookie");
+
+    const httpsResponse = await sendRequest(identityService, "POST", "/v1/sign-in", {
+      body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+      headers: { "x-forwarded-proto": "https" },
+    });
+    await httpsResponse.body?.cancel();
+    assertStringIncludes(httpsResponse.headers.get("set-cookie")!, "Secure");
+
+    for (
+      const credentials of [
+        { email: ADMIN_EMAIL, password: "wrong-password" },
+        { email: "nobody@example.com", password: ADMIN_PASSWORD },
+      ]
+    ) {
+      assertEquals(
+        await expectErrorCode(
+          sendRequest(identityService, "POST", "/v1/sign-in", { body: credentials }),
+          401,
+        ),
+        "invalid_credentials",
+      );
+    }
+  },
+);
+
+defineIdentityTest(
+  "issues short-lived access tokens to a signed-in browser until it signs out",
+  async ({ identityService, admin }) => {
+    const tokenResponse = await expectJson<AccessTokenResponse>(admin.requestAccessToken(), 200);
+    assertEquals(tokenResponse.projectId, null);
+    assertEquals(tokenResponse.role, null);
+    const issuedAt = Date.parse("2026-11-07T10:00:00Z");
+    assert(Date.parse(tokenResponse.expiresAt) - issuedAt <= 400_000);
+    const currentUser = await expectJson<User>(admin.send("GET", "/v1/me"), 200);
+    assertEquals(currentUser.email, ADMIN_EMAIL);
+
+    await expectJson(
+      sendRequest(identityService, "DELETE", "/v1/sign-in", { cookie: admin.cookie }),
+      204,
+    );
+    assertEquals(await expectErrorCode(admin.requestAccessToken(), 401), "unauthenticated");
+    await expectJson(
+      sendRequest(identityService, "POST", "/v1/sign-in/access-tokens", { body: {} }),
+      401,
+    );
+  },
+);
+
+defineIdentityTest(
+  "refuses local sign-in when local accounts are disabled",
+  async ({ database, admin }) => {
+    const identityService = createTestIdentityService(database, { areLocalAccountsEnabled: false });
+    assertEquals(
+      await expectErrorCode(
+        sendRequest(identityService, "POST", "/v1/sign-in", {
+          body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+        }),
+        403,
+      ),
+      "local_accounts_disabled",
+    );
+    await expectJson(
+      sendRequest(identityService, "POST", "/v1/users", {
+        bearerToken: admin.accessToken,
+        body: { email: "new@example.com", displayName: "New", password: USER_PASSWORD },
+      }),
+      403,
+    );
+  },
+);
+
+defineIdentityTest("requires a user's access token", async ({ identityService, admin }) => {
+  const { accessToken: serviceToken } = await expectJson<AccessTokenResponse>(
+    requestServiceToken(identityService, {}),
+    200,
+  );
+  const project = await createProject(admin, "checkout-bot");
+  const { apiKey } = await createApiKey(admin, project.id, "CI pipeline");
+  for (const bearerToken of [undefined, "wrong-token", apiKey, serviceToken]) {
+    assertEquals(
+      await expectErrorCode(
+        sendRequest(identityService, "GET", "/v1/projects", { bearerToken }),
+        401,
+      ),
+      "unauthenticated",
+    );
+  }
+});
+
+defineIdentityTest(
+  "gives the first administrator the Role admin in the Projects that exist",
+  async ({ database }) => {
+    for (const tableName of IDENTITY_TABLES) {
+      await database.orm.em.fork().execute(`delete from ${tableName}`);
+    }
+    const firstProject = await createFirstProjectIfNone(
+      database,
+      "bootstrap-key-with-at-least-thirty-two-characters",
+    );
+    const firstAdministrator = await createFirstAdministratorIfNone(
+      database,
+      { email: "First@Example.com", password: ADMIN_PASSWORD },
+      { passwordHashIterations: PASSWORD_HASH_ITERATIONS },
+    );
+    assertEquals(firstAdministrator?.email, "first@example.com");
+    assertEquals(
+      await createFirstAdministratorIfNone(database, {
+        email: "second@example.com",
+        password: ADMIN_PASSWORD,
+      }),
+      null,
+    );
+
+    const identityService = createTestIdentityService(database);
+    const admin = await signIn(identityService, "first@example.com", ADMIN_PASSWORD);
+    const tokenResponse = await expectJson<AccessTokenResponse>(
+      admin.requestAccessToken(firstProject!.id),
+      200,
+    );
+    assertEquals(tokenResponse.role, "admin");
+    const { groups } = await expectJson<{ groups: Group[] }>(admin.send("GET", "/v1/groups"), 200);
+    assertEquals(groups.map((group) => [group.name, group.members.map(({ email }) => email)]), [
+      ["Administrators", ["first@example.com"]],
+    ]);
+  },
+);
+
+defineIdentityTest(
+  "lets only Instance admins manage Projects, users and Groups",
+  async ({ identityService, admin }) => {
+    const member = await createUser(admin, "member@example.com");
+    const memberBrowser = await signIn(identityService, member.email, USER_PASSWORD);
+    const project = await createProject(admin, "checkout-bot");
+
+    for (
+      const [method, path, body] of [
+        ["POST", "/v1/projects", { name: "member-project" }],
+        ["DELETE", `/v1/projects/${project.id}`, undefined],
+        ["GET", "/v1/users", undefined],
+        ["POST", "/v1/users", {
+          email: "x@example.com",
+          displayName: "X",
+          password: USER_PASSWORD,
+        }],
+        ["PATCH", `/v1/users/${member.id}`, { isInstanceAdmin: true }],
+        ["POST", "/v1/groups", { name: "Members" }],
+        ["GET", `/v1/projects/${project.id}/role-assignments`, undefined],
+        ["GET", `/v1/projects/${project.id}/api-keys`, undefined],
+      ] as const
+    ) {
+      assertEquals(
+        await expectErrorCode(memberBrowser.send(method, path, body), 403),
+        "forbidden",
+        `${method} ${path}`,
+      );
+    }
+    // A user without a Role cannot see the Project at all.
+    const { projects } = await expectJson<ListProjectsResponse>(
+      memberBrowser.send("GET", "/v1/projects"),
+      200,
+    );
+    assertEquals(projects, []);
+    await expectJson(memberBrowser.send("GET", `/v1/projects/${project.id}`), 404);
+    assertEquals(
+      await expectErrorCode(memberBrowser.requestAccessToken(project.id), 403),
+      "forbidden",
+    );
+    // Every signed-in user can list Groups, so that a Project admin can assign Roles.
+    await expectJson(memberBrowser.send("GET", "/v1/groups"), 200);
+  },
+);
+
+defineIdentityTest(
+  "gives a user the highest Role of their Groups in a Project",
+  async ({ identityService, admin }) => {
+    const project = await createProject(admin, "checkout-bot");
+    const otherProject = await createProject(admin, "assistant");
+    const member = await createUser(admin, "member@example.com");
+    await grantRole(admin, member, project.id, "viewer");
+    const editors = await grantRole(admin, member, project.id, "editor");
+    await grantRole(admin, member, otherProject.id, "viewer", "Assistant viewers");
+    const memberBrowser = await signIn(identityService, member.email, USER_PASSWORD);
+
+    const projectToken = await expectJson<AccessTokenResponse>(
+      memberBrowser.requestAccessToken(project.id),
+      200,
+    );
+    assertEquals([projectToken.projectId, projectToken.role], [project.id, "editor"]);
+    const { projects } = await expectJson<ListProjectsResponse>(
+      memberBrowser.send("GET", "/v1/projects"),
+      200,
+    );
+    assertEquals(projects.map((listed) => [listed.name, listed.role]), [
+      ["assistant", "viewer"],
+      ["checkout-bot", "editor"],
+    ]);
+
+    // Without the editors' Group, the next token carries viewer.
+    await expectJson(admin.send("DELETE", `/v1/groups/${editors.id}/members/${member.id}`), 200);
+    const nextToken = await expectJson<AccessTokenResponse>(
+      memberBrowser.requestAccessToken(project.id),
+      200,
+    );
+    assertEquals(nextToken.role, "viewer");
+  },
+);
+
+defineIdentityTest(
+  "lets a Project's admin manage its Role assignments and API keys, not an editor",
+  async ({ identityService, admin }) => {
+    const project = await createProject(admin, "checkout-bot");
+    const otherProject = await createProject(admin, "assistant");
+    const projectAdmin = await createUser(admin, "lead@example.com");
+    const editor = await createUser(admin, "editor@example.com");
+    await grantRole(admin, projectAdmin, project.id, "admin");
+    const editors = await grantRole(admin, editor, project.id, "editor");
+    const projectAdminBrowser = await signIn(identityService, projectAdmin.email, USER_PASSWORD);
+    const editorBrowser = await signIn(identityService, editor.email, USER_PASSWORD);
+
+    await expectJson(
+      projectAdminBrowser.send("PUT", `/v1/projects/${project.id}/role-assignments/${editors.id}`, {
+        role: "viewer",
+      }),
+      200,
+    );
+    const { roleAssignments } = await expectJson<ListRoleAssignmentsResponse>(
+      projectAdminBrowser.send("GET", `/v1/projects/${project.id}/role-assignments`),
+      200,
+    );
+    assertEquals(
+      roleAssignments.map((assignment) => [assignment.groupName, assignment.role]),
+      [["editor@example.com editor", "viewer"], ["lead@example.com admin", "admin"]],
+    );
+    const { apiKey } = await createApiKey(projectAdminBrowser, project.id, "CI pipeline");
+    assertEquals(await resolveApiKey(identityService, apiKey), project.id);
+
+    await expectJson(
+      editorBrowser.send("PUT", `/v1/projects/${project.id}/role-assignments/${editors.id}`, {
+        role: "admin",
+      }),
+      403,
+    );
+    await expectJson(
+      editorBrowser.send("POST", `/v1/projects/${project.id}/api-keys`, { name: "Mine" }),
+      403,
+    );
+    // The Project admin's Role does not reach another Project.
+    await expectJson(
+      projectAdminBrowser.send("GET", `/v1/projects/${otherProject.id}/role-assignments`),
+      403,
+    );
+
+    await expectJson(
+      projectAdminBrowser.send(
+        "DELETE",
+        `/v1/projects/${project.id}/role-assignments/${editors.id}`,
+      ),
+      204,
+    );
+    assertEquals(
+      await expectErrorCode(editorBrowser.requestAccessToken(project.id), 403),
+      "forbidden",
+    );
+  },
+);
+
+defineIdentityTest("manages users and their deactivation", async ({ identityService, admin }) => {
+  const member = await createUser(admin, "Member@Example.com");
+  assertEquals(member.email, "member@example.com");
+  assertEquals([member.isInstanceAdmin, member.isLocalAccount], [false, true]);
+  assertEquals(
+    await expectErrorCode(
+      admin.send("POST", "/v1/users", {
+        email: "member@example.com",
+        displayName: "Again",
+        password: USER_PASSWORD,
+      }),
+      409,
+    ),
+    "conflict",
+  );
+  await expectJson(
+    admin.send("POST", "/v1/users", {
+      email: "short@example.com",
+      displayName: "S",
+      password: "x",
+    }),
+    400,
+  );
+  const { users } = await expectJson<ListUsersResponse>(admin.send("GET", "/v1/users"), 200);
+  assertEquals(users.map((user) => user.email), [ADMIN_EMAIL, "member@example.com"]);
+
+  const memberBrowser = await signIn(identityService, member.email, USER_PASSWORD);
+  const deactivated = await expectJson<User>(
+    admin.send("PATCH", `/v1/users/${member.id}`, { isDeactivated: true }),
+    200,
+  );
+  assert(deactivated.deactivatedAt !== null);
+  // The sign-in ends at once, and so does the token's access to Identity.
+  await expectJson(memberBrowser.requestAccessToken(), 401);
+  await expectJson(memberBrowser.send("GET", "/v1/me"), 401);
+  await expectJson(
+    sendRequest(identityService, "POST", "/v1/sign-in", {
+      body: { email: member.email, password: USER_PASSWORD },
+    }),
+    401,
+  );
+
+  await expectJson(
+    admin.send("PATCH", `/v1/users/${member.id}`, {
+      isDeactivated: false,
+      password: "a-new-password-1",
+      displayName: "Renamed",
+    }),
+    200,
+  );
+  await signIn(identityService, member.email, "a-new-password-1");
+});
+
+defineIdentityTest(
+  "keeps at least one active Instance admin",
+  async ({ identityService, admin }) => {
+    const { id: adminId } = await expectJson<User>(admin.send("GET", "/v1/me"), 200);
+    for (const change of [{ isInstanceAdmin: false }, { isDeactivated: true }]) {
+      assertEquals(
+        await expectErrorCode(admin.send("PATCH", `/v1/users/${adminId}`, change), 409),
+        "conflict",
+      );
+    }
+    const secondAdmin = await createUser(admin, "second@example.com", true);
+    await expectJson(admin.send("PATCH", `/v1/users/${adminId}`, { isInstanceAdmin: false }), 200);
+    const secondBrowser = await signIn(identityService, secondAdmin.email, USER_PASSWORD);
+    await expectJson(secondBrowser.send("GET", "/v1/users"), 200);
+    await expectJson(admin.send("GET", "/v1/users"), 403);
+  },
+);
+
+defineIdentityTest("manages Groups and their members", async ({ admin }) => {
+  const member = await createUser(admin, "member@example.com");
+  const group = await expectJson<Group>(
+    admin.send("POST", "/v1/groups", { name: " Support " }),
+    201,
+  );
+  assertEquals([group.name, group.members], ["Support", []]);
+  await expectJson(admin.send("POST", "/v1/groups", { name: "Support" }), 409);
+
+  const withMember = await expectJson<Group>(
+    admin.send("PUT", `/v1/groups/${group.id}/members/${member.id}`),
+    200,
+  );
+  assertEquals(withMember.members.map(({ email }) => email), ["member@example.com"]);
+  // Adding again is not an error, so that a retried request succeeds.
+  await expectJson(admin.send("PUT", `/v1/groups/${group.id}/members/${member.id}`), 200);
+  await expectJson(admin.send("PUT", `/v1/groups/${group.id}/members/unknown-user`), 404);
+  await expectJson(admin.send("PUT", `/v1/groups/unknown-group/members/${member.id}`), 404);
+
+  const project = await createProject(admin, "checkout-bot");
+  await expectJson(
+    admin.send("PUT", `/v1/projects/${project.id}/role-assignments/${group.id}`, {
+      role: "editor",
+    }),
+    200,
+  );
+  await expectJson(admin.send("DELETE", `/v1/groups/${group.id}`), 204);
+  await expectJson(admin.send("DELETE", `/v1/groups/${group.id}`), 404);
+  const { roleAssignments } = await expectJson<ListRoleAssignmentsResponse>(
+    admin.send("GET", `/v1/projects/${project.id}/role-assignments`),
+    200,
+  );
+  assertEquals(roleAssignments, []);
+});
+
+defineIdentityTest(
+  "issues service tokens that services verify with the published keys",
+  async ({ identityService, admin }) => {
+    const project = await createProject(admin, "checkout-bot");
+    const tokenResponse = await expectJson<AccessTokenResponse>(
+      requestServiceToken(identityService, { projectId: project.id }),
+      200,
+    );
+    assertEquals([tokenResponse.projectId, tokenResponse.role], [project.id, "viewer"]);
+
+    // What every service does: read the JWKS endpoint and verify the token locally.
+    const verifier = createAccessTokenVerifier({
+      readPublicKeySet: async () =>
+        await (await sendRequest(identityService, "GET", "/internal/v1/jwks.json")).json(),
+      // Near the test clock, which issued the token.
+      readCurrentTime: () => new Date("2026-11-07T10:01:00Z"),
+    });
+    assertEquals(await verifier.verifyAccessToken(tokenResponse.accessToken), {
+      subject: "service:evaluation",
+      projectId: project.id,
+      role: "viewer",
+    });
+    const { keys } = await expectJson<{ keys: { kty: string; alg: string; d?: string }[] }>(
+      sendRequest(identityService, "GET", "/internal/v1/jwks.json"),
+      200,
+    );
+    assertEquals(keys.map((key) => [key.kty, key.alg, key.d]), [["EC", "ES256", undefined]]);
+
+    await expectJson(requestServiceToken(identityService, { projectId: "unknown" }), 404);
+    for (
+      const basicCredentials of [
+        "evaluation:wrong-secret",
+        `telemetry:${EVALUATION_CLIENT_SECRET}`,
+        "no-separator",
+      ]
+    ) {
+      await expectJson(requestServiceToken(identityService, {}, basicCredentials), 401);
+    }
+  },
+);
+
+defineIdentityTest(
+  "resolves API keys only for services",
+  async ({ identityService, admin }) => {
+    const project = await createProject(admin, "checkout-bot");
+    const { apiKey } = await createApiKey(admin, project.id, "CI pipeline");
+    for (const bearerToken of [undefined, admin.accessToken]) {
+      await expectJson(
+        sendRequest(identityService, "POST", "/internal/v1/api-keys/resolve", {
+          body: { apiKey },
+          bearerToken,
+        }),
+        401,
+      );
+    }
+    assertEquals(await resolveApiKey(identityService, apiKey), project.id);
+  },
+);
+
+defineIdentityTest("creates and lists Projects by name", async ({ admin }) => {
+  const checkoutProject = await createProject(admin, "  checkout-bot ");
+  await createProject(admin, "assistant");
 
   assertEquals(checkoutProject.name, "checkout-bot");
   assertMatch(
     checkoutProject.id,
     /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   );
-  assertEquals(checkoutProject.createdAt, "2026-11-07T10:00:01.000Z");
   const { projects } = await expectJson<ListProjectsResponse>(
-    sendRequest(identityService, "GET", "/v1/projects"),
+    admin.send("GET", "/v1/projects"),
     200,
   );
-  assertEquals(projects.map((project) => project.name), ["assistant", "checkout-bot"]);
+  // An Instance admin sees every Project, with no Role in the ones created later.
+  assertEquals(projects.map((project) => [project.name, project.role]), [
+    ["assistant", null],
+    ["checkout-bot", null],
+  ]);
   assertEquals(
-    await expectJson<Project>(
-      sendRequest(identityService, "GET", `/v1/projects/${checkoutProject.id}`),
+    await expectJson<AccessibleProject>(
+      admin.send("GET", `/v1/projects/${checkoutProject.id}`),
       200,
     ),
-    checkoutProject,
+    { ...checkoutProject, role: null },
   );
 });
 
-defineIdentityTest("refuses a second Project with the same name", async ({ identityService }) => {
-  await createProject(identityService, "checkout-bot");
-  const conflict = await expectJson<{ error: { code: string } }>(
-    sendRequest(identityService, "POST", "/v1/projects", { body: { name: "checkout-bot" } }),
-    409,
+defineIdentityTest("refuses a second Project with the same name", async ({ admin }) => {
+  await createProject(admin, "checkout-bot");
+  assertEquals(
+    await expectErrorCode(admin.send("POST", "/v1/projects", { name: "checkout-bot" }), 409),
+    "conflict",
   );
-  assertEquals(conflict.error.code, "conflict");
   for (const invalidName of ["", "   ", "x".repeat(65)]) {
-    await expectJson(
-      sendRequest(identityService, "POST", "/v1/projects", { body: { name: invalidName } }),
-      400,
-    );
-  }
-});
-
-defineIdentityTest("requires the Instance admin key", async ({ identityService }) => {
-  const project = await createProject(identityService, "checkout-bot");
-  const { apiKey } = await createApiKey(identityService, project.id, "CI pipeline");
-  for (const bearerToken of [null, "wrong-admin-key", apiKey]) {
-    const rejection = await expectJson<{ error: { code: string } }>(
-      sendRequest(identityService, "GET", "/v1/projects", { bearerToken }),
-      401,
-    );
-    assertEquals(rejection.error.code, "unauthenticated");
+    await expectJson(admin.send("POST", "/v1/projects", { name: invalidName }), 400);
   }
 });
 
 defineIdentityTest(
   "creates an API key that is shown once and resolves to its Project",
-  async ({ identityService }) => {
-    const project = await createProject(identityService, "checkout-bot");
-    const createdKey = await createApiKey(identityService, project.id, "CI pipeline");
+  async ({ identityService, admin }) => {
+    const project = await createProject(admin, "checkout-bot");
+    const createdKey = await createApiKey(admin, project.id, "CI pipeline");
 
     assertMatch(createdKey.apiKey, /^extispex_[0-9A-Za-z]{43}$/);
     assertEquals(createdKey.keyPrefix, createdKey.apiKey.slice(0, 17));
@@ -174,7 +744,7 @@ defineIdentityTest(
     assertEquals(await resolveApiKey(identityService, createdKey.apiKey), project.id);
 
     const { apiKeys } = await expectJson<ListApiKeysResponse>(
-      sendRequest(identityService, "GET", `/v1/projects/${project.id}/api-keys`),
+      admin.send("GET", `/v1/projects/${project.id}/api-keys`),
       200,
     );
     const { apiKey: _secretValue, ...listedKey } = createdKey;
@@ -185,48 +755,48 @@ defineIdentityTest(
 
 defineIdentityTest("does not resolve unknown keys", async ({ identityService }) => {
   assertEquals(await resolveApiKey(identityService, "extispex_unknown"), null);
+  const { accessToken } = await expectJson<AccessTokenResponse>(
+    requestServiceToken(identityService, {}),
+    200,
+  );
   await expectJson(
     sendRequest(identityService, "POST", "/internal/v1/api-keys/resolve", {
       body: { apiKey: "x".repeat(257) },
-      bearerToken: null,
+      bearerToken: accessToken,
     }),
     400,
   );
 });
 
-defineIdentityTest("stops resolving a revoked key", async ({ identityService }) => {
-  const project = await createProject(identityService, "checkout-bot");
-  const revokedKey = await createApiKey(identityService, project.id, "Old laptop");
-  const workingKey = await createApiKey(identityService, project.id, "CI pipeline");
+defineIdentityTest("stops resolving a revoked key", async ({ identityService, admin }) => {
+  const project = await createProject(admin, "checkout-bot");
+  const revokedKey = await createApiKey(admin, project.id, "Old laptop");
+  const workingKey = await createApiKey(admin, project.id, "CI pipeline");
   const revokePath = `/v1/projects/${project.id}/api-keys/${revokedKey.id}`;
 
-  await expectJson(sendRequest(identityService, "DELETE", revokePath), 204);
+  await expectJson(admin.send("DELETE", revokePath), 204);
   // Revoking again is not an error, so that a retried request succeeds.
-  await expectJson(sendRequest(identityService, "DELETE", revokePath), 204);
+  await expectJson(admin.send("DELETE", revokePath), 204);
 
   assertEquals(await resolveApiKey(identityService, revokedKey.apiKey), null);
   assertEquals(await resolveApiKey(identityService, workingKey.apiKey), project.id);
   const { apiKeys } = await expectJson<ListApiKeysResponse>(
-    sendRequest(identityService, "GET", `/v1/projects/${project.id}/api-keys`),
+    admin.send("GET", `/v1/projects/${project.id}/api-keys`),
     200,
   );
   assertEquals(
-    apiKeys.map((apiKey: ApiKey) => [apiKey.name, apiKey.revokedAt]),
-    [["CI pipeline", null], ["Old laptop", "2026-11-07T10:00:04.000Z"]],
+    apiKeys.map((apiKey: ApiKey) => [apiKey.name, apiKey.revokedAt !== null]),
+    [["CI pipeline", false], ["Old laptop", true]],
   );
 });
 
-defineIdentityTest("revokes keys only within their Project", async ({ identityService }) => {
-  const checkoutProject = await createProject(identityService, "checkout-bot");
-  const assistantProject = await createProject(identityService, "assistant");
-  const assistantKey = await createApiKey(identityService, assistantProject.id, "CI pipeline");
+defineIdentityTest("revokes keys only within their Project", async ({ identityService, admin }) => {
+  const checkoutProject = await createProject(admin, "checkout-bot");
+  const assistantProject = await createProject(admin, "assistant");
+  const assistantKey = await createApiKey(admin, assistantProject.id, "CI pipeline");
 
   await expectJson(
-    sendRequest(
-      identityService,
-      "DELETE",
-      `/v1/projects/${checkoutProject.id}/api-keys/${assistantKey.id}`,
-    ),
+    admin.send("DELETE", `/v1/projects/${checkoutProject.id}/api-keys/${assistantKey.id}`),
     404,
   );
   assertEquals(await resolveApiKey(identityService, assistantKey.apiKey), assistantProject.id);
@@ -234,34 +804,34 @@ defineIdentityTest("revokes keys only within their Project", async ({ identitySe
 
 defineIdentityTest(
   "stops a deleted Project's keys and frees its name",
-  async ({ identityService }) => {
-    const project = await createProject(identityService, "checkout-bot");
-    const { apiKey } = await createApiKey(identityService, project.id, "CI pipeline");
+  async ({ identityService, admin }) => {
+    const project = await createProject(admin, "checkout-bot");
+    const { apiKey } = await createApiKey(admin, project.id, "CI pipeline");
 
-    await expectJson(sendRequest(identityService, "DELETE", `/v1/projects/${project.id}`), 204);
+    await expectJson(admin.send("DELETE", `/v1/projects/${project.id}`), 204);
 
     assertEquals(await resolveApiKey(identityService, apiKey), null);
-    await expectJson(sendRequest(identityService, "DELETE", `/v1/projects/${project.id}`), 404);
-    await expectJson(sendRequest(identityService, "GET", `/v1/projects/${project.id}`), 404);
+    await expectJson(admin.send("DELETE", `/v1/projects/${project.id}`), 404);
+    await expectJson(admin.send("GET", `/v1/projects/${project.id}`), 404);
     await expectJson(
-      sendRequest(identityService, "POST", `/v1/projects/${project.id}/api-keys`, {
-        body: { name: "Too late" },
-      }),
+      admin.send("POST", `/v1/projects/${project.id}/api-keys`, { name: "Late" }),
       404,
     );
+    await expectJson(admin.requestAccessToken(project.id), 404);
+    await expectJson(requestServiceToken(identityService, { projectId: project.id }), 404);
     const { projects } = await expectJson<ListProjectsResponse>(
-      sendRequest(identityService, "GET", "/v1/projects"),
+      admin.send("GET", "/v1/projects"),
       200,
     );
     assertEquals(projects, []);
-    const recreatedProject = await createProject(identityService, "checkout-bot");
+    const recreatedProject = await createProject(admin, "checkout-bot");
     assert(recreatedProject.id !== project.id);
   },
 );
 
 defineIdentityTest(
   "creates the first Project only on an empty Instance",
-  async ({ identityService, database }) => {
+  async ({ identityService, database, admin }) => {
     const bootstrapApiKey = "bootstrap-key-with-at-least-thirty-two-characters";
     const firstProject = await createFirstProjectIfNone(database, bootstrapApiKey);
 
@@ -269,7 +839,7 @@ defineIdentityTest(
     assertEquals(firstProject.name, "Default");
     assertEquals(await resolveApiKey(identityService, bootstrapApiKey), firstProject.id);
     const { apiKeys } = await expectJson<ListApiKeysResponse>(
-      sendRequest(identityService, "GET", `/v1/projects/${firstProject.id}/api-keys`),
+      admin.send("GET", `/v1/projects/${firstProject.id}/api-keys`),
       200,
     );
     assertEquals(apiKeys.map((apiKey) => apiKey.keyPrefix), ["bootstra"]);
@@ -279,10 +849,7 @@ defineIdentityTest(
       await createFirstProjectIfNone(database, "another-key-of-thirty-two-chars!!"),
       null,
     );
-    await expectJson(
-      sendRequest(identityService, "DELETE", `/v1/projects/${firstProject.id}`),
-      204,
-    );
+    await expectJson(admin.send("DELETE", `/v1/projects/${firstProject.id}`), 204);
     assertEquals(
       await createFirstProjectIfNone(database, "another-key-of-thirty-two-chars!!"),
       null,
@@ -305,12 +872,20 @@ defineIdentityTest(
 );
 
 defineIdentityTest("publishes an OpenAPI 3.1 document", async ({ identityService }) => {
-  const response = await sendRequest(identityService, "GET", "/openapi.json", {
-    bearerToken: null,
-  });
+  const response = await sendRequest(identityService, "GET", "/openapi.json");
   const openApiDocument = await response.json();
   assertEquals(openApiDocument.openapi, "3.1.0");
   const documentedPaths = Object.keys(openApiDocument.paths);
-  assert(documentedPaths.includes("/v1/projects/{projectId}/api-keys/{apiKeyId}"));
-  assert(documentedPaths.includes("/internal/v1/api-keys/resolve"));
+  for (
+    const expectedPath of [
+      "/v1/projects/{projectId}/api-keys/{apiKeyId}",
+      "/v1/projects/{projectId}/role-assignments/{groupId}",
+      "/v1/sign-in/access-tokens",
+      "/internal/v1/api-keys/resolve",
+      "/internal/v1/service-tokens",
+      "/internal/v1/jwks.json",
+    ]
+  ) {
+    assert(documentedPaths.includes(expectedPath), expectedPath);
+  }
 });

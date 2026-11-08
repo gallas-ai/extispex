@@ -599,17 +599,136 @@ kbd {
   color: var(--color-accent-text);
 }
 
-.api-key-trigger {
+.user-menu-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.user-menu-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+
+.user-menu-email {
+  overflow-wrap: anywhere;
+}
+
+.user-menu-theme {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .popover-section.user-menu-theme {
+    display: block;
+    padding: 10px 14px;
+  }
+}
+
+.user-menu-admin {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* The switcher gives way first when the top bar runs out of room. */
+.project-switcher {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.project-switcher-trigger {
+  max-width: min(260px, 100%);
+  min-width: 0;
   height: 30px;
   padding: 0 10px;
   border-color: var(--color-border);
   font-size: 12.5px;
 }
 
-.api-key-masked {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.02em;
+.project-switcher-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switcher-list {
+  display: grid;
+  gap: 2px;
+  max-height: 50vh;
+  margin: 6px -8px 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.project-switcher-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-switcher-option:hover,
+.project-switcher-option:focus-visible {
+  outline: none;
+  background: var(--color-surface-sunken);
+}
+
+.project-switcher-check {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  color: var(--color-accent-text);
+}
+
+.project-switcher-option-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 18px;
+}
+
+.role-badge-admin {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
 }
 
 .popover-anchor {
@@ -2945,8 +3064,8 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
-/* On a phone the top bar keeps only icons; the names stay available to screen readers. */
-@media (max-width: 560px) {
+/* On narrow screens the top bar keeps only icons; the names stay available to screen readers. */
+@media (max-width: 720px) {
   .top-bar-start {
     gap: 12px;
   }
@@ -2955,14 +3074,21 @@ textarea {
     padding: 0 8px;
   }
 
-  .navigation-link-text,
-  .api-key-masked {
+  .navigation-link-text {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+}
+
+/* On a phone the theme moves into the account menu and the Project keeps only its name. */
+@media (max-width: 560px) {
+  .top-bar-theme,
+  .project-switcher-trigger .role-badge {
+    display: none;
   }
 }
 
@@ -3063,50 +3189,6 @@ textarea {
   border-top: 1px solid var(--color-border);
   color: var(--color-text-subtle);
   font-size: 13px;
-}
-
-.admin-key-panel {
-  width: min(520px, 100%);
-  margin: 24px auto 0;
-  padding: 28px;
-}
-
-.admin-key-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-medium);
-  background: var(--color-accent-soft);
-  color: var(--color-accent-text);
-}
-
-.admin-key-title {
-  margin-top: 16px;
-  font-size: 17px;
-  font-weight: 600;
-}
-
-.admin-key-lead {
-  margin-top: 6px;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-.admin-key-lead code {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.admin-key-form {
-  display: grid;
-  gap: 4px;
-  margin-top: 20px;
-}
-
-.admin-key-form .button {
-  justify-self: start;
-  margin-top: 12px;
 }
 
 .project-list-panel {
@@ -3276,4 +3358,175 @@ textarea {
   .admin-key-panel {
     padding: 20px;
   }
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Sign-in, Roles and Access
+   ------------------------------------------------------------------------------------------- */
+
+.app-loading {
+  flex: 1;
+  min-height: 100vh;
+  background: var(--color-canvas);
+}
+
+.sign-in-password-label {
+  margin-top: 10px;
+}
+
+.panel-note {
+  padding: 14px 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.role-assignment-form {
+  flex-wrap: wrap;
+}
+
+.role-assignment-form .select-input:first-child {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.role-assignment-group {
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.group-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+}
+
+.group-item {
+  display: grid;
+  /* A long option in the member select must not widen the Group past the panel. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.group-item + .group-item {
+  border-top: 1px solid var(--color-border);
+}
+
+.group-item-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.group-item-name {
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.group-item-actions {
+  margin-left: auto;
+}
+
+.member-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+  font-size: 12.5px;
+}
+
+.member-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-chip-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.member-chip-remove:hover {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+
+.group-member-form .select-input {
+  flex: 0 1 320px;
+  min-width: 0;
+}
+
+.user-form-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.user-form-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.user-table td:first-child {
+  min-width: 0;
+}
+
+.user-name {
+  display: block;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.user-email {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.column-user-status {
+  white-space: nowrap;
+}
+
+.user-deactivated .user-name,
+.user-deactivated .user-email {
+  color: var(--color-text-subtle);
 }

@@ -1,7 +1,7 @@
 import type { ServiceRequestHandler } from "@extispex/service-client";
 import {
   createServiceHttpApp,
-  type ProjectResolver,
+  type RequestAuthenticator,
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import { type PromptServiceEnvironment, registerPromptRoutes } from "./prompts/prompt-routes.ts";
@@ -12,7 +12,7 @@ export { openPromptDatabase, type PromptDatabase } from "./storage/prompt-databa
 
 export interface PromptServiceDependencies {
   database: PromptDatabase;
-  projectResolver: ProjectResolver;
+  requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
   readCurrentTime?: () => Date;
 }
@@ -29,7 +29,7 @@ export function createPromptService(dependencies: PromptServiceDependencies): Pr
   });
   registerPromptRoutes(app, {
     promptRepository: createPromptRepository(dependencies.database),
-    projectResolver: dependencies.projectResolver,
+    requestAuthenticator: dependencies.requestAuthenticator,
     readCurrentTime: dependencies.readCurrentTime ?? (() => new Date()),
   });
   return { handleRequest: (request) => app.fetch(request) };

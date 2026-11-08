@@ -1,0 +1,109 @@
+import { ACCESS_TOKEN_ALGORITHM, type PublicKeySet, type Role } from "@extispex/contracts";
+import {
+  type AccessTokenSigningKey,
+  type AccessTokenVerifier,
+  createAccessTokenVerifier,
+  signAccessToken,
+} from "@extispex/service-runtime";
+import type { IdentityDatabase } from "../storage/identity-database.ts";
+import { SigningKeyRecord } from "../storage/identity-entities.ts";
+import { generateTimeOrderedId } from "../storage/time-ordered-id.ts";
+
+/** Short enough that a removed Role or a deactivated user loses access within five minutes. */
+export const ACCESS_TOKEN_LIFETIME_SECONDS = 300;
+
+const SIGNING_KEY_ALGORITHM = { name: "ECDSA", namedCurve: "P-256" } as const;
+
+export interface IssuedAccessToken {
+  accessToken: string;
+  expiresAt: Date;
+}
+
+/** Signs Identity's access tokens and publishes the keys that verify them. */
+export interface AccessTokenSigner {
+  issueAccessToken(
+    subject: string,
+    projectAccess: { projectId: string; role: Role } | null,
+  ): Promise<IssuedAccessToken>;
+  /** Every stored public key, read from the database each time. */
+  readPublicKeySet(): Promise<PublicKeySet>;
+  /** Verifies tokens with the stored keys, as the other services do with the JWKS endpoint. */
+  accessTokenVerifier: AccessTokenVerifier;
+}
+
+/**
+ * Keeps the signing keys in Identity's database, so that every replica signs with the same key.
+ * The first token creates a key when there is none. When replicas create one at once, both keys
+ * stay valid and every replica signs with the oldest.
+ */
+export function createAccessTokenSigner(
+  database: IdentityDatabase,
+  readCurrentTime: () => Date,
+): AccessTokenSigner {
+  let signingKey: Promise<AccessTokenSigningKey> | null = null;
+
+  const readStoredKeys = () =>
+    database.orm.em.fork().find(SigningKeyRecord, {}, { orderBy: { createdAt: "asc", id: "asc" } });
+
+  const loadSigningKey = async (): Promise<AccessTokenSigningKey> => {
+    let storedKeys = await readStoredKeys();
+    if (storedKeys.length === 0) {
+      await database.orm.em.fork().insert(SigningKeyRecord, await generateSigningKey());
+      storedKeys = await readStoredKeys();
+    }
+    const oldestKey = storedKeys[0];
+    return {
+      keyId: oldestKey.id,
+      privateKey: await crypto.subtle.importKey(
+        "jwk",
+        JSON.parse(oldestKey.privateKeyJwk),
+        SIGNING_KEY_ALGORITHM,
+        false,
+        ["sign"],
+      ),
+    };
+  };
+
+  const generateSigningKey = async () => {
+    const keyPair = await crypto.subtle.generateKey(SIGNING_KEY_ALGORITHM, true, [
+      "sign",
+      "verify",
+    ]) as CryptoKeyPair;
+    const createdAt = readCurrentTime();
+    return {
+      id: generateTimeOrderedId(createdAt),
+      privateKeyJwk: JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.privateKey)),
+      publicKeyJwk: JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.publicKey)),
+      createdAt,
+    };
+  };
+
+  const readPublicKeySet = async (): Promise<PublicKeySet> => ({
+    keys: (await readStoredKeys()).map((storedKey) => ({
+      ...JSON.parse(storedKey.publicKeyJwk),
+      kid: storedKey.id,
+      alg: ACCESS_TOKEN_ALGORITHM,
+      use: "sig",
+    })),
+  });
+
+  return {
+    async issueAccessToken(subject, projectAccess) {
+      signingKey ??= loadSigningKey().catch((error) => {
+        signingKey = null;
+        throw error;
+      });
+      const issuedAt = readCurrentTime();
+      const expiresAt = new Date(issuedAt.getTime() + ACCESS_TOKEN_LIFETIME_SECONDS * 1000);
+      const accessToken = await signAccessToken(await signingKey, {
+        subject,
+        projectAccess,
+        issuedAt,
+        expiresAt,
+      });
+      return { accessToken, expiresAt };
+    },
+    readPublicKeySet,
+    accessTokenVerifier: createAccessTokenVerifier({ readPublicKeySet, readCurrentTime }),
+  };
+}

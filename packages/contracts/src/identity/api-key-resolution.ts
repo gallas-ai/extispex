@@ -13,14 +13,16 @@ export const resolvedApiKeySchema = z.object({ projectId: z.string() });
 
 /**
  * Finds the Project an API key belongs to, for Telemetry and Prompt. It is internal: the Gateway
- * does not forward it, because it is not in `publicApiRoutesByService`. The key travels in the body
- * so that it never appears in a URL or an access log.
+ * does not forward it, because it is not in `publicApiRoutesByService`. It takes a service token
+ * without a Project. The key travels in the body so that it never appears in a URL or an access
+ * log.
  */
 export const resolveApiKeyRoute = createRoute({
   method: "post",
   path: "/internal/v1/api-keys/resolve",
   summary: "Find the Project of a working API key.",
   tags: ["Internal"],
+  security: [{ accessToken: [] }],
   request: {
     body: { content: { "application/json": { schema: resolveApiKeyRequestSchema } } },
   },
@@ -30,6 +32,7 @@ export const resolveApiKeyRoute = createRoute({
       content: { "application/json": { schema: resolvedApiKeySchema } },
     },
     400: describeErrorResponse("The request is invalid."),
+    401: describeErrorResponse("The caller is not a service with a valid service token."),
     404: describeErrorResponse("The key is unknown or revoked, or its Project is deleted."),
   },
 });

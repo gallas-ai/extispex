@@ -19,6 +19,8 @@ export const publicApiRoutesByService: Record<PublicApiServiceName, RouteConfig[
 export const PUBLIC_API_INFO = {
   title: "Extispex API",
   version: "1",
-  description: "Send the Project API key as `Authorization: Bearer <key>`. Managing Projects and " +
-    "API keys takes the Instance admin key instead, sent the same way.",
+  description: "Send a Project API key or an access token as `Authorization: Bearer <value>`. " +
+    "A browser signs in at `/v1/sign-in` and then gets short-lived access tokens from " +
+    "`/v1/sign-in/access-tokens`. Managing users, Groups, Roles, Projects and API keys takes a " +
+    "user's access token.",
 };

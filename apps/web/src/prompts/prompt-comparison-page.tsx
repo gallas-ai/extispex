@@ -18,22 +18,23 @@ import {
   promptPagePath,
   ROLE_LABELS,
 } from "./prompt-parts.tsx";
+import type { ApiCredentials } from "../api/api-request.ts";
 
 interface PromptComparisonPageProps {
-  apiKey: string;
-  onDisconnect: () => void;
+  credentials: ApiCredentials;
+  onSignInRequired: () => void;
 }
 
 /** Two versions of one prompt side by side: what changed in the text and the model parameters. */
-export function PromptComparisonPage({ apiKey, onDisconnect }: PromptComparisonPageProps) {
+export function PromptComparisonPage({ credentials, onSignInRequired }: PromptComparisonPageProps) {
   const promptName = useParams().promptName as string;
   const navigate = useNavigate();
   const [searchParameters] = useSearchParams();
   const fromVersionNumber = Number(searchParameters.get("fromVersion")) || null;
   const toVersionNumber = Number(searchParameters.get("toVersion")) || null;
 
-  const loadVersions = useCallback(() => listPromptVersions(apiKey, promptName), [
-    apiKey,
+  const loadVersions = useCallback(() => listPromptVersions(credentials, promptName), [
+    credentials,
     promptName,
   ]);
   const [versionsState, reloadVersions] = useApiResource(loadVersions);
@@ -77,9 +78,9 @@ export function PromptComparisonPage({ apiKey, onDisconnect }: PromptComparisonP
           <LoadError
             subject="The prompt"
             message={versionsState.message}
-            isApiKeyRejected={versionsState.isApiKeyRejected}
+            isSignInRequired={versionsState.isSignInRequired}
             onRetry={reloadVersions}
-            onDisconnect={onDisconnect}
+            onSignInRequired={onSignInRequired}
           />
         </section>
       )}
@@ -98,7 +99,7 @@ export function PromptComparisonPage({ apiKey, onDisconnect }: PromptComparisonP
             onSelect={selectVersions}
           />
           <ComparisonResult
-            apiKey={apiKey}
+            credentials={credentials}
             promptName={promptName}
             fromVersionNumber={fromVersionNumber}
             toVersionNumber={toVersionNumber}
@@ -162,16 +163,16 @@ function VersionPicker(
 }
 
 function ComparisonResult(
-  { apiKey, promptName, fromVersionNumber, toVersionNumber }: {
-    apiKey: string;
+  { credentials, promptName, fromVersionNumber, toVersionNumber }: {
+    credentials: ApiCredentials;
     promptName: string;
     fromVersionNumber: number;
     toVersionNumber: number;
   },
 ) {
   const loadComparison = useCallback(
-    () => comparePromptVersions(apiKey, promptName, fromVersionNumber, toVersionNumber),
-    [apiKey, promptName, fromVersionNumber, toVersionNumber],
+    () => comparePromptVersions(credentials, promptName, fromVersionNumber, toVersionNumber),
+    [credentials, promptName, fromVersionNumber, toVersionNumber],
   );
   const [comparisonState, reloadComparison] = useApiResource(loadComparison);
 

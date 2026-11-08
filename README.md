@@ -5,16 +5,17 @@
 Self-hosted observability and evaluation for GenAI applications and agents. Your application sends
 OpenTelemetry traces; Extispex stores them, lets you find them by your own Correlation ID or Session
 ID, and shows them in a web UI. It also keeps your prompts as immutable versions with movable labels
-such as `production`, and keeps each Project's data apart behind its own API keys.
+such as `production`, and keeps each Project's data apart: people see a Project through the Roles of
+their Groups, and applications send its API keys.
 
 > **Why "Extispex"?** An _extispex_ was a Roman diviner, from Latin _exta_ (entrails) and _specio_
 > (I look): the one who looks inside. By examining the inner organs of a sacrifice, an extispex
 > judged whether an undertaking would end well. Looking inside and judging the outcome is tracing
 > and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
 
-**Status:** early development. The trace pipeline, versioned prompts, and Projects with API keys
-work end to end. Logs, metrics, evaluations, users and sign-in are designed in
-[docs/architecture.md](docs/architecture.md) but not built yet.
+**Status:** early development. The trace pipeline, versioned prompts, Projects with API keys, and
+users with Groups and Roles work end to end. Logs, metrics, evaluations and company sign-in (OIDC,
+SCIM) are designed in [docs/architecture.md](docs/architecture.md) but not built yet.
 
 ## Try it locally
 
@@ -33,38 +34,45 @@ docker run -p 4317:4317 -p 4318:4318 -p 8080:8080 -v extispex-data:/data \
 | 4318 | OTLP over HTTP, protobuf or JSON                     |
 | 8080 | Web UI and REST API, described at `/v1/openapi.json` |
 
-On first start the instance creates the Project `Default` and logs two keys, once:
+On first start the instance creates the Project `Default` with an API key, and the first
+administrator, and logs both secrets once:
 
 ```text
-{"level":"info","service":"all-in-one","message":"Generated the Instance admin key. …","instanceAdminKey":"extispex_admin_…"}
 {"level":"info","service":"all-in-one","message":"Created the first Project. …","projectName":"Default","apiKey":"extispex_…"}
+{"level":"info","service":"all-in-one","message":"Created the first administrator. …","email":"admin@extispex.local","password":"…"}
 ```
 
-Open <http://localhost:8080> and enter the `apiKey`. Then send a sample conversation from
-[examples/](examples/) with it. The `instanceAdminKey` manages Projects and API keys under
-**Projects**; the image also keeps it in `/data/instance-admin-key`.
+Open <http://localhost:8080> and sign in as `admin@extispex.local` with the logged password; the
+image also keeps it in `/data/initial-admin-password`. Then send a sample conversation from
+[examples/](examples/) with the `apiKey`.
 
-To choose the keys yourself, set `INSTANCE_ADMIN_KEY` and `BOOTSTRAP_PROJECT_API_KEY` (at least 32
-characters each) before the first start.
+To choose them yourself, set `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` (at least 12
+characters) and `BOOTSTRAP_PROJECT_API_KEY` (at least 32 characters) before the first start.
 
-## Projects and API keys
+## Projects, users and Roles
 
-A Project keeps its telemetry and prompts apart from every other Project. An application sends one
-of the Project's API keys, and the key alone decides where the data goes. Create Projects and keys
-under **Projects** in the UI, or through the REST API with the Instance admin key:
+A Project keeps its telemetry and prompts apart from every other Project. People belong to Groups,
+and each Project gives Groups a Role:
 
-```sh
-curl -X POST localhost:8080/v1/projects -H "authorization: Bearer $INSTANCE_ADMIN_KEY" \
-  -H 'content-type: application/json' -d '{"name": "checkout-assistant"}'
-curl -X POST localhost:8080/v1/projects/<project id>/api-keys \
-  -H "authorization: Bearer $INSTANCE_ADMIN_KEY" -H 'content-type: application/json' \
-  -d '{"name": "CI pipeline"}'
-```
+| Role     | May                                                  |
+| -------- | ---------------------------------------------------- |
+| `viewer` | read traces and prompts                              |
+| `editor` | also change prompts and send telemetry               |
+| `admin`  | also manage the Project's Role assignments, API keys |
 
-A key looks like `extispex_` followed by 43 letters and digits, and is shown only when it is
-created: Extispex stores only its hash. A revoked key, or any key of a deleted Project, stops
-working within a minute. The Instance admin key manages Projects but cannot read their data. It
-stands in for users and Roles, which come later.
+An Instance admin creates Projects, users and Groups under **Projects** and **Access**. The first
+administrator is one, in the Group `Administrators`, which has the Role `admin` in `Default`. A
+Project's `admin` gives Groups Roles and creates API keys on the Project's page.
+
+The browser signs in with an HttpOnly cookie and gets access tokens that last five minutes, so a
+removed Role or a deactivated user loses access within five minutes. Until company sign-in through
+OIDC arrives, people sign in with local accounts, which the all-in-one image always enables and the
+separate Identity service enables with `LOCAL_ACCOUNTS=enabled`.
+
+Applications and scripts send one of the Project's API keys, and the key alone decides the Project.
+A key acts as an `editor`. It looks like `extispex_` followed by 43 letters and digits, and is shown
+only when it is created: Extispex stores only its hash. A revoked key, or any key of a deleted
+Project, stops working within a minute.
 
 ## Sending telemetry
 
@@ -124,7 +132,7 @@ all-in-one image takes the bare name because it is the one to try first.
 | `ghcr.io/gallas-ai/extispex-evaluation`        | Evaluation service API                     | Planned |
 | `ghcr.io/gallas-ai/extispex-evaluation-worker` | Evaluation worker                          | Planned |
 | `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Built   |
-| `ghcr.io/gallas-ai/extispex-identity`          | Identity service: Projects and API keys    | Built   |
+| `ghcr.io/gallas-ai/extispex-identity`          | Identity service: users, Roles, API keys   | Built   |
 
 ## Development
 
@@ -138,8 +146,9 @@ deno task build:web         # build the UI into apps/web/dist, which port 8080 s
 deno task start:all-in-one  # run everything locally on ports 4317, 4318 and 8080, with SQLite in apps/all-in-one/data
 ```
 
-Open <http://localhost:8080> and enter the API key that the first start logged. In a second
-terminal, send a sample conversation with it and search for the Session ID it prints:
+Open <http://localhost:8080> and sign in with the email and password that the first start logged. In
+a second terminal, send a sample conversation with the logged API key and search for the Session ID
+it prints:
 
 ```sh
 cd examples/typescript && API_KEY=extispex_… deno task send-conversation

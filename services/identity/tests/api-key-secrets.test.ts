@@ -2,7 +2,7 @@ import { assert, assertEquals, assertMatch, assertNotEquals } from "@std/assert"
 import {
   areSecretsEqual,
   generateApiKey,
-  generateInstanceAdminKey,
+  generateServiceClientSecret,
   hashApiKey,
   readKeyPrefix,
 } from "../src/api-keys/api-key-secrets.ts";
@@ -12,7 +12,7 @@ Deno.test("generates recognisable keys with 256 random bits", () => {
   const generatedKeys = new Set(Array.from({ length: 1_000 }, generateApiKey));
   assertEquals(generatedKeys.size, 1_000);
   for (const apiKey of generatedKeys) assertMatch(apiKey, /^extispex_[0-9A-Za-z]{43}$/);
-  assertMatch(generateInstanceAdminKey(), /^extispex_admin_[0-9A-Za-z]{43}$/);
+  assertMatch(generateServiceClientSecret(), /^extispex_client_[0-9A-Za-z]{43}$/);
 });
 
 Deno.test("uses every base62 character", () => {

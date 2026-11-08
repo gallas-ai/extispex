@@ -1,47 +1,65 @@
-import type { ApiKey, CreatedApiKey, Project } from "@extispex/contracts";
+import type {
+  AccessibleProject,
+  ApiKey,
+  CreatedApiKey,
+  Group,
+  Role,
+  RoleAssignment,
+} from "@extispex/contracts";
 import { type FormEvent, useCallback, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { isApiKeyRejection } from "../api/api-request.ts";
 import {
+  assignRole,
   createApiKey,
   deleteProject,
   getProject,
   listApiKeys,
+  listGroups,
+  listRoleAssignments,
+  removeRoleAssignment,
   revokeApiKey,
 } from "../api/identity-api.ts";
+import { ROLES } from "../access/access-rules.ts";
+import { useAccess } from "../sign-in/access-context.ts";
 import { formatRelativeTime } from "../traces/trace-formatting.ts";
 import { CopyButton } from "../ui/copy-button.tsx";
-import { AlertIcon, CheckIcon, FolderIcon, KeyIcon, PlusIcon, TrashIcon } from "../ui/icons.tsx";
+import { AlertIcon, CheckIcon, FolderIcon, PlusIcon, TrashIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
 import { useNow } from "../ui/use-now.ts";
-import { InstanceAdminKeyForm } from "./instance-admin-key-form.tsx";
-import { type InstanceAdminProps, REJECTED_ADMIN_KEY_PROBLEM } from "./projects-page.tsx";
 
-interface ProjectPageProps extends InstanceAdminProps {
-  /** Makes the browser use a new key for Traces and Prompts. */
-  onUseApiKey: (apiKey: string) => void;
+/** What each Role allows, as the Role assignment form explains it. */
+export const ROLE_DESCRIPTIONS: Record<Role, string> = {
+  viewer: "reads traces and prompts",
+  editor: "also changes prompts and sends telemetry",
+  admin: "also manages Roles and API keys",
+};
+
+interface ProjectDetails {
+  project: AccessibleProject;
+  /** Null when the user may not manage the Project. */
+  management: {
+    roleAssignments: RoleAssignment[];
+    groups: Group[];
+    apiKeys: ApiKey[];
+  } | null;
 }
 
-interface ProjectWithApiKeys {
-  project: Project;
-  apiKeys: ApiKey[];
-}
-
-/** One Project: creating and revoking its API keys, and deleting it. */
-export function ProjectPage(
-  { instanceAdminKey, onInstanceAdminKeyChange, onUseApiKey }: ProjectPageProps,
-) {
+/** One Project: who has which Role in it, its API keys, and deleting it. */
+export function ProjectPage() {
   const { projectId = "" } = useParams();
-  const loadProject = useCallback(async (): Promise<ProjectWithApiKeys> => {
-    const [project, { apiKeys }] = await Promise.all([
-      getProject(instanceAdminKey, projectId),
-      listApiKeys(instanceAdminKey, projectId),
+  const { user, credentials, showSignIn } = useAccess();
+  const loadProject = useCallback(async (): Promise<ProjectDetails> => {
+    const project = await getProject(credentials, projectId);
+    if (!user.isInstanceAdmin && project.role !== "admin") return { project, management: null };
+    const [{ roleAssignments }, { groups }, { apiKeys }] = await Promise.all([
+      listRoleAssignments(credentials, projectId),
+      listGroups(credentials),
+      listApiKeys(credentials, projectId),
     ]);
-    return { project, apiKeys };
-  }, [instanceAdminKey, projectId]);
+    return { project, management: { roleAssignments, groups, apiKeys } };
+  }, [credentials, projectId, user.isInstanceAdmin]);
   const [projectState, reloadProject] = useApiResource(loadProject);
-  const forgetRejectedKey = () => onInstanceAdminKeyChange("");
 
   const breadcrumbs = (
     <nav className="breadcrumbs" aria-label="Breadcrumbs">
@@ -54,25 +72,6 @@ export function ProjectPage(
     </nav>
   );
 
-  if (instanceAdminKey === "") {
-    return (
-      <div className="page page-constrained projects-page">
-        {breadcrumbs}
-        <InstanceAdminKeyForm onSubmit={onInstanceAdminKeyChange} problem={null} />
-      </div>
-    );
-  }
-  if (projectState.status === "failed" && projectState.isApiKeyRejected) {
-    return (
-      <div className="page page-constrained projects-page">
-        {breadcrumbs}
-        <InstanceAdminKeyForm
-          onSubmit={onInstanceAdminKeyChange}
-          problem={REJECTED_ADMIN_KEY_PROBLEM}
-        />
-      </div>
-    );
-  }
   if (projectState.status === "failed" && projectState.statusCode === 404) {
     return (
       <div className="page page-constrained projects-page">
@@ -82,7 +81,7 @@ export function ProjectPage(
             <FolderIcon size={22} />
           </span>
           <h1 className="empty-state-title">This Project does not exist</h1>
-          <p>It may have been deleted.</p>
+          <p>It may have been deleted, or you have no Role in it.</p>
           <Link className="button button-secondary" to="/projects">Go to Projects</Link>
         </div>
       </div>
@@ -98,9 +97,9 @@ export function ProjectPage(
           <LoadError
             subject="The Project"
             message={projectState.message}
-            isApiKeyRejected={false}
+            isSignInRequired={projectState.isSignInRequired}
             onRetry={reloadProject}
-            onDisconnect={forgetRejectedKey}
+            onSignInRequired={showSignIn}
           />
         </section>
       )}
@@ -111,53 +110,214 @@ export function ProjectPage(
               <h1 className="project-title">{projectState.resource.project.name}</h1>
               <p className="page-subtitle">
                 Project ID <code>{projectState.resource.project.id}</code>
+                {projectState.resource.project.role !== null && (
+                  <>
+                    {" · "}Your Role{" "}
+                    <span className="role-badge">{projectState.resource.project.role}</span>
+                  </>
+                )}
               </p>
             </div>
           </div>
-          <ApiKeysPanel
-            instanceAdminKey={instanceAdminKey}
-            project={projectState.resource.project}
-            apiKeys={projectState.resource.apiKeys}
-            onChange={reloadProject}
-            onKeyRejected={forgetRejectedKey}
-            onUseApiKey={onUseApiKey}
-          />
-          <DeleteProjectPanel
-            instanceAdminKey={instanceAdminKey}
-            project={projectState.resource.project}
-            onKeyRejected={forgetRejectedKey}
-          />
+          {projectState.resource.management === null
+            ? (
+              <p className="panel panel-note">
+                Only the Project's admins manage its Roles and API keys.
+              </p>
+            )
+            : (
+              <>
+                <RoleAssignmentsPanel
+                  projectId={projectState.resource.project.id}
+                  roleAssignments={projectState.resource.management.roleAssignments}
+                  groups={projectState.resource.management.groups}
+                  onChange={reloadProject}
+                />
+                <ApiKeysPanel
+                  projectId={projectState.resource.project.id}
+                  apiKeys={projectState.resource.management.apiKeys}
+                  onChange={reloadProject}
+                />
+              </>
+            )}
+          {user.isInstanceAdmin && <DeleteProjectPanel project={projectState.resource.project} />}
         </>
       )}
     </div>
   );
 }
 
-interface ApiKeysPanelProps {
-  instanceAdminKey: string;
-  project: Project;
-  apiKeys: ApiKey[];
+interface RoleAssignmentsPanelProps {
+  projectId: string;
+  roleAssignments: RoleAssignment[];
+  groups: Group[];
   onChange: () => void;
-  onKeyRejected: () => void;
-  onUseApiKey: (apiKey: string) => void;
 }
 
-function ApiKeysPanel(
-  { instanceAdminKey, project, apiKeys, onChange, onKeyRejected, onUseApiKey }: ApiKeysPanelProps,
+function RoleAssignmentsPanel(
+  { projectId, roleAssignments, groups, onChange }: RoleAssignmentsPanelProps,
 ) {
-  const navigate = useNavigate();
+  const { credentials, reloadAccess } = useAccess();
+  const unassignedGroups = groups.filter((group) =>
+    !roleAssignments.some((assignment) => assignment.groupId === group.id)
+  );
+  const [groupId, setGroupId] = useState("");
+  const [role, setRole] = useState<Role>("viewer");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const selectedGroupId = unassignedGroups.some((group) => group.id === groupId)
+    ? groupId
+    : unassignedGroups[0]?.id ?? "";
+
+  const change = async (makeChange: () => Promise<unknown>) => {
+    setIsSaving(true);
+    setProblem(null);
+    try {
+      await makeChange();
+      onChange();
+      // The user's own Role may have changed.
+      await reloadAccess();
+    } catch (error) {
+      setProblem((error as Error).message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const submit = (submitEvent: FormEvent) => {
+    submitEvent.preventDefault();
+    if (selectedGroupId === "") return;
+    change(() => assignRole(credentials, projectId, selectedGroupId, role));
+  };
+
+  return (
+    <section className="panel role-assignments-panel" aria-labelledby="role-assignments-title">
+      <h2 id="role-assignments-title" className="panel-title">Roles</h2>
+      <form className="panel-form" onSubmit={submit}>
+        <span className="field-label">Give a Group a Role</span>
+        {unassignedGroups.length === 0
+          ? (
+            <p className="field-hint">
+              Every Group has a Role here. Instance admins create Groups under Access.
+            </p>
+          )
+          : (
+            <div className="inline-form role-assignment-form">
+              <select
+                className="select-input"
+                aria-label="Group"
+                value={selectedGroupId}
+                onChange={(changeEvent) => setGroupId(changeEvent.target.value)}
+              >
+                {unassignedGroups.map((group) => (
+                  <option key={group.id} value={group.id}>{group.name}</option>
+                ))}
+              </select>
+              <RoleSelect label="Role for the Group" role={role} onChange={setRole} />
+              <button type="submit" className="button button-primary" disabled={isSaving}>
+                <PlusIcon size={14} />
+                Assign Role
+              </button>
+            </div>
+          )}
+        <p className="field-hint">
+          A <code>viewer</code> {ROLE_DESCRIPTIONS.viewer}, an <code>editor</code>{" "}
+          {ROLE_DESCRIPTIONS.editor}, an <code>admin</code>{" "}
+          {ROLE_DESCRIPTIONS.admin}. Members' access changes within five minutes.
+        </p>
+        {problem !== null && (
+          <p className="form-problem" role="alert">
+            <AlertIcon size={14} />
+            {problem}
+          </p>
+        )}
+      </form>
+      {roleAssignments.length === 0
+        ? <p className="panel-empty-text">No Group has a Role in this Project yet.</p>
+        : (
+          <div className="table-scroll">
+            <table className="data-table role-assignment-table">
+              <thead>
+                <tr>
+                  <th scope="col">Group</th>
+                  <th scope="col">Role</th>
+                  <th scope="col" className="column-actions">
+                    <span className="visually-hidden">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {roleAssignments.map((assignment) => (
+                  <tr key={assignment.groupId}>
+                    <td className="role-assignment-group">{assignment.groupName}</td>
+                    <td>
+                      <RoleSelect
+                        label={`Role of ${assignment.groupName}`}
+                        role={assignment.role}
+                        disabled={isSaving}
+                        onChange={(nextRole) =>
+                          change(() =>
+                            assignRole(credentials, projectId, assignment.groupId, nextRole)
+                          )}
+                      />
+                    </td>
+                    <td className="column-actions">
+                      <button
+                        type="button"
+                        className="button button-ghost button-danger button-small"
+                        disabled={isSaving}
+                        aria-label={`Remove the Role of ${assignment.groupName}`}
+                        onClick={() =>
+                          change(() =>
+                            removeRoleAssignment(credentials, projectId, assignment.groupId)
+                          )}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </section>
+  );
+}
+
+function RoleSelect(
+  { label, role, disabled = false, onChange }: {
+    label: string;
+    role: Role;
+    disabled?: boolean;
+    onChange: (role: Role) => void;
+  },
+) {
+  return (
+    <select
+      className="select-input"
+      aria-label={label}
+      value={role}
+      disabled={disabled}
+      onChange={(changeEvent) => onChange(changeEvent.target.value as Role)}
+    >
+      {ROLES.map((roleOption) => <option key={roleOption} value={roleOption}>{roleOption}</option>)}
+    </select>
+  );
+}
+
+interface ApiKeysPanelProps {
+  projectId: string;
+  apiKeys: ApiKey[];
+  onChange: () => void;
+}
+
+function ApiKeysPanel({ projectId, apiKeys, onChange }: ApiKeysPanelProps) {
+  const { credentials } = useAccess();
   const [keyName, setKeyName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null);
-
-  const reportFailure = (error: unknown) => {
-    if (isApiKeyRejection(error)) {
-      onKeyRejected();
-    } else {
-      setProblem((error as Error).message);
-    }
-  };
 
   const submit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
@@ -168,11 +328,11 @@ function ApiKeysPanel(
     setIsCreating(true);
     setProblem(null);
     try {
-      setCreatedKey(await createApiKey(instanceAdminKey, project.id, keyName.trim()));
+      setCreatedKey(await createApiKey(credentials, projectId, keyName.trim()));
       setKeyName("");
       onChange();
     } catch (error) {
-      reportFailure(error);
+      setProblem((error as Error).message);
     } finally {
       setIsCreating(false);
     }
@@ -181,11 +341,11 @@ function ApiKeysPanel(
   const revoke = async (apiKey: ApiKey) => {
     setProblem(null);
     try {
-      await revokeApiKey(instanceAdminKey, project.id, apiKey.id);
+      await revokeApiKey(credentials, projectId, apiKey.id);
       if (createdKey?.id === apiKey.id) setCreatedKey(null);
       onChange();
     } catch (error) {
-      reportFailure(error);
+      setProblem((error as Error).message);
     }
   };
 
@@ -210,8 +370,9 @@ function ApiKeysPanel(
           </button>
         </div>
         <p className="field-hint">
-          Applications send the key as{" "}
-          <code>Authorization: Bearer &lt;key&gt;</code>, for OTLP and the REST API alike.
+          Applications and scripts send the key as{" "}
+          <code>Authorization: Bearer &lt;key&gt;</code>, for OTLP and the REST API alike. A key
+          acts as an <code>editor</code>.
         </p>
         {problem !== null && (
           <p className="form-problem" role="alert">
@@ -232,17 +393,6 @@ function ApiKeysPanel(
             <CopyButton value={createdKey.apiKey} label="API key" />
           </div>
           <div className="new-api-key-actions">
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={() => {
-                onUseApiKey(createdKey.apiKey);
-                navigate("/traces");
-              }}
-            >
-              <KeyIcon size={13} />
-              Use in this browser
-            </button>
             <button
               type="button"
               className="button button-ghost button-small"
@@ -345,28 +495,20 @@ function ApiKeyTable(
   );
 }
 
-interface DeleteProjectPanelProps {
-  instanceAdminKey: string;
-  project: Project;
-  onKeyRejected: () => void;
-}
-
-function DeleteProjectPanel({ instanceAdminKey, project, onKeyRejected }: DeleteProjectPanelProps) {
+function DeleteProjectPanel({ project }: { project: AccessibleProject }) {
   const navigate = useNavigate();
+  const { credentials, reloadAccess } = useAccess();
   const [isConfirming, setIsConfirming] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const remove = async () => {
     setProblem(null);
     try {
-      await deleteProject(instanceAdminKey, project.id);
+      await deleteProject(credentials, project.id);
+      await reloadAccess();
       navigate("/projects");
     } catch (error) {
-      if (isApiKeyRejection(error)) {
-        onKeyRejected();
-      } else {
-        setProblem((error as Error).message);
-      }
+      setProblem((error as Error).message);
     }
   };
 

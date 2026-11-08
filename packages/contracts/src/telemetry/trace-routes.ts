@@ -1,9 +1,9 @@
 import { createRoute } from "@hono/zod-openapi";
 import { z } from "zod";
 import {
-  apiKeySecurity,
   commonErrorResponses,
   describeErrorResponse,
+  projectDataSecurity,
 } from "../openapi-route-parts.ts";
 import {
   listTracesQuerySchema,
@@ -16,7 +16,7 @@ export const listTracesRoute = createRoute({
   path: "/v1/traces",
   summary: "List traces, newest first, optionally filtered by Correlation ID or Session ID.",
   tags: ["Traces"],
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { query: listTracesQuerySchema },
   responses: {
     200: {
@@ -32,7 +32,7 @@ export const getTraceRoute = createRoute({
   path: "/v1/traces/{traceId}",
   summary: "Get all stored spans of one trace.",
   tags: ["Traces"],
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: {
     params: z.object({ traceId: z.string().regex(/^[0-9a-f]{32}$/) }),
   },

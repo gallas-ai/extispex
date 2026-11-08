@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { roleSchema } from "./access-contracts.ts";
 
 /** A Project's display name, unique among the Instance's Projects that are not deleted. */
 export const projectNameSchema = z.string().trim().min(1).max(64);
@@ -12,9 +13,12 @@ export const projectSchema = z.object({
   createdAt: z.string(),
 });
 
+/** A Project with the caller's Role in it, or null for an Instance admin without a Role there. */
+export const accessibleProjectSchema = projectSchema.extend({ role: roleSchema.nullable() });
+
 export const createProjectRequestSchema = z.object({ name: projectNameSchema });
 
-export const listProjectsResponseSchema = z.object({ projects: z.array(projectSchema) });
+export const listProjectsResponseSchema = z.object({ projects: z.array(accessibleProjectSchema) });
 
 /** A Project API key as listed: never the key itself, which is stored only as a hash. */
 export const apiKeySchema = z.object({
@@ -36,6 +40,7 @@ export const createdApiKeySchema = apiKeySchema.extend({ apiKey: z.string() });
 export const listApiKeysResponseSchema = z.object({ apiKeys: z.array(apiKeySchema) });
 
 export type Project = z.infer<typeof projectSchema>;
+export type AccessibleProject = z.infer<typeof accessibleProjectSchema>;
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 export type ListProjectsResponse = z.infer<typeof listProjectsResponseSchema>;
 export type ApiKey = z.infer<typeof apiKeySchema>;

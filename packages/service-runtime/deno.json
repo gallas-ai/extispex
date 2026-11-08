@@ -2,11 +2,13 @@
   "name": "@extispex/service-runtime",
   "version": "0.1.0",
   "exports": {
-    ".": "./src/mod.ts"
+    ".": "./src/mod.ts",
+    "./testing": "./src/testing.ts"
   },
   "imports": {
     "@hono/zod-openapi": "npm:@hono/zod-openapi@^1.1.0",
     "@std/assert": "jsr:@std/assert@^1.0.0",
-    "hono": "npm:hono@^4.10.0"
+    "hono": "npm:hono@^4.10.0",
+    "jose": "npm:jose@6.2.15"
   }
 }

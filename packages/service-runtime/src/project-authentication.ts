@@ -6,18 +6,15 @@ import {
 } from "@extispex/contracts";
 import type { ServiceClient } from "@extispex/service-client";
 
+import { IdentityUnavailableError } from "./identity-unavailable-error.ts";
+
 /** Finds the Project that an API key belongs to. */
 export interface ProjectResolver {
   /**
    * Resolves to the Project's ID, or null for an unknown or revoked key. Rejects with
-   * {@link ProjectResolutionUnavailableError} when the answer cannot be obtained.
+   * {@link IdentityUnavailableError} when the answer cannot be obtained.
    */
   resolveProjectId(apiKey: string): Promise<string | null>;
-}
-
-/** Identity could not be asked, so the key is neither accepted nor refused. Retry later. */
-export class ProjectResolutionUnavailableError extends Error {
-  override name = "ProjectResolutionUnavailableError";
 }
 
 /** How long Identity's answer for one key is reused, which bounds how late a revocation acts. */
@@ -25,6 +22,7 @@ export const API_KEY_CACHE_MILLISECONDS = 60_000;
 const MAXIMUM_CACHED_API_KEYS = 10_000;
 
 export interface IdentityProjectResolverOptions {
+  /** A client that sends a service token, as `createServiceTokenClient` returns. */
   identityClient: ServiceClient;
   cacheMilliseconds?: number;
   maximumCachedApiKeys?: number;
@@ -64,7 +62,7 @@ export function createIdentityProjectResolver(
         }),
       );
     } catch (error) {
-      throw new ProjectResolutionUnavailableError("The Identity service is unreachable.", {
+      throw new IdentityUnavailableError("The Identity service is unreachable.", {
         cause: error,
       });
     }
@@ -74,7 +72,7 @@ export function createIdentityProjectResolver(
     }
     if (!response.ok) {
       await response.body?.cancel();
-      throw new ProjectResolutionUnavailableError(
+      throw new IdentityUnavailableError(
         `The Identity service answered with status ${response.status}.`,
       );
     }
@@ -129,16 +127,4 @@ async function hashForCache(apiKey: string): Promise<string> {
 export function extractBearerToken(authorizationHeader: string | null | undefined): string | null {
   const bearerMatch = authorizationHeader?.match(/^Bearer\s+(\S+)$/i);
   return bearerMatch ? bearerMatch[1] : null;
-}
-
-/**
- * The Project of the request's API key, or null without a working key. Rejects with
- * {@link ProjectResolutionUnavailableError} when the key cannot be checked.
- */
-export async function authenticateProject(
-  projectResolver: ProjectResolver,
-  authorizationHeader: string | null | undefined,
-): Promise<string | null> {
-  const apiKey = extractBearerToken(authorizationHeader);
-  return apiKey === null ? null : await projectResolver.resolveProjectId(apiKey);
 }

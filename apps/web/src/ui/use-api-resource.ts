@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, isApiKeyRejection } from "../api/api-request.ts";
+import { ApiError, isSignInRequired } from "../api/api-request.ts";
 
 export type ApiResourceState<Resource> =
   | { status: "loading" }
   | { status: "loaded"; resource: Resource }
-  | { status: "failed"; message: string; statusCode: number | null; isApiKeyRejected: boolean };
+  | { status: "failed"; message: string; statusCode: number | null; isSignInRequired: boolean };
 
 /**
  * Loads one resource from the API whenever `loadResource` changes, so pass a memoized function.
@@ -34,7 +34,7 @@ export function useApiResource<Resource>(
           status: "failed",
           message: error.message,
           statusCode: error instanceof ApiError ? error.statusCode : null,
-          isApiKeyRejected: isApiKeyRejection(error),
+          isSignInRequired: isSignInRequired(error),
         });
       });
     return () => {

@@ -19,20 +19,21 @@ const SHOWN_RANDOM_CHARACTER_COUNT = 8;
  */
 export const MINIMUM_CONFIGURED_KEY_LENGTH = 32;
 
-/** Generated Instance admin keys have their own prefix, so that nobody mistakes one for a Project key. */
-export const INSTANCE_ADMIN_KEY_PREFIX = "extispex_admin_";
+/** Generated service client secrets have their own prefix, so that nobody mistakes one for an API key. */
+export const SERVICE_CLIENT_SECRET_PREFIX = "extispex_client_";
 
 /** A new Project API key: `extispex_` followed by 43 random base62 characters. */
 export function generateApiKey(): string {
   return `${API_KEY_PREFIX}${generateRandomCharacters()}`;
 }
 
-/** A new Instance admin key, for an Instance that does not set `INSTANCE_ADMIN_KEY`. */
-export function generateInstanceAdminKey(): string {
-  return `${INSTANCE_ADMIN_KEY_PREFIX}${generateRandomCharacters()}`;
+/** A service's client secret, for the all-in-one process, which configures its services itself. */
+export function generateServiceClientSecret(): string {
+  return `${SERVICE_CLIENT_SECRET_PREFIX}${generateRandomCharacters()}`;
 }
 
-function generateRandomCharacters(): string {
+/** 43 random base62 characters, 256 bits, such as a sign-in cookie's value or a password. */
+export function generateRandomCharacters(): string {
   let randomCharacters = "";
   while (randomCharacters.length < RANDOM_CHARACTER_COUNT) {
     for (const randomByte of crypto.getRandomValues(new Uint8Array(64))) {
@@ -48,8 +49,13 @@ function generateRandomCharacters(): string {
  * The key's SHA-256 hash as hex. A fast hash is enough because keys are long random strings, not
  * passwords: nobody can try enough candidates to find one, and lookups stay one indexed query.
  */
-export async function hashApiKey(apiKey: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(apiKey));
+export function hashApiKey(apiKey: string): Promise<string> {
+  return hashRandomSecret(apiKey);
+}
+
+/** The SHA-256 hash as hex of a long random secret, such as an API key or a sign-in cookie. */
+export async function hashRandomSecret(secret: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

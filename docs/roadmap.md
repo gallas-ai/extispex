@@ -11,8 +11,8 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 0    | First trace pipeline and CI on GitHub                                                                  | Done   |
 | 1    | [Prompt service](#1-prompt-service)                                                                    | Done   |
 | 2    | [Projects and API keys](#2-projects-and-api-keys)                                                      | Done   |
-| 3    | [Users, Groups, Roles and tokens](#3-users-groups-roles-and-tokens)                                    | Next   |
-| 4    | [Datasets and Client-Driven Execution](#4-datasets-and-client-driven-execution)                        |        |
+| 3    | [Users, Groups, Roles and tokens](#3-users-groups-roles-and-tokens)                                    | Done   |
+| 4    | [Datasets and Client-Driven Execution](#4-datasets-and-client-driven-execution)                        | Next   |
 | 5    | [Trace completion and Telemetry Evaluator](#5-trace-completion-and-telemetry-evaluator)                |        |
 | 6    | [Server-Driven Execution and Session Test Cases](#6-server-driven-execution-and-session-test-cases)    |        |
 | 7    | [LLM providers, Grading Evaluator and LLM Summary](#7-llm-providers-grading-evaluator-and-llm-summary) |        |
@@ -246,6 +246,9 @@ Iteration as Error, and a reused Correlation ID is rejected, in both deployments
 
 - Targets with credentials encrypted by AES-256-GCM. The master key comes from the environment, and
   the local image generates it into `/data` on first start.
+- Left over from step 3: encrypt Identity's private signing key in its database with the master key,
+  so that reading the database is no longer enough to sign access tokens. See the consequences in
+  [ADR 0008](adr/0008-project-scoped-access-tokens-signed-by-identity.md).
 - An allowlist of destinations the worker may call.
 - Session Test Cases with several steps, in both execution modes, for the Regex and Telemetry
   Evaluators.
@@ -319,6 +322,9 @@ e2e tests.
 - OIDC authorization code flow with PKCE, users created on first sign-in.
 - Group claims mapped to Groups.
 - An e2e test against a local OIDC provider in a container.
+- Left over from step 3, for local accounts if they stay: protection against guessing passwords (a
+  rate limit per account and per address, or a temporary lockout), and changing one's own password,
+  which today only an Instance admin can do through `PATCH /v1/users/{userId}`.
 
 **Decisions to make first:**
 
@@ -429,6 +435,9 @@ deployments.
 - OTLP/gRPC behind an L7 load balancer.
 - CI installs the chart into a local cluster such as kind and runs the e2e tests against it.
 - Published images on `ghcr.io` with one version set.
+- Left over from step 3: rotating Identity's signing key. Services already read the keys again for
+  an unknown key ID; what is missing is adding a new key, choosing which key signs, and removing the
+  old one after the longest token lifetime.
 
 **Decisions to make first:**
 

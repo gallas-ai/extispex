@@ -6,52 +6,43 @@ import {
   getProjectRoute,
   listApiKeysRoute,
   listProjectsRoute,
-  resolveApiKeyRoute,
   revokeApiKeyRoute,
 } from "@extispex/contracts";
-import { extractBearerToken } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
-  areSecretsEqual,
-  generateApiKey,
-  hashApiKey,
-  readKeyPrefix,
-} from "../api-keys/api-key-secrets.ts";
+  canManageProject,
+  type IdentityEnvironment,
+  INSTANCE_ADMIN_REQUIRED,
+  PROJECT_ADMIN_REQUIRED,
+} from "../access/user-authentication.ts";
+import { generateApiKey, hashApiKey, readKeyPrefix } from "../api-keys/api-key-secrets.ts";
+import type { AccessRepository } from "../storage/access-repository.ts";
 import type { ProjectRepository } from "../storage/project-repository.ts";
 
 export interface ProjectRouteDependencies {
   projectRepository: ProjectRepository;
-  instanceAdminKey: string;
+  accessRepository: AccessRepository;
   readCurrentTime: () => Date;
 }
-
-const unauthenticatedError = createErrorResponse(
-  "unauthenticated",
-  "The Instance admin key is required in the Authorization header as a Bearer token.",
-);
 
 function projectNotFoundError(projectId: string) {
   return createErrorResponse("not_found", `Project ${projectId} was not found.`);
 }
 
+/**
+ * Projects and their API keys. Users see the Projects they have a Role in; Instance admins see
+ * every Project and create and delete them. A Project's `admin` manages its API keys.
+ */
 export function registerProjectRoutes(
-  app: OpenAPIHono,
+  app: OpenAPIHono<IdentityEnvironment>,
   dependencies: ProjectRouteDependencies,
 ): void {
-  const { projectRepository } = dependencies;
-
-  app.use("/v1/*", async (context, next) => {
-    const presentedKey = extractBearerToken(context.req.header("authorization"));
-    if (
-      presentedKey === null ||
-      !await areSecretsEqual(presentedKey, dependencies.instanceAdminKey)
-    ) {
-      return context.json(unauthenticatedError, 401);
-    }
-    await next();
-  });
+  const { projectRepository, accessRepository } = dependencies;
 
   app.openapi(createProjectRoute, async (context) => {
+    if (!context.get("currentUser").isInstanceAdmin) {
+      return context.json(INSTANCE_ADMIN_REQUIRED, 403);
+    }
     const { name } = context.req.valid("json");
     const creation = await projectRepository.createProject(name, dependencies.readCurrentTime());
     if (creation.status === "name_taken") {
@@ -64,17 +55,30 @@ export function registerProjectRoutes(
   });
 
   app.openapi(listProjectsRoute, async (context) => {
-    return context.json({ projects: await projectRepository.listProjects() }, 200);
+    const currentUser = context.get("currentUser");
+    const rolesByProject = await accessRepository.listUserRoles(currentUser.id);
+    const projects = (await projectRepository.listProjects())
+      .map((project) => ({ ...project, role: rolesByProject.get(project.id) ?? null }))
+      .filter((project) => currentUser.isInstanceAdmin || project.role !== null);
+    return context.json({ projects }, 200);
   });
 
   app.openapi(getProjectRoute, async (context) => {
     const { projectId } = context.req.valid("param");
+    const currentUser = context.get("currentUser");
     const project = await projectRepository.findProject(projectId);
-    if (project === null) return context.json(projectNotFoundError(projectId), 404);
-    return context.json(project, 200);
+    const role = await accessRepository.findUserRole(currentUser.id, projectId);
+    // Users without a Role cannot tell a Project they may not see from one that does not exist.
+    if (project === null || (role === null && !currentUser.isInstanceAdmin)) {
+      return context.json(projectNotFoundError(projectId), 404);
+    }
+    return context.json({ ...project, role }, 200);
   });
 
   app.openapi(deleteProjectRoute, async (context) => {
+    if (!context.get("currentUser").isInstanceAdmin) {
+      return context.json(INSTANCE_ADMIN_REQUIRED, 403);
+    }
     const { projectId } = context.req.valid("param");
     if (!await projectRepository.deleteProject(projectId, dependencies.readCurrentTime())) {
       return context.json(projectNotFoundError(projectId), 404);
@@ -87,6 +91,9 @@ export function registerProjectRoutes(
     const { name } = context.req.valid("json");
     if (await projectRepository.findProject(projectId) === null) {
       return context.json(projectNotFoundError(projectId), 404);
+    }
+    if (!await canManageProject(accessRepository, context.get("currentUser"), projectId)) {
+      return context.json(PROJECT_ADMIN_REQUIRED, 403);
     }
     const apiKey = generateApiKey();
     const storedApiKey = await projectRepository.createApiKey(
@@ -102,6 +109,9 @@ export function registerProjectRoutes(
     if (await projectRepository.findProject(projectId) === null) {
       return context.json(projectNotFoundError(projectId), 404);
     }
+    if (!await canManageProject(accessRepository, context.get("currentUser"), projectId)) {
+      return context.json(PROJECT_ADMIN_REQUIRED, 403);
+    }
     return context.json({ apiKeys: await projectRepository.listApiKeys(projectId) }, 200);
   });
 
@@ -109,6 +119,9 @@ export function registerProjectRoutes(
     const { projectId, apiKeyId } = context.req.valid("param");
     if (await projectRepository.findProject(projectId) === null) {
       return context.json(projectNotFoundError(projectId), 404);
+    }
+    if (!await canManageProject(accessRepository, context.get("currentUser"), projectId)) {
+      return context.json(PROJECT_ADMIN_REQUIRED, 403);
     }
     const revocation = await projectRepository.revokeApiKey(
       projectId,
@@ -122,22 +135,5 @@ export function registerProjectRoutes(
       );
     }
     return context.body(null, 204);
-  });
-}
-
-/** Lets Telemetry and Prompt find the Project of an API key; not reachable through the Gateway. */
-export function registerApiKeyResolutionRoute(
-  app: OpenAPIHono,
-  dependencies: Pick<ProjectRouteDependencies, "projectRepository">,
-): void {
-  app.openapi(resolveApiKeyRoute, async (context) => {
-    const { apiKey } = context.req.valid("json");
-    const projectId = await dependencies.projectRepository.findProjectIdByKeyHash(
-      await hashApiKey(apiKey),
-    );
-    if (projectId === null) {
-      return context.json(createErrorResponse("not_found", "The API key does not work."), 404);
-    }
-    return context.json({ projectId }, 200);
   });
 }

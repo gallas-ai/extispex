@@ -22,14 +22,15 @@ import {
   type PromptDraft,
 } from "./prompt-draft.ts";
 import { Breadcrumbs, promptPagePath, ROLE_LABELS, VariableList } from "./prompt-parts.tsx";
+import type { ApiCredentials } from "../api/api-request.ts";
 
 interface EditorPageProps {
-  apiKey: string;
-  onDisconnect: () => void;
+  credentials: ApiCredentials;
+  onSignInRequired: () => void;
 }
 
 /** Creates a prompt together with its first version. */
-export function NewPromptPage({ apiKey }: EditorPageProps) {
+export function NewPromptPage({ credentials }: EditorPageProps) {
   const navigate = useNavigate();
   const [promptName, setPromptName] = useState("");
   const [description, setDescription] = useState("");
@@ -83,7 +84,7 @@ export function NewPromptPage({ apiKey }: EditorPageProps) {
           </div>
         }
         onSubmit={async (versionRequest) => {
-          const firstVersion = await createPrompt(apiKey, {
+          const firstVersion = await createPrompt(credentials, {
             ...versionRequest,
             name: promptName.trim(),
             description: description.trim() || undefined,
@@ -96,16 +97,16 @@ export function NewPromptPage({ apiKey }: EditorPageProps) {
 }
 
 /** Adds a version, starting from the one in `?from=` or the latest. */
-export function NewPromptVersionPage({ apiKey, onDisconnect }: EditorPageProps) {
+export function NewPromptVersionPage({ credentials, onSignInRequired }: EditorPageProps) {
   const navigate = useNavigate();
   const promptName = useParams().promptName as string;
   const [searchParameters] = useSearchParams();
   const requestedBaseNumber = Number(searchParameters.get("from")) || null;
   const loadBaseVersion = useCallback(async (): Promise<PromptVersion> => {
     const baseVersionNumber = requestedBaseNumber ??
-      (await getPrompt(apiKey, promptName)).latestVersionNumber;
-    return await getPromptVersion(apiKey, promptName, baseVersionNumber);
-  }, [apiKey, promptName, requestedBaseNumber]);
+      (await getPrompt(credentials, promptName)).latestVersionNumber;
+    return await getPromptVersion(credentials, promptName, baseVersionNumber);
+  }, [credentials, promptName, requestedBaseNumber]);
   const [baseVersionState, reloadBaseVersion] = useApiResource(loadBaseVersion);
 
   return (
@@ -137,9 +138,9 @@ export function NewPromptVersionPage({ apiKey, onDisconnect }: EditorPageProps) 
           <LoadError
             subject="The prompt"
             message={baseVersionState.message}
-            isApiKeyRejected={baseVersionState.isApiKeyRejected}
+            isSignInRequired={baseVersionState.isSignInRequired}
             onRetry={reloadBaseVersion}
-            onDisconnect={onDisconnect}
+            onSignInRequired={onSignInRequired}
           />
         </section>
       )}
@@ -149,7 +150,7 @@ export function NewPromptVersionPage({ apiKey, onDisconnect }: EditorPageProps) 
           submitLabel="Save version"
           cancelPath={promptPagePath(promptName, baseVersionState.resource.versionNumber)}
           onSubmit={async (versionRequest) => {
-            const newVersion = await createPromptVersion(apiKey, promptName, versionRequest);
+            const newVersion = await createPromptVersion(credentials, promptName, versionRequest);
             navigate(promptPagePath(promptName, newVersion.versionNumber));
           }}
         />

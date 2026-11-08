@@ -1,9 +1,9 @@
 import { createRoute } from "@hono/zod-openapi";
 import { z } from "zod";
 import {
-  apiKeySecurity,
   commonErrorResponses,
   describeErrorResponse,
+  projectDataSecurity,
 } from "../openapi-route-parts.ts";
 import {
   comparePromptVersionsQuerySchema,
@@ -43,7 +43,7 @@ export const createPromptRoute = createRoute({
   path: "/v1/prompts",
   summary: "Create a prompt with its first version.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { body: jsonBody(createPromptRequestSchema) },
   responses: {
     201: jsonResponse("The prompt's first version.", promptVersionSchema),
@@ -57,7 +57,7 @@ export const listPromptsRoute = createRoute({
   path: "/v1/prompts",
   summary: "List the Project's prompts, most recently changed first.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   responses: {
     200: jsonResponse("The prompts.", listPromptsResponseSchema),
     ...commonErrorResponses,
@@ -69,7 +69,7 @@ export const getPromptRoute = createRoute({
   path: "/v1/prompts/{promptName}",
   summary: "Get a prompt with its latest version number and Prompt Labels.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { params: promptPathParameters },
   responses: {
     200: jsonResponse("The prompt.", promptSummarySchema),
@@ -83,7 +83,7 @@ export const createPromptVersionRoute = createRoute({
   path: "/v1/prompts/{promptName}/versions",
   summary: "Add a Prompt Version. It gets the next number and never changes afterwards.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { params: promptPathParameters, body: jsonBody(createPromptVersionRequestSchema) },
   responses: {
     201: jsonResponse("The new version.", promptVersionSchema),
@@ -97,7 +97,7 @@ export const listPromptVersionsRoute = createRoute({
   path: "/v1/prompts/{promptName}/versions",
   summary: "List a prompt's versions, newest first.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { params: promptPathParameters },
   responses: {
     200: jsonResponse("The versions, without their text.", listPromptVersionsResponseSchema),
@@ -111,7 +111,7 @@ export const getPromptVersionRoute = createRoute({
   path: "/v1/prompts/{promptName}/versions/{versionNumber}",
   summary: "Get a Prompt Version by its number.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { params: versionPathParameters },
   responses: {
     200: jsonResponse("The version.", promptVersionSchema),
@@ -125,7 +125,7 @@ export const getPromptVersionByLabelRoute = createRoute({
   path: "/v1/prompts/{promptName}/labels/{labelName}",
   summary: "Get the Prompt Version that a Prompt Label points to.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { params: labelPathParameters },
   responses: {
     200: jsonResponse("The version the label points to.", promptVersionSchema),
@@ -139,7 +139,7 @@ export const movePromptLabelRoute = createRoute({
   path: "/v1/prompts/{promptName}/labels/{labelName}",
   summary: "Point a Prompt Label at a version, creating the label if it does not exist.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { params: labelPathParameters, body: jsonBody(movePromptLabelRequestSchema) },
   responses: {
     200: jsonResponse("The label.", promptLabelSchema),
@@ -153,7 +153,7 @@ export const removePromptLabelRoute = createRoute({
   path: "/v1/prompts/{promptName}/labels/{labelName}",
   summary: "Remove a Prompt Label. The version it pointed to stays.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { params: labelPathParameters },
   responses: {
     204: { description: "The label was removed." },
@@ -167,7 +167,7 @@ export const comparePromptVersionsRoute = createRoute({
   path: "/v1/prompts/{promptName}/compare",
   summary: "Compare two Prompt Versions by text and model parameters.",
   tags: TAGS,
-  security: apiKeySecurity,
+  security: projectDataSecurity,
   request: { params: promptPathParameters, query: comparePromptVersionsQuerySchema },
   responses: {
     200: jsonResponse(

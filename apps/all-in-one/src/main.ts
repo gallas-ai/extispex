@@ -3,11 +3,15 @@
  * Services call each other through their request handlers instead of the network.
  */
 import { createGatewayService } from "@extispex/gateway-service";
+import { MINIMUM_PASSWORD_LENGTH } from "@extispex/contracts";
 import {
+  createFirstAdministratorIfNone,
   createFirstProjectIfNone,
   createIdentityService,
+  DEFAULT_FIRST_ADMINISTRATOR_EMAIL,
   generateApiKey,
-  generateInstanceAdminKey,
+  generateRandomCharacters,
+  generateServiceClientSecret,
   type IdentityDatabase,
   MINIMUM_CONFIGURED_KEY_LENGTH,
   openIdentityDatabase,
@@ -15,9 +19,8 @@ import {
 import { createPromptService, openPromptDatabase } from "@extispex/prompt-service";
 import { createInProcessServiceClient } from "@extispex/service-client";
 import {
-  createIdentityProjectResolver,
+  createIdentityRequestAuthenticator,
   createStructuredLogger,
-  InvalidConfigurationError,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   readSecretEnvironmentVariable,
@@ -36,27 +39,40 @@ const dataDirectory = readOptionalEnvironmentVariable("DATA_DIRECTORY") ?? "./da
 await Deno.mkdir(dataDirectory, { recursive: true });
 
 const identityDatabase = await openIdentityDatabase(`sqlite:${dataDirectory}/identity.sqlite`);
+// The services in this process get service tokens like separate services do, with secrets that
+// exist only in memory, so nothing needs configuring.
+const serviceClientSecrets = new Map([
+  ["telemetry", generateServiceClientSecret()],
+  ["prompt", generateServiceClientSecret()],
+]);
 const identityService = createIdentityService({
   database: identityDatabase,
-  instanceAdminKey: await readOrGenerateInstanceAdminKey(),
+  // Local accounts are how people sign in to the local image.
+  areLocalAccountsEnabled: true,
+  serviceClientSecrets,
   logger: createStructuredLogger("identity"),
 });
 await createFirstProjectOnFirstStart(identityDatabase);
-const projectResolver = createIdentityProjectResolver({
-  identityClient: createInProcessServiceClient(identityService.handleRequest),
-});
+await createFirstAdministratorOnFirstStart(identityDatabase);
+const identityClient = createInProcessServiceClient(identityService.handleRequest);
+const createRequestAuthenticator = (clientId: string) =>
+  createIdentityRequestAuthenticator({
+    identityClient,
+    clientId,
+    clientSecret: serviceClientSecrets.get(clientId)!,
+  });
 
 const telemetryDatabase = await openTelemetryDatabase(`sqlite:${dataDirectory}/telemetry.sqlite`);
 const telemetryService = createTelemetryService({
   database: telemetryDatabase,
-  projectResolver,
+  requestAuthenticator: createRequestAuthenticator("telemetry"),
   logger: createStructuredLogger("telemetry"),
 });
 
 const promptDatabase = await openPromptDatabase(`sqlite:${dataDirectory}/prompt.sqlite`);
 const promptService = createPromptService({
   database: promptDatabase,
-  projectResolver,
+  requestAuthenticator: createRequestAuthenticator("prompt"),
   logger: createStructuredLogger("prompt"),
 });
 
@@ -117,38 +133,6 @@ function readGrpcTlsFiles(): GrpcTlsFiles | null {
 }
 
 /**
- * `INSTANCE_ADMIN_KEY` when set. Otherwise a key generated on first start into the data directory,
- * like the encryption master key, so that the local image needs no configuration.
- */
-async function readOrGenerateInstanceAdminKey(): Promise<string> {
-  const configuredKey = readSecretEnvironmentVariable(
-    "INSTANCE_ADMIN_KEY",
-    MINIMUM_CONFIGURED_KEY_LENGTH,
-  );
-  if (configuredKey !== undefined) return configuredKey;
-  const keyFile = `${dataDirectory}/instance-admin-key`;
-  try {
-    const storedKey = (await Deno.readTextFile(keyFile)).trim();
-    if (storedKey.length < MINIMUM_CONFIGURED_KEY_LENGTH) {
-      throw new InvalidConfigurationError(
-        `${keyFile} must hold at least ${MINIMUM_CONFIGURED_KEY_LENGTH} characters.`,
-      );
-    }
-    return storedKey;
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
-  }
-  const generatedKey = generateInstanceAdminKey();
-  await Deno.writeTextFile(keyFile, `${generatedKey}\n`, { mode: 0o600, createNew: true });
-  logger.info(
-    "Generated the Instance admin key. Use it under Projects in the UI to manage Projects and " +
-      "API keys. Set INSTANCE_ADMIN_KEY to choose your own.",
-    { instanceAdminKey: generatedKey, keyFile },
-  );
-  return generatedKey;
-}
-
-/**
  * A fresh instance gets the Project `Default` with `BOOTSTRAP_PROJECT_API_KEY`, or with a generated
  * key that is logged only this once.
  */
@@ -169,5 +153,33 @@ async function createFirstProjectOnFirstStart(database: IdentityDatabase): Promi
   logger.info(
     "Created the first Project. Its API key is shown only now; create more under Projects in the UI.",
     { projectName: firstProject.name, apiKey: firstApiKey },
+  );
+}
+
+/**
+ * A fresh instance gets its first user, an Instance admin with the Role admin in `Default`. The
+ * email defaults to `admin@extispex.local`; the password comes from `BOOTSTRAP_ADMIN_PASSWORD`, or
+ * is generated, logged this once and kept in the data directory.
+ */
+async function createFirstAdministratorOnFirstStart(database: IdentityDatabase): Promise<void> {
+  const email = readOptionalEnvironmentVariable("BOOTSTRAP_ADMIN_EMAIL") ??
+    DEFAULT_FIRST_ADMINISTRATOR_EMAIL;
+  const configuredPassword = readSecretEnvironmentVariable(
+    "BOOTSTRAP_ADMIN_PASSWORD",
+    MINIMUM_PASSWORD_LENGTH,
+  );
+  const password = configuredPassword ?? generateRandomCharacters();
+  const firstAdministrator = await createFirstAdministratorIfNone(database, { email, password });
+  if (firstAdministrator === null) return;
+  if (configuredPassword !== undefined) {
+    logger.info("Created the first administrator with BOOTSTRAP_ADMIN_PASSWORD", { email });
+    return;
+  }
+  const passwordFile = `${dataDirectory}/initial-admin-password`;
+  await Deno.writeTextFile(passwordFile, `${password}\n`, { mode: 0o600 });
+  logger.info(
+    "Created the first administrator. Sign in to the UI with this email and password, and add " +
+      "users under Access.",
+    { email, password, passwordFile },
   );
 }

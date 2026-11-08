@@ -42,6 +42,7 @@ Deno.test("forwards trace queries with only the allowed headers", async () => {
   assertEquals(new URL(receivedRequests[0].url).search, "?correlationId=order-42");
   assertEquals(receivedRequests[0].headers.get("authorization"), "Bearer test-key");
   assertEquals(receivedRequests[0].headers.get("cookie"), null);
+  assertEquals(receivedRequests[0].headers.get("x-forwarded-proto"), "http");
 });
 
 Deno.test("forwards prompt requests with their body to the Prompt service", async () => {
@@ -97,7 +98,7 @@ Deno.test("answers 503 when a service is unreachable", async () => {
   });
 });
 
-Deno.test("forwards Project management with the admin key to the Identity service", async () => {
+Deno.test("forwards Project management with the access token to the Identity service", async () => {
   const receivedRequests: Request[] = [];
   const gatewayService = createGatewayService({
     serviceClients: {
@@ -112,7 +113,7 @@ Deno.test("forwards Project management with the admin key to the Identity servic
   const response = await gatewayService.handleRequest(
     new Request("http://gateway.test/v1/projects/project-one/api-keys/key-one", {
       method: "DELETE",
-      headers: { authorization: "Bearer admin-key" },
+      headers: { authorization: "Bearer access-token" },
     }),
   );
   await response.body?.cancel();
@@ -123,7 +124,47 @@ Deno.test("forwards Project management with the admin key to the Identity servic
     new URL(receivedRequests[0].url).pathname,
     "/v1/projects/project-one/api-keys/key-one",
   );
-  assertEquals(receivedRequests[0].headers.get("authorization"), "Bearer admin-key");
+  assertEquals(receivedRequests[0].headers.get("authorization"), "Bearer access-token");
+});
+
+Deno.test("passes the sign-in cookie between the browser and Identity", async () => {
+  const receivedRequests: Request[] = [];
+  const gatewayService = createGatewayService({
+    serviceClients: {
+      telemetry: unexpectedServiceCall(),
+      prompt: unexpectedServiceCall(),
+      identity: (request) => {
+        receivedRequests.push(request);
+        return Promise.resolve(
+          Response.json({ accessToken: "token" }, {
+            headers: { "set-cookie": "extispex_sign_in=renewed; Path=/v1/sign-in; HttpOnly" },
+          }),
+        );
+      },
+    },
+    webAssetsDirectory: null,
+    logger,
+  });
+
+  const response = await gatewayService.handleRequest(
+    new Request("http://gateway.test/v1/sign-in/access-tokens", {
+      method: "POST",
+      headers: {
+        cookie: "extispex_sign_in=current",
+        "content-type": "application/json",
+        "x-forwarded-proto": "https",
+      },
+      body: "{}",
+    }),
+  );
+  await response.body?.cancel();
+
+  assertEquals(receivedRequests[0].headers.get("cookie"), "extispex_sign_in=current");
+  assertEquals(receivedRequests[0].headers.get("x-forwarded-proto"), "https");
+  assertEquals(
+    response.headers.get("set-cookie"),
+    "extispex_sign_in=renewed; Path=/v1/sign-in; HttpOnly",
+  );
 });
 
 Deno.test("does not expose the internal API key resolution through the gateway", async () => {
@@ -198,6 +239,11 @@ Deno.test("publishes one OpenAPI document for every service", async () => {
       "/v1/projects",
       "/v1/projects/{projectId}/api-keys",
       "/v1/projects/{projectId}/api-keys/{apiKeyId}",
+      "/v1/projects/{projectId}/role-assignments/{groupId}",
+      "/v1/sign-in",
+      "/v1/sign-in/access-tokens",
+      "/v1/users/{userId}",
+      "/v1/groups/{groupId}/members/{userId}",
     ]
   ) {
     assert(documentedPaths.includes(expectedPath), `${expectedPath} is not documented.`);
@@ -209,9 +255,15 @@ Deno.test("publishes one OpenAPI document for every service", async () => {
   ]);
   assertEquals(Object.keys(openApiDocument.components.securitySchemes), [
     "apiKey",
-    "instanceAdminKey",
+    "accessToken",
+    "serviceClient",
   ]);
-  assertEquals(openApiDocument.paths["/v1/projects"].post.security, [{ instanceAdminKey: [] }]);
+  assertEquals(openApiDocument.paths["/v1/projects"].post.security, [{ accessToken: [] }]);
+  assertEquals(openApiDocument.paths["/v1/prompts"].get.security, [
+    { apiKey: [] },
+    { accessToken: [] },
+  ]);
+  assert(!documentedPaths.some((path) => path.startsWith("/internal/")));
 });
 
 Deno.test("turns OpenAPI path parameters into Hono path parameters", () => {

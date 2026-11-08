@@ -1,9 +1,10 @@
 /**
- * Browser tests of the Projects pages: entering the Instance admin key, creating a Project and an
- * API key, using the key in the browser, revoking it and deleting the Project, and the layout rules
- * that keep those pages from scrolling sideways.
+ * Browser tests of the Projects and Access pages: creating a Project, giving a Group a Role in it,
+ * switching to it, creating and revoking an API key, managing users and Groups, a viewer who
+ * cannot change prompts, deleting the Project, and the layout rules that keep those pages from
+ * scrolling sideways.
  */
-import { assert, assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertMatch } from "@std/assert";
 import type { Browser } from "playwright-core";
 import {
   assertNoHorizontalOverflow,
@@ -26,77 +27,70 @@ Deno.test({
   fn: async (testContext) => {
     const deployment = await startDeployment();
     let browser: Browser | null = null;
-    // A fresh name keeps the test apart from Projects that other runs leave in a shared database.
-    const projectName = `ui-project-${crypto.randomUUID().slice(0, 8)}`;
+    // Fresh names keep the test apart from data that other runs leave in a shared database.
+    const uniquePart = crypto.randomUUID().slice(0, 8);
+    const projectName = `ui-project-${uniquePart}`;
+    const groupName = `UI viewers ${uniquePart}`;
+    const viewer = {
+      email: `ui-viewer-${uniquePart}@e2e.extispex.test`,
+      password: "ui-viewer-pass",
+    };
     let projectPath = "";
     try {
       browser = await launchBrowser();
       const openBrowser = browser;
       const openAdminUi = (path: string, width = 1280) =>
-        openUi(openBrowser, deployment, {
-          width,
-          apiKey: null,
-          instanceAdminKey: deployment.instanceAdminKey,
-          path,
-        });
+        openUi(openBrowser, deployment, { width, account: deployment.admin, path });
 
-      await testContext.step("leads from the connect page to the Projects", async () => {
-        const uiSession = await openUi(openBrowser, deployment, { width: 1280, apiKey: null });
-        const { page } = uiSession;
-        await page.getByRole("heading", { name: "Connect to your Project" }).waitFor();
-        await page.getByLabel("API key", { exact: true }).fill(
-          "extispex_admin_notAProjectKey000000000000000000000",
-        );
-        await page.getByRole("button", { name: "Connect" }).click();
-        assertStringIncludes(
-          await page.locator(".connect-form [role=alert]").innerText(),
-          "Instance admin key",
-        );
-        await page.getByRole("link", { name: "Manage Projects and API keys" }).click();
-        await page.getByRole("heading", { name: "Projects", level: 1 }).waitFor();
-        await page.getByRole("heading", { name: "Enter the Instance admin key" }).waitFor();
-        assertNoPageErrors(uiSession);
-        await uiSession.close();
-      });
-
-      await testContext.step("asks again for a rejected Instance admin key", async () => {
-        const uiSession = await openUi(openBrowser, deployment, {
-          width: 1280,
-          apiKey: null,
-          path: "/projects",
-        });
-        const { page } = uiSession;
-        await page.getByLabel("Instance admin key", { exact: true }).fill("wrong-admin-key");
-        await page.getByRole("button", { name: "Continue" }).click();
-        assertStringIncludes(
-          await page.locator(".admin-key-form [role=alert]").innerText(),
-          "not accepted",
-        );
-        await page.getByLabel("Instance admin key", { exact: true }).fill(
-          deployment.instanceAdminKey,
-        );
-        await page.getByRole("button", { name: "Continue" }).click();
-        await page.getByRole("button", { name: "Create Project" }).waitFor();
-        await page.locator(".panel-loading").waitFor({ state: "detached" });
-        assert(
-          (await page.locator(".project-cell-name").allInnerTexts()).includes("Default"),
-          "The first Project created on start should be listed.",
-        );
-        forgetExpectedRequestFailures(uiSession, [401]);
-        assertNoPageErrors(uiSession);
-        await uiSession.close();
-      });
-
-      await testContext.step("creates a Project and an API key used in this browser", async () => {
+      await testContext.step("lists the Projects with the user's Role in each", async () => {
         const uiSession = await openAdminUi("/projects");
         const { page } = uiSession;
-        await page.getByLabel("Project name").fill(projectName);
-        await page.getByRole("button", { name: "Create Project" }).click();
-        await page.getByRole("heading", { name: projectName, level: 1 }).waitFor();
-        projectPath = new URL(page.url()).pathname;
-        assertMatch(projectPath, /^\/projects\/[0-9a-f-]{36}$/);
-        await page.getByText("This Project has no API keys yet.").waitFor();
+        await page.getByRole("heading", { name: "Projects", level: 1 }).waitFor();
+        const defaultRow = page.locator("tr", { has: page.getByRole("link", { name: "Default" }) });
+        assertEquals(await defaultRow.locator(".role-badge").innerText(), "admin");
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
 
+      await testContext.step(
+        "creates a Project and gives a Group the Role admin in it",
+        async () => {
+          const uiSession = await openAdminUi("/projects");
+          const { page } = uiSession;
+          await page.getByLabel("Project name").fill(projectName);
+          await page.getByRole("button", { name: "Create Project" }).click();
+          await page.getByRole("heading", { name: projectName, level: 1 }).waitFor();
+          projectPath = new URL(page.url()).pathname;
+          assertMatch(projectPath, /^\/projects\/[0-9a-f-]{36}$/);
+          await page.getByText("No Group has a Role in this Project yet.").waitFor();
+
+          await page.getByLabel("Group", { exact: true }).selectOption({ label: "Administrators" });
+          await page.getByLabel("Role for the Group").selectOption("admin");
+          await page.getByRole("button", { name: "Assign Role" }).click();
+          await page.getByLabel("Role of Administrators", { exact: true }).waitFor();
+          assertEquals(
+            await page.getByLabel("Role of Administrators", { exact: true }).inputValue(),
+            "admin",
+          );
+
+          // The administrator is in the Group, so the new Project is theirs to switch to.
+          await page.locator(".project-switcher-trigger").click();
+          await page.getByRole("button", { name: new RegExp(`^${projectName}`) }).click();
+          assertEquals(
+            (await page.locator(".project-switcher-name").innerText()).trim(),
+            projectName,
+          );
+          await page.getByRole("link", { name: "Traces" }).click();
+          await page.getByText("No traces yet").waitFor();
+          assertNoPageErrors(uiSession);
+          await uiSession.close();
+        },
+      );
+
+      await testContext.step("creates an API key that is shown once", async () => {
+        const uiSession = await openAdminUi(projectPath);
+        const { page } = uiSession;
+        await page.getByText("This Project has no API keys yet.").waitFor();
         await page.getByLabel("New key's name").fill("CI pipeline");
         await page.getByRole("button", { name: "Create API key" }).click();
         const newKey = page.getByRole("status", { name: "New API key" });
@@ -106,14 +100,11 @@ Deno.test({
         await page.locator(".api-key-row").waitFor();
         assertEquals(await page.locator(".api-key-name").allInnerTexts(), ["CI pipeline"]);
         assertEquals(await page.locator(".api-key-prefix").innerText(), `${apiKey.slice(0, 17)}…`);
-
-        await newKey.getByRole("button", { name: "Use in this browser" }).click();
-        await page.getByRole("heading", { name: "Traces", level: 1 }).waitFor();
-        await page.getByText("No traces yet").waitFor();
-        assertEquals(
-          (await page.locator(".api-key-trigger").innerText()).trim(),
-          `••••${apiKey.slice(-4)}`,
-        );
+        const tracesResponse = await fetch(`${deployment.gatewayUrl}/v1/traces`, {
+          headers: { authorization: `Bearer ${apiKey}` },
+        });
+        assertEquals(tracesResponse.status, 200);
+        await tracesResponse.body?.cancel();
         assertNoPageErrors(uiSession);
         await uiSession.close();
       });
@@ -132,8 +123,70 @@ Deno.test({
         await uiSession.close();
       });
 
+      await testContext.step("creates a user and a Group with the user in it", async () => {
+        const uiSession = await openAdminUi("/access");
+        const { page } = uiSession;
+        await page.getByRole("heading", { name: "Access", level: 1 }).waitFor();
+        await page.getByLabel("Email").fill(viewer.email);
+        await page.getByLabel("Name", { exact: true }).fill(`Viewer ${uniquePart}`);
+        await page.getByLabel("Initial password").fill(viewer.password);
+        await page.getByRole("button", { name: "Create user" }).click();
+        await page.locator(".user-email", { hasText: viewer.email }).waitFor();
+
+        await page.getByLabel("New Group's name").fill(groupName);
+        await page.getByRole("button", { name: "Create Group" }).click();
+        const group = page.getByRole("listitem", { name: `Group ${groupName}` });
+        await group.waitFor();
+        await group.getByLabel(`User to add to ${groupName}`).selectOption({
+          label: `Viewer ${uniquePart} (${viewer.email})`,
+        });
+        await group.getByRole("button", { name: "Add member" }).click();
+        await group.getByRole("list", { name: `Members of ${groupName}` }).waitFor();
+        assertEquals(await group.locator(".member-chip-name").allInnerTexts(), [
+          `Viewer ${uniquePart}`,
+        ]);
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
+      await testContext.step("lets a viewer read prompts but offers no changes", async () => {
+        const adminSession = await openAdminUi(projectPath);
+        await adminSession.page.getByLabel("Group", { exact: true }).selectOption({
+          label: groupName,
+        });
+        await adminSession.page.getByLabel("Role for the Group").selectOption("viewer");
+        await adminSession.page.getByRole("button", { name: "Assign Role" }).click();
+        await adminSession.page.getByLabel(`Role of ${groupName}`, { exact: true }).waitFor();
+        await adminSession.close();
+
+        const uiSession = await openUi(openBrowser, deployment, {
+          width: 1280,
+          account: viewer,
+          path: "/prompts",
+        });
+        const { page } = uiSession;
+        await page.getByRole("heading", { name: "Prompts", level: 1 }).waitFor();
+        assertEquals(
+          (await page.locator(".project-switcher-trigger").innerText()).replace(/\s+/g, " ").trim(),
+          `${projectName} viewer`,
+        );
+        await page.getByText("No prompts yet").waitFor();
+        assertEquals(await page.getByRole("link", { name: "New prompt" }).count(), 0);
+        assertEquals(await page.getByRole("link", { name: "Access" }).count(), 0);
+        await page.getByRole("link", { name: "Projects" }).click();
+        assertEquals(await page.locator(".project-cell-name").allInnerTexts(), [projectName]);
+        await page.getByRole("link", { name: projectName }).click();
+        await page.getByText("Only the Project's admins manage its Roles and API keys.").waitFor();
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
       for (
-        const [pageName, path] of [["Project list", "/projects"], ["Project", "PROJECT"]]
+        const [pageName, path] of [
+          ["Project list", "/projects"],
+          ["Project", "PROJECT"],
+          ["Access", "/access"],
+        ]
       ) {
         await testContext.step(`never scrolls the ${pageName} page sideways`, async () => {
           const uiSession = await openAdminUi(path === "PROJECT" ? projectPath : path, 360);
@@ -150,12 +203,7 @@ Deno.test({
       }
 
       await testContext.step("keeps the top bar on one line on a phone", async () => {
-        const uiSession = await openUi(openBrowser, deployment, {
-          width: 360,
-          apiKey: deployment.apiKey,
-          instanceAdminKey: deployment.instanceAdminKey,
-          path: "/projects",
-        });
+        const uiSession = await openAdminUi("/projects", 360);
         const { page } = uiSession;
         await page.getByRole("heading", { name: "Projects", level: 1 }).waitFor();
         const topBarHeight = await page.locator(".top-bar").evaluate((element) =>
@@ -184,6 +232,7 @@ Deno.test({
         );
         await page.goto(projectPath);
         await page.getByRole("heading", { name: "This Project does not exist" }).waitFor();
+        assert(!(await page.locator(".project-switcher-name").innerText()).includes(projectName));
         forgetExpectedRequestFailures(uiSession, [404]);
         assertNoPageErrors(uiSession);
         await uiSession.close();

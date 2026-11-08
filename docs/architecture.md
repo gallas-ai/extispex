@@ -55,8 +55,9 @@ flowchart LR
   gateway --> prompt
   gateway --> identity
   company -- "OIDC, SCIM, file import" --> identity
-  telemetry -- "validate API key, cached 60 s" --> identity
-  prompt -- "validate API key, cached 60 s" --> identity
+  telemetry -- "public keys, service token, API key resolution cached 60 s" --> identity
+  prompt -- "public keys, service token, API key resolution cached 60 s" --> identity
+  evaluation_worker -- "service token for a Project" --> identity
   evaluation_worker -- "read traces and sessions" --> telemetry
   evaluation_worker -- "read Prompt Versions" --> prompt
   evaluation_worker -- "call Target" --> app
@@ -114,7 +115,7 @@ flowchart LR
   `grpc.max_receive_message_length` after decompression; its default of 4 MiB is raised to the same
   limit.
 - OTLP traffic goes directly to Telemetry and bypasses the Gateway because of its volume and gRPC.
-- The API key on the request determines the Project.
+- The API key, or the access token's Project, on the request determines the Project.
 - A batch is acknowledged only after it is stored. If the database cannot keep up, Telemetry returns
   a retryable response and the exporter retries. There is no intermediate buffer in v1.
 
@@ -293,19 +294,70 @@ those definitions, and the Gateway builds its forwarding table and the combined 
 - **OIDC** signs users in.
 - **SCIM 2.0** keeps users and Groups in sync between sign-ins.
 - **JSON or CSV import** serves companies without SCIM.
-- **Local accounts** exist only in the local image.
+- **Local accounts** sign in with a password that Identity stores. The local image always enables
+  them; the separate Identity service enables them with `LOCAL_ACCOUNTS=enabled`, which is how
+  people sign in until OIDC exists (roadmap step 9). Step 9 decides whether they stay as a
+  break-glass account in production.
 - Permissions are not imported. A company's group is mapped to a Group, and a Project admin assigns
   it a Role: `viewer`, `editor` or `admin`.
 
 ### Requests
 
-- **UI and REST:** Identity issues a short-lived JWT carrying Roles. Each service verifies its
-  signature locally. Until users exist (roadmap step 3), the UI and REST use a Project API key, like
-  OTLP.
-- **OTLP:** Telemetry validates the Project API key with Identity and caches the result for 60
-  seconds, so a revocation takes effect within a minute.
-- **Service to service:** each service obtains a short-lived token from Identity. The worker uses it
-  to read Telemetry and Prompt data for the Project it is evaluating.
+- **UI and REST:** Identity issues short-lived access tokens, JWTs scoped to at most one Project and
+  carrying the caller's Role there. Each service verifies them locally. See
+  [ADR 0008](adr/0008-project-scoped-access-tokens-signed-by-identity.md).
+- **Scripts and OTLP:** a Project API key, which Telemetry and Prompt resolve through Identity and
+  cache for 60 seconds, so a revocation takes effect within a minute. An API key acts as `editor`.
+- **Service to service:** each service obtains a short-lived service token from Identity. The worker
+  uses one per Project to read Telemetry and Prompt data for the Project it is evaluating.
+
+### Users, Groups, Roles and tokens
+
+Built in roadmap step 3.
+
+```mermaid
+sequenceDiagram
+  participant browser as Browser
+  participant identity as Identity
+  participant service as Prompt or Telemetry
+  browser->>identity: POST /v1/sign-in {email, password}
+  identity-->>browser: Set-Cookie extispex_sign_in (HttpOnly, SameSite=Strict, Path=/v1/sign-in)
+  browser->>identity: POST /v1/sign-in/access-tokens {projectId} + cookie
+  identity-->>browser: {accessToken: JWT for 5 minutes, role}
+  browser->>service: GET /v1/prompts, Authorization: Bearer JWT
+  service->>service: verify the signature with Identity's cached public keys
+  service-->>browser: the Project's prompts
+```
+
+- **Roles:** a `viewer` reads a Project's data, an `editor` also changes it, an `admin` also manages
+  the Project's Role assignments and API keys. A user gets the highest Role of their Groups in the
+  Project. Services check the Role: reading takes `viewer`, every change `editor`.
+- **Instance admins** create Projects, users and Groups, and manage any Project's Role assignments.
+  They read a Project's data only through a Role. The first administrator is an Instance admin in
+  the Group `Administrators`, which gets the Role `admin` in every Project that exists at first
+  start. The Instance always keeps at least one active Instance admin.
+- **Access tokens:** ES256 JWTs with `sub` (`user:<id>` or `service:<client id>`), and `project` and
+  `role` when scoped to a Project. They last five minutes, so a removed Role or a deactivated user
+  loses access to other services within five minutes. Identity's own endpoints read the user from
+  its database on every request, so a change applies there at once. A token without a Project
+  manages access only and reaches no Project's data.
+- **Signing keys:** Identity creates a P-256 key pair on its first token and keeps it in its
+  database, so every replica signs with the same key. Services read the public keys from
+  `GET /internal/v1/jwks.json`, keep them in memory, and read them again for a token with an unknown
+  key ID, at most every 30 seconds. Rotation is not built; the key ID allows adding it.
+- **Sign-in:** the cookie holds 256 random bits, and Identity stores only their SHA-256 hash. A
+  sign-in ends after 12 hours without a new access token, or when the user signs out or is
+  deactivated. The cookie is `Secure` when the browser used HTTPS, which the Gateway passes in
+  `X-Forwarded-Proto`. The UI keeps access tokens in memory only. Passwords are PBKDF2-HMAC-SHA256
+  hashes with 600,000 iterations, as OWASP advises; WebCrypto computes them without a dependency.
+- **Service tokens:** a service authenticates with the OAuth 2.0 client credentials grant: its
+  client ID and secret from `SERVICE_CLIENTS` in Identity and `IDENTITY_CLIENT_SECRET` in the
+  service, sent as HTTP Basic to `POST /internal/v1/service-tokens`. A token for a Project carries
+  `viewer`; one without a Project calls Identity's internal API, such as API key resolution. The
+  all-in-one process generates its services' secrets in memory. Services keep a token until a minute
+  before it expires.
+- **Gateway:** forwards cookies only to Identity, so the sign-in cookie never reaches another
+  service.
 
 ### Projects and API keys
 
@@ -323,17 +375,18 @@ which Project a key belongs to.
   working within a minute.
 - **Identity unavailable:** a key that is not cached gets `503` with `Retry-After` on HTTP and
   `UNAVAILABLE` on gRPC. OTLP exporters retry both, so spans are not lost during a short outage.
-- **Internal endpoint:** the Gateway does not forward `/internal/` paths, because they are not in
-  the shared contracts. Within the Instance's network the endpoint is unauthenticated until service
-  tokens exist (step 3), so Identity's port must not be published. Compose does not publish it.
-- **Instance admin key:** until users and Roles exist, creating and deleting Projects and API keys
-  takes the key from `INSTANCE_ADMIN_KEY`. It reads no Project's data. The local image generates it
-  into `/data/instance-admin-key` on first start when the variable is not set, and logs it once.
+- **Internal endpoints:** the Gateway does not forward `/internal/` paths, because they are not in
+  the shared contracts. API key resolution takes a service token since step 3. Identity's port is
+  still not published, in Compose either: the public keys need no authentication, and the service
+  token endpoint should not be exposed to guessing.
+- **Managing** Projects and API keys took an Instance admin key from the environment in step 2.
+  Since step 3, an Instance admin creates and deletes Projects, and a Project's `admin` manages its
+  API keys.
 - **First start:** when the Instance has no Project at all, Identity creates the Project `Default`
   with the key from `BOOTSTRAP_PROJECT_API_KEY`. The local image generates that key when the
   variable is not set and logs it once. Separate services without the variable start with no
-  Project; the admin creates one in the UI. Several replicas starting at once create one Project,
-  because the name is unique among Projects that are not deleted.
+  Project; an Instance admin creates one in the UI. Several replicas starting at once create one
+  Project, because the name is unique among Projects that are not deleted.
 - **Deleting a Project** sets its deletion time. Its keys stop resolving at once and it disappears
   from the list; purging its data in every service is step 13.
 
@@ -502,6 +555,16 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The Users, Groups, Roles and tokens step added these checks on 2026-11-08.
+
+| Tested                                           | Result                                                                                                                                                     |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity service on SQLite and PostgreSQL        | Sign-in, sign-out, users, Groups, Role assignments, the first administrator, service tokens and the last-admin rule work on both                           |
+| Roles through the Gateway                        | A `viewer` reads prompts and traces but gets `403` for changes and for OTLP; an `editor` changes prompts; a Project `admin` manages Roles, an `editor` not |
+| Service token for one Project                    | Reads the Project's prompts through the Gateway and gets `403` for changes, in separate services; Identity refuses a user's token on its internal API      |
+| Access tokens verified locally                   | Services verify tokens with the JWKS endpoint's keys, read again for a new key ID; expired, foreign and malformed tokens are refused                       |
+| Sign-in, Project switcher and Access in Chromium | Signing in and out, assigning a Role, switching Projects, creating users and Groups, and a viewer without change buttons work                              |
+
 The Projects and API keys step added these checks on 2026-11-07.
 
 | Tested                                    | Result                                                                                                                                                              |
@@ -528,8 +591,13 @@ The Prompt service step added these checks on 2026-11-07.
 - The capacity target of 5,000 spans per second
 - The Prompt and Identity images running against a managed PostgreSQL service, where the user may
   not be allowed to create databases; they then need their databases created beforehand
-- That Identity's port stays unreachable from outside the Instance in Kubernetes; the internal API
-  key resolution relies on it until service tokens exist
+- That Identity's port stays unreachable from outside the Instance in Kubernetes
+- Service tokens across the network in the all-in-one deployment: its services call Identity in the
+  process, and no other client reaches Identity's internal API there. The all-in-one e2e tests cover
+  them only indirectly, because API key resolution needs one
+- Signing key rotation, which is not built, and many replicas creating the first signing key at once
+- Brute-force protection for sign-in: there is no rate limit or lockout yet
+- Browsers other than Chromium with the sign-in cookie
 - pg-boss under sustained load, in a container and on a managed PostgreSQL service
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
@@ -553,3 +621,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0005: Playwright browser tests with layout rules](adr/0005-playwright-browser-tests-with-layout-rules.md)
 - [ADR 0006: Public API routes in the shared contracts](adr/0006-public-api-routes-in-shared-contracts.md)
 - [ADR 0007: Prefixed API keys resolved through Identity](adr/0007-prefixed-api-keys-resolved-through-identity.md)
+- [ADR 0008: Project-scoped access tokens signed by Identity](adr/0008-project-scoped-access-tokens-signed-by-identity.md)

@@ -1,111 +1,60 @@
-import type { Project } from "@extispex/contracts";
-import { type FormEvent, useCallback, useState } from "react";
+import type { AccessibleProject } from "@extispex/contracts";
+import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { isApiKeyRejection } from "../api/api-request.ts";
-import { createProject, listProjects } from "../api/identity-api.ts";
+import { createProject } from "../api/identity-api.ts";
+import { useAccess } from "../sign-in/access-context.ts";
 import { formatRelativeTime } from "../traces/trace-formatting.ts";
-import { AlertIcon, FolderIcon, LogOutIcon, PlusIcon } from "../ui/icons.tsx";
-import { LoadError } from "../ui/load-error.tsx";
-import { useApiResource } from "../ui/use-api-resource.ts";
+import { AlertIcon, FolderIcon, PlusIcon } from "../ui/icons.tsx";
 import { useNow } from "../ui/use-now.ts";
-import { InstanceAdminKeyForm } from "./instance-admin-key-form.tsx";
-
-export interface InstanceAdminProps {
-  instanceAdminKey: string;
-  onInstanceAdminKeyChange: (instanceAdminKey: string) => void;
-}
-
-export const REJECTED_ADMIN_KEY_PROBLEM = "The Instance admin key was not accepted.";
 
 export function projectPagePath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}`;
 }
 
-/** Lists the Instance's Projects and creates new ones, with the Instance admin key. */
-export function ProjectsPage({ instanceAdminKey, onInstanceAdminKeyChange }: InstanceAdminProps) {
+/** The Projects the user has a Role in, or every Project for an Instance admin, who creates them. */
+export function ProjectsPage() {
+  const { user, projects, reloadAccess } = useAccess();
+
+  useEffect(() => {
+    // Another admin may have added the user to a Project since the app loaded.
+    reloadAccess();
+  }, [reloadAccess]);
+
   return (
     <div className="page page-constrained projects-page">
       <div className="page-header">
         <div className="page-heading">
           <h1>Projects</h1>
           <p className="page-subtitle">
-            Each Project keeps its telemetry and prompts apart, and its API keys decide where data
-            goes.
+            Each Project keeps its telemetry and prompts apart. Groups get a Role in each Project.
           </p>
         </div>
-        {instanceAdminKey !== "" && (
-          <div className="page-actions">
-            <button
-              type="button"
-              className="button button-ghost"
-              onClick={() => onInstanceAdminKeyChange("")}
-            >
-              <LogOutIcon size={14} />
-              Forget admin key
-            </button>
-          </div>
-        )}
       </div>
-      {instanceAdminKey === ""
-        ? <InstanceAdminKeyForm onSubmit={onInstanceAdminKeyChange} problem={null} />
-        : (
-          <ProjectList
-            instanceAdminKey={instanceAdminKey}
-            onInstanceAdminKeyChange={onInstanceAdminKeyChange}
-          />
-        )}
+      {user.isInstanceAdmin && <NewProjectForm />}
+      <section className="panel project-list-panel" aria-label="Project list">
+        {projects.length === 0
+          ? (
+            <div className="empty-state">
+              <span className="empty-state-icon">
+                <FolderIcon size={22} />
+              </span>
+              <h2>No Projects yet</h2>
+              <p>
+                {user.isInstanceAdmin
+                  ? "Create a Project above, then give a Group a Role in it."
+                  : "You have no Role in a Project. Ask an admin to add you to a Group."}
+              </p>
+            </div>
+          )
+          : <ProjectTable projects={projects} />}
+      </section>
     </div>
   );
 }
 
-function ProjectList({ instanceAdminKey, onInstanceAdminKeyChange }: InstanceAdminProps) {
-  const loadProjects = useCallback(() => listProjects(instanceAdminKey), [instanceAdminKey]);
-  const [projectsState, reloadProjects] = useApiResource(loadProjects);
-
-  if (projectsState.status === "failed" && projectsState.isApiKeyRejected) {
-    return (
-      <InstanceAdminKeyForm
-        onSubmit={onInstanceAdminKeyChange}
-        problem={REJECTED_ADMIN_KEY_PROBLEM}
-      />
-    );
-  }
-  return (
-    <>
-      <NewProjectForm
-        instanceAdminKey={instanceAdminKey}
-        onInstanceAdminKeyChange={onInstanceAdminKeyChange}
-      />
-      <section className="panel project-list-panel" aria-label="Project list">
-        {projectsState.status === "loading" && <div className="panel-loading" />}
-        {projectsState.status === "failed" && (
-          <LoadError
-            subject="Projects"
-            message={projectsState.message}
-            isApiKeyRejected={false}
-            onRetry={reloadProjects}
-            onDisconnect={() => onInstanceAdminKeyChange("")}
-          />
-        )}
-        {projectsState.status === "loaded" && projectsState.resource.projects.length === 0 && (
-          <div className="empty-state">
-            <span className="empty-state-icon">
-              <FolderIcon size={22} />
-            </span>
-            <h2>No Projects yet</h2>
-            <p>Create a Project above, then an API key for your application to send data with.</p>
-          </div>
-        )}
-        {projectsState.status === "loaded" && projectsState.resource.projects.length > 0 && (
-          <ProjectTable projects={projectsState.resource.projects} />
-        )}
-      </section>
-    </>
-  );
-}
-
-function NewProjectForm({ instanceAdminKey, onInstanceAdminKeyChange }: InstanceAdminProps) {
+function NewProjectForm() {
   const navigate = useNavigate();
+  const { credentials, reloadAccess } = useAccess();
   const [projectName, setProjectName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -119,13 +68,10 @@ function NewProjectForm({ instanceAdminKey, onInstanceAdminKeyChange }: Instance
     setIsCreating(true);
     setProblem(null);
     try {
-      const project = await createProject(instanceAdminKey, projectName.trim());
+      const project = await createProject(credentials, projectName.trim());
+      await reloadAccess();
       navigate(projectPagePath(project.id));
     } catch (error) {
-      if (isApiKeyRejection(error)) {
-        onInstanceAdminKeyChange("");
-        return;
-      }
       setProblem((error as Error).message);
       setIsCreating(false);
     }
@@ -162,7 +108,7 @@ function NewProjectForm({ instanceAdminKey, onInstanceAdminKeyChange }: Instance
   );
 }
 
-function ProjectTable({ projects }: { projects: Project[] }) {
+function ProjectTable({ projects }: { projects: AccessibleProject[] }) {
   const navigate = useNavigate();
   const nowUnixMilliseconds = useNow(15_000);
   return (
@@ -171,6 +117,7 @@ function ProjectTable({ projects }: { projects: Project[] }) {
         <thead>
           <tr>
             <th scope="col">Project</th>
+            <th scope="col">Your Role</th>
             <th scope="col" className="column-numeric">Created</th>
           </tr>
         </thead>
@@ -190,6 +137,11 @@ function ProjectTable({ projects }: { projects: Project[] }) {
                 <Link className="project-cell-name" to={projectPagePath(project.id)}>
                   {project.name}
                 </Link>
+              </td>
+              <td>
+                {project.role === null
+                  ? <span className="status-text">None</span>
+                  : <span className="role-badge">{project.role}</span>}
               </td>
               <td
                 className="column-numeric text-muted"

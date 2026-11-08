@@ -32,7 +32,7 @@ Deno.test({
       browser = await launchBrowser();
       const openBrowser = browser;
       const openPromptUi = (path: string, width = 1440) =>
-        openUi(openBrowser, deployment, { width, apiKey: deployment.apiKey, path });
+        openUi(openBrowser, deployment, { width, account: deployment.admin, path });
 
       await testContext.step("moves between Traces and Prompts", async () => {
         const uiSession = await openPromptUi("/");

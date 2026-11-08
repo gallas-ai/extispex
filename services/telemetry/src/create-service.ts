@@ -1,7 +1,8 @@
 import type { ServiceRequestHandler } from "@extispex/service-client";
 import {
   createServiceHttpApp,
-  type ProjectResolver,
+  type ProjectAccessEnvironment,
+  type RequestAuthenticator,
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import type * as grpc from "@grpc/grpc-js";
@@ -21,7 +22,7 @@ export { openTelemetryDatabase, type TelemetryDatabase } from "./storage/telemet
 
 export interface TelemetryServiceDependencies {
   database: TelemetryDatabase;
-  projectResolver: ProjectResolver;
+  requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
   readCurrentTime?: () => Date;
 }
@@ -42,23 +43,26 @@ export function createTelemetryService(
     dependencies.readCurrentTime ?? (() => new Date()),
   );
 
-  const app = createServiceHttpApp({
+  const app = createServiceHttpApp<ProjectAccessEnvironment>({
     apiTitle: "Extispex: Telemetry API",
     logger: dependencies.logger,
   });
   registerOtlpHttpRoutes(app, {
     traceIngestion,
-    projectResolver: dependencies.projectResolver,
+    requestAuthenticator: dependencies.requestAuthenticator,
     logger: dependencies.logger,
   });
-  registerTraceQueryRoutes(app, { spanRepository, projectResolver: dependencies.projectResolver });
+  registerTraceQueryRoutes(app, {
+    spanRepository,
+    requestAuthenticator: dependencies.requestAuthenticator,
+  });
 
   return {
     handleRequest: (request) => app.fetch(request),
     createGrpcServer: () =>
       createOtlpGrpcServer({
         traceIngestion,
-        projectResolver: dependencies.projectResolver,
+        requestAuthenticator: dependencies.requestAuthenticator,
         logger: dependencies.logger,
       }),
   };

@@ -8,6 +8,7 @@ import {
   movePromptLabel,
   removePromptLabel,
 } from "../api/prompt-api.ts";
+import { useCanEditProject } from "../sign-in/access-context.ts";
 import { formatRelativeTime } from "../traces/trace-formatting.ts";
 import { AlertIcon, CompareIcon, PlusIcon, TagIcon, TrashIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
@@ -24,10 +25,11 @@ import {
   VariableList,
   VersionBadge,
 } from "./prompt-parts.tsx";
+import type { ApiCredentials } from "../api/api-request.ts";
 
 interface PromptPageProps {
-  apiKey: string;
-  onDisconnect: () => void;
+  credentials: ApiCredentials;
+  onSignInRequired: () => void;
 }
 
 interface PromptWithVersions {
@@ -36,16 +38,17 @@ interface PromptWithVersions {
 }
 
 /** One prompt: its version history beside the selected version, which is `?version=` or latest. */
-export function PromptPage({ apiKey, onDisconnect }: PromptPageProps) {
+export function PromptPage({ credentials, onSignInRequired }: PromptPageProps) {
+  const canEdit = useCanEditProject();
   const promptName = useParams().promptName as string;
   const [searchParameters] = useSearchParams();
   const loadPromptWithVersions = useCallback(async (): Promise<PromptWithVersions> => {
     const [prompt, { versions }] = await Promise.all([
-      getPrompt(apiKey, promptName),
-      listPromptVersions(apiKey, promptName),
+      getPrompt(credentials, promptName),
+      listPromptVersions(credentials, promptName),
     ]);
     return { prompt, versions };
-  }, [apiKey, promptName]);
+  }, [credentials, promptName]);
   const [promptState, reloadPrompt] = useApiResource(loadPromptWithVersions);
 
   if (promptState.status !== "loaded") {
@@ -64,9 +67,9 @@ export function PromptPage({ apiKey, onDisconnect }: PromptPageProps) {
             <LoadError
               subject="The prompt"
               message={promptState.message}
-              isApiKeyRejected={promptState.isApiKeyRejected}
+              isSignInRequired={promptState.isSignInRequired}
               onRetry={reloadPrompt}
-              onDisconnect={onDisconnect}
+              onSignInRequired={onSignInRequired}
             />
           )}
         </section>
@@ -103,13 +106,15 @@ export function PromptPage({ apiKey, onDisconnect }: PromptPageProps) {
               Compare
             </Link>
           )}
-          <Link
-            className="button button-primary"
-            to={newPromptVersionPath(prompt.name, selectedVersionNumber)}
-          >
-            <PlusIcon size={14} />
-            New version
-          </Link>
+          {canEdit && (
+            <Link
+              className="button button-primary"
+              to={newPromptVersionPath(prompt.name, selectedVersionNumber)}
+            >
+              <PlusIcon size={14} />
+              New version
+            </Link>
+          )}
         </div>
       </div>
 
@@ -121,16 +126,18 @@ export function PromptPage({ apiKey, onDisconnect }: PromptPageProps) {
             versions={versions}
             selectedVersionNumber={selectedVersionNumber}
           />
-          <PromptLabelManager
-            apiKey={apiKey}
-            prompt={prompt}
-            selectedVersionNumber={selectedVersionNumber}
-            onLabelsChanged={reloadPrompt}
-          />
+          {canEdit && (
+            <PromptLabelManager
+              credentials={credentials}
+              prompt={prompt}
+              selectedVersionNumber={selectedVersionNumber}
+              onLabelsChanged={reloadPrompt}
+            />
+          )}
         </div>
         <SelectedVersion
           key={selectedVersionNumber}
-          apiKey={apiKey}
+          credentials={credentials}
           prompt={prompt}
           versionNumber={selectedVersionNumber}
         />
@@ -191,15 +198,15 @@ function VersionHistory(
 }
 
 interface SelectedVersionProps {
-  apiKey: string;
+  credentials: ApiCredentials;
   prompt: PromptSummary;
   versionNumber: number;
 }
 
-function SelectedVersion({ apiKey, prompt, versionNumber }: SelectedVersionProps) {
+function SelectedVersion({ credentials, prompt, versionNumber }: SelectedVersionProps) {
   const loadVersion = useCallback(
-    () => getPromptVersion(apiKey, prompt.name, versionNumber),
-    [apiKey, prompt.name, versionNumber],
+    () => getPromptVersion(credentials, prompt.name, versionNumber),
+    [credentials, prompt.name, versionNumber],
   );
   const [versionState, reloadVersion] = useApiResource(loadVersion);
   // From the prompt rather than the version, so that a moved label shows here at once.
@@ -270,8 +277,8 @@ function LoadedVersion({ version }: { version: PromptVersion }) {
 
 /** The prompt's labels, each with the version it points to, moved to the selected version. */
 function PromptLabelManager(
-  { apiKey, prompt, selectedVersionNumber, onLabelsChanged }: {
-    apiKey: string;
+  { credentials, prompt, selectedVersionNumber, onLabelsChanged }: {
+    credentials: ApiCredentials;
     prompt: PromptSummary;
     selectedVersionNumber: number;
     onLabelsChanged: () => void;
@@ -303,7 +310,7 @@ function PromptLabelManager(
     if (labelName === "") return;
     const hasSucceeded = await changeLabel(
       labelName,
-      () => movePromptLabel(apiKey, prompt.name, labelName, versionNumber),
+      () => movePromptLabel(credentials, prompt.name, labelName, versionNumber),
     );
     if (hasSucceeded) setNewLabelName("");
   };
@@ -343,7 +350,8 @@ function PromptLabelManager(
                         onClick={() =>
                           changeLabel(
                             label.name,
-                            () => movePromptLabel(apiKey, prompt.name, label.name, versionNumber),
+                            () =>
+                              movePromptLabel(credentials, prompt.name, label.name, versionNumber),
                           )}
                       >
                         Move to v{versionNumber}
@@ -358,7 +366,7 @@ function PromptLabelManager(
                       onClick={() =>
                         changeLabel(
                           label.name,
-                          () => removePromptLabel(apiKey, prompt.name, label.name),
+                          () => removePromptLabel(credentials, prompt.name, label.name),
                         )}
                     >
                       <TrashIcon size={14} />

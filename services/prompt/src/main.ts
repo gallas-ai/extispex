@@ -1,6 +1,6 @@
 import { createHttpServiceClient } from "@extispex/service-client";
 import {
-  createIdentityProjectResolver,
+  createIdentityRequestAuthenticator,
   createStructuredLogger,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
@@ -13,8 +13,10 @@ const logger = createStructuredLogger("prompt");
 const database = await openPromptDatabase(readRequiredEnvironmentVariable("PROMPT_DATABASE_URL"));
 const promptService = createPromptService({
   database,
-  projectResolver: createIdentityProjectResolver({
+  requestAuthenticator: createIdentityRequestAuthenticator({
     identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
+    clientId: "prompt",
+    clientSecret: readRequiredEnvironmentVariable("IDENTITY_CLIENT_SECRET"),
   }),
   logger,
 });

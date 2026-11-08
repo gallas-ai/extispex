@@ -1,9 +1,11 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
+  createRequestAuthenticator,
   createStructuredLogger,
-  ProjectResolutionUnavailableError,
+  IdentityUnavailableError,
   type ProjectResolver,
 } from "@extispex/service-runtime";
+import { createTestAccessTokens } from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import type { ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
 import {
@@ -22,6 +24,13 @@ const testProjectResolver: ProjectResolver = {
       ({ [API_KEY]: "project-one", [OTHER_PROJECT_API_KEY]: "project-two" })[apiKey] ?? null,
     ),
 };
+
+/** Stands in for Identity's signing key, for access tokens with a Role. */
+const testAccessTokens = await createTestAccessTokens();
+const testRequestAuthenticator = createRequestAuthenticator({
+  projectResolver: testProjectResolver,
+  accessTokenVerifier: testAccessTokens.accessTokenVerifier,
+});
 const TRACE_ID = "5b8efff798038103d269b633813fc60c";
 const ROOT_SPAN_ID = "eee19b7ec3c1b174";
 const CHILD_SPAN_ID = "eee19b7ec3c1b175";
@@ -89,7 +98,7 @@ async function withTelemetryService(
     await database.orm.em.fork().execute("delete from spans");
     await testBody(createTelemetryService({
       database,
-      projectResolver: testProjectResolver,
+      requestAuthenticator: testRequestAuthenticator,
       logger: createStructuredLogger("telemetry-test"),
     }));
   } finally {
@@ -276,15 +285,45 @@ defineTelemetryTest("requires a valid API key", async (telemetryService) => {
   await response.body?.cancel();
 });
 
+defineTelemetryTest(
+  "lets a viewer query traces but not send telemetry",
+  async (telemetryService) => {
+    await postJsonTraces(
+      telemetryService,
+      createJsonTraceRequest({ includeCorrelationIdOnChild: true }),
+    );
+    const viewerToken = await testAccessTokens.issueAccessToken({
+      projectId: "project-one",
+      role: "viewer",
+    });
+    const traceResponse = await sendRequest(telemetryService, `/v1/traces/${TRACE_ID}`, {
+      apiKey: viewerToken,
+    });
+    assertEquals(traceResponse.status, 200);
+    await traceResponse.body?.cancel();
+
+    const ingestionResponse = await sendRequest(telemetryService, "/v1/traces", {
+      method: "POST",
+      apiKey: viewerToken,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(createJsonTraceRequest({ includeCorrelationIdOnChild: true })),
+    });
+    assertEquals(ingestionResponse.status, 403);
+    await ingestionResponse.body?.cancel();
+  },
+);
+
 Deno.test("asks clients to retry while API keys cannot be checked", async () => {
   const database = await openTelemetryDatabase("sqlite::memory:");
   try {
     const telemetryService = createTelemetryService({
       database,
-      projectResolver: {
-        resolveProjectId: () =>
-          Promise.reject(new ProjectResolutionUnavailableError("Identity is down.")),
-      },
+      requestAuthenticator: createRequestAuthenticator({
+        projectResolver: {
+          resolveProjectId: () => Promise.reject(new IdentityUnavailableError("Identity is down.")),
+        },
+        accessTokenVerifier: testAccessTokens.accessTokenVerifier,
+      }),
       logger: { ...createStructuredLogger("telemetry-test"), warn: () => {} },
     });
     for (

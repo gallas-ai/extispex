@@ -100,9 +100,25 @@ keys each belong to exactly one Project. _Avoid_: Workspace, tenant
 identifies. It is shown once, when it is created, and stored only as a hash. It can be revoked.
 _Avoid_: Token, access key
 
-**Instance admin key**: A secret from the Instance's configuration that manages Projects and API
-keys but reads no Project's data. It stands in for admins until users and Roles exist. _Avoid_:
-Master key (the encryption key for stored credentials), root key
+**User**: A person who signs in to the platform, with a local account or through the company's
+identity provider. _Avoid_: Account, member
+
+**Local account**: A user who signs in with a password that the platform stores.
+
+**Instance admin**: A user who manages Projects, users and Groups and every Project's Role
+assignments. Reads a Project's data only through a Role. _Avoid_: Superuser, root, Project admin
+(the Role `admin` in one Project)
+
+**Sign-in**: A browser's authenticated presence, from signing in until signing out or 12 hours
+without use. It lives in an HttpOnly cookie and yields access tokens. _Avoid_: Session (a group of
+traces), login
+
+**Access token**: A short-lived token that Identity signs for a user or a service, scoped to at most
+one Project and carrying the caller's Role there. Every service verifies it itself. _Avoid_: API
+key, session token
+
+**Service token**: An access token that Identity issues to a service, for its calls to other
+services. _Avoid_: Machine token, internal key
 
 **Group**: A set of users, imported from the company's identity system or created locally, that
 receives a Role in a Project. _Avoid_: Team

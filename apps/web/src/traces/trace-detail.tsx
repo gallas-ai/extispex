@@ -12,9 +12,10 @@ import {
   millisecondsBetween,
   shortenIdentifier,
 } from "./trace-formatting.ts";
+import type { ApiCredentials } from "../api/api-request.ts";
 
 interface TraceDetailProps {
-  apiKey: string;
+  credentials: ApiCredentials;
   traceId: string;
   selectedSpanId: string | null;
   onSelectSpan: (spanId: string) => void;
@@ -30,7 +31,7 @@ type TraceDetailState =
 
 export function TraceDetail(
   {
-    apiKey,
+    credentials,
     traceId,
     selectedSpanId,
     onSelectSpan,
@@ -45,7 +46,7 @@ export function TraceDetail(
   useEffect(() => {
     let isCurrentRequest = true;
     setTraceDetailState({ status: "loading" });
-    getTrace(apiKey, traceId)
+    getTrace(credentials, traceId)
       .then((trace) => {
         if (isCurrentRequest) setTraceDetailState({ status: "loaded", trace });
       })
@@ -55,7 +56,7 @@ export function TraceDetail(
     return () => {
       isCurrentRequest = false;
     };
-  }, [apiKey, traceId, loadAttempt]);
+  }, [credentials, traceId, loadAttempt]);
 
   return (
     <section className="panel trace-detail-panel" aria-label="Trace detail">

@@ -2,22 +2,25 @@ import type { PromptSummary } from "@extispex/contracts";
 import { useCallback } from "react";
 import { Link, useNavigate } from "react-router";
 import { listPrompts } from "../api/prompt-api.ts";
+import { useCanEditProject } from "../sign-in/access-context.ts";
 import { formatRelativeTime } from "../traces/trace-formatting.ts";
 import { PlusIcon, PromptIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
 import { useNow } from "../ui/use-now.ts";
 import { LabelBadge, promptPagePath, VersionBadge } from "./prompt-parts.tsx";
+import type { ApiCredentials } from "../api/api-request.ts";
 
 interface PromptsPageProps {
-  apiKey: string;
-  onDisconnect: () => void;
+  credentials: ApiCredentials;
+  onSignInRequired: () => void;
 }
 
 export const NEW_PROMPT_PATH = "/new-prompt";
 
-export function PromptsPage({ apiKey, onDisconnect }: PromptsPageProps) {
-  const loadPrompts = useCallback(() => listPrompts(apiKey), [apiKey]);
+export function PromptsPage({ credentials, onSignInRequired }: PromptsPageProps) {
+  const canEdit = useCanEditProject();
+  const loadPrompts = useCallback(() => listPrompts(credentials), [credentials]);
   const [promptsState, reloadPrompts] = useApiResource(loadPrompts);
 
   return (
@@ -33,12 +36,14 @@ export function PromptsPage({ apiKey, onDisconnect }: PromptsPageProps) {
               : " "}
           </p>
         </div>
-        <div className="page-actions">
-          <Link className="button button-primary" to={NEW_PROMPT_PATH}>
-            <PlusIcon size={14} />
-            New prompt
-          </Link>
-        </div>
+        {canEdit && (
+          <div className="page-actions">
+            <Link className="button button-primary" to={NEW_PROMPT_PATH}>
+              <PlusIcon size={14} />
+              New prompt
+            </Link>
+          </div>
+        )}
       </div>
 
       <section className="panel prompt-list-panel" aria-label="Prompt list">
@@ -47,9 +52,9 @@ export function PromptsPage({ apiKey, onDisconnect }: PromptsPageProps) {
           <LoadError
             subject="Prompts"
             message={promptsState.message}
-            isApiKeyRejected={promptsState.isApiKeyRejected}
+            isSignInRequired={promptsState.isSignInRequired}
             onRetry={reloadPrompts}
-            onDisconnect={onDisconnect}
+            onSignInRequired={onSignInRequired}
           />
         )}
         {promptsState.status === "loaded" && promptsState.resource.prompts.length === 0 && (
@@ -62,10 +67,12 @@ export function PromptsPage({ apiKey, onDisconnect }: PromptsPageProps) {
               Store a prompt with its model parameters. Every change becomes a new version, and
               labels such as <code>production</code> point to the version your application uses.
             </p>
-            <Link className="button button-primary" to={NEW_PROMPT_PATH}>
-              <PlusIcon size={14} />
-              Create a prompt
-            </Link>
+            {canEdit && (
+              <Link className="button button-primary" to={NEW_PROMPT_PATH}>
+                <PlusIcon size={14} />
+                Create a prompt
+              </Link>
+            )}
           </div>
         )}
         {promptsState.status === "loaded" && promptsState.resource.prompts.length > 0 && (

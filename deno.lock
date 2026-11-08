@@ -37,6 +37,7 @@
     "npm:@vitejs/plugin-react@5": "5.2.0_vite@7.3.7",
     "npm:diff@9.0.0": "9.0.0",
     "npm:hono@^4.10.0": "4.13.16",
+    "npm:jose@6.2.15": "6.2.15",
     "npm:playwright-core@1.64.1": "1.64.1",
     "npm:protobufjs@^7.5.0": "7.6.6",
     "npm:react-dom@19": "19.3.1_react@19.3.1",
@@ -957,6 +958,9 @@
     "is-fullwidth-code-point@3.0.0": {
       "integrity": "sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg=="
     },
+    "jose@6.2.15": {
+      "integrity": "sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA=="
+    },
     "js-tokens@4.0.0": {
       "integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="
     },
@@ -1316,7 +1320,8 @@
         "dependencies": [
           "jsr:@std/assert@1",
           "npm:@hono/zod-openapi@^1.1.0",
-          "npm:hono@^4.10.0"
+          "npm:hono@^4.10.0",
+          "npm:jose@6.2.15"
         ]
       },
       "packages/service-storage": {

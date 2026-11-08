@@ -13,7 +13,7 @@ or negative, for 60 seconds.
 ```ts
 // packages/service-runtime: what Telemetry and Prompt run for every request
 const projectId = await projectResolver.resolveProjectId(apiKey);
-//   cached for 60 s, keyed by SHA-256(apiKey), otherwise:
+//   cached for 60 s, keyed by SHA-256(apiKey), otherwise, with a service token since step 3:
 //   POST /internal/v1/api-keys/resolve {"apiKey": "extispex_…"} → 200 {"projectId"} | 404
 
 // services/identity: the lookup is one indexed query
@@ -53,5 +53,6 @@ revocation takes effect, which is what [architecture.md](../architecture.md#requ
   `Retry-After`, and gRPC `UNAVAILABLE`, which OTLP exporters retry.
 - A configured key such as `BOOTSTRAP_PROJECT_API_KEY` may lack the prefix. It must be at least 32
   characters long, and its first 8 characters are shown.
-- The resolution endpoint is internal and unauthenticated until service tokens exist (roadmap step
-  3), so Identity's port must stay inside the Instance's network.
+- The resolution endpoint is internal and was unauthenticated until service tokens existed. Since
+  roadmap step 3 it takes a service token, see
+  [ADR 0008](0008-project-scoped-access-tokens-signed-by-identity.md).

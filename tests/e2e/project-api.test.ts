@@ -1,5 +1,5 @@
 /**
- * Projects and API keys through the Gateway: a key created with the Instance admin key works for
+ * Projects and API keys through the Gateway: a key that the first administrator creates works for
  * OTLP ingestion and REST, and stops working within a minute of being revoked or of its Project
  * being deleted.
  */
@@ -8,28 +8,10 @@ import type { CreatedApiKey, ListApiKeysResponse, Project } from "@extispex/cont
 import * as grpc from "@grpc/grpc-js";
 import { Buffer } from "node:buffer";
 import { type RunningDeployment, startDeployment } from "./deployment.ts";
+import { callGateway, signInThroughGateway } from "./sign-in.ts";
 
 /** Identity's answers are cached for 60 seconds; the rest is time to notice the change. */
 const REVOCATION_DEADLINE_MILLISECONDS = 70_000;
-
-async function callGateway<ResponseBody>(
-  deployment: RunningDeployment,
-  method: string,
-  path: string,
-  expectedStatus: number,
-  { bearerToken, body }: { bearerToken: string; body?: unknown },
-): Promise<ResponseBody> {
-  const headers = new Headers({ authorization: `Bearer ${bearerToken}` });
-  if (body !== undefined) headers.set("content-type", "application/json");
-  const response = await fetch(`${deployment.gatewayUrl}${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const responseText = await response.text();
-  assertEquals(response.status, expectedStatus, `${method} ${path}: ${responseText}`);
-  return (responseText === "" ? null : JSON.parse(responseText)) as ResponseBody;
-}
 
 /** How each entry point answers a request made with the key. */
 interface KeyAcceptance {
@@ -126,7 +108,8 @@ Deno.test({
   sanitizeResources: false,
   fn: async (testContext) => {
     const deployment = await startDeployment();
-    const adminRequest = { bearerToken: deployment.instanceAdminKey };
+    const admin = await signInThroughGateway(deployment, deployment.admin);
+    const adminRequest = { bearerToken: admin.accessToken };
     // A fresh name keeps the test apart from Projects that other runs leave in a shared database.
     const projectName = `e2e-project-${crypto.randomUUID().slice(0, 8)}`;
     try {
@@ -134,8 +117,8 @@ Deno.test({
         assertEquals(await checkKey(deployment, deployment.apiKey), ACCEPTED);
       });
 
-      await testContext.step("refuses management without the Instance admin key", async () => {
-        for (const bearerToken of [deployment.apiKey, "wrong-admin-key"]) {
+      await testContext.step("refuses management without a user's access token", async () => {
+        for (const bearerToken of [deployment.apiKey, "wrong-access-token"]) {
           await callGateway(deployment, "GET", "/v1/projects", 401, { bearerToken });
         }
       });
