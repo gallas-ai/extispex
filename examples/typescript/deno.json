@@ -13,6 +13,7 @@
     "@opentelemetry/sdk-trace": "npm:@opentelemetry/sdk-trace@^3.0.0"
   },
   "tasks": {
-    "send-conversation": "deno run --allow-net --allow-env send-conversation.ts"
+    "send-conversation": "deno run --allow-net --allow-env send-conversation.ts",
+    "run-dataset": "deno run --allow-net --allow-env run-dataset.ts"
   }
 }

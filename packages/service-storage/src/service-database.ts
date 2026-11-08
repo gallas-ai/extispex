@@ -1,4 +1,9 @@
-import type { MigrationObject, Options } from "@mikro-orm/core";
+import {
+  type MigrationObject,
+  type Options,
+  TableExistsException,
+  UniqueConstraintViolationException,
+} from "@mikro-orm/core";
 import { Migrator } from "@mikro-orm/migrations";
 import type { MikroORM } from "@mikro-orm/sql";
 
@@ -32,6 +37,38 @@ export interface ServiceDatabaseOptions {
 export async function openServiceDatabase(
   options: ServiceDatabaseOptions,
 ): Promise<ServiceDatabase> {
+  for (let attemptNumber = 1;; attemptNumber++) {
+    try {
+      return await openAndMigrate(options);
+    } catch (error) {
+      if (attemptNumber >= MAXIMUM_OPEN_ATTEMPTS || !isLostInitializationRace(error)) throw error;
+      await new Promise((resolveDelay) =>
+        setTimeout(resolveDelay, attemptNumber * OPEN_RETRY_DELAY_MILLISECONDS)
+      );
+    }
+  }
+}
+
+const MAXIMUM_OPEN_ATTEMPTS = 8;
+const OPEN_RETRY_DELAY_MILLISECONDS = 250;
+
+/**
+ * Replicas that start together race to create the database and apply the migrations. Migrations run
+ * in one transaction, so the loser has changed nothing and finds the work done when it tries again.
+ */
+function isLostInitializationRace(error: unknown): boolean {
+  for (let current = error; current instanceof Error; current = current.cause) {
+    if (
+      current instanceof UniqueConstraintViolationException ||
+      current instanceof TableExistsException
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function openAndMigrate(options: ServiceDatabaseOptions): Promise<ServiceDatabase> {
   const { databaseUrl } = options;
   const sharedOptions = {
     entities: options.entities,
@@ -68,7 +105,12 @@ export async function openServiceDatabase(
       "The database URL must start with postgresql://, postgres:// or sqlite:.",
     );
   }
-  await orm.migrator.up();
+  try {
+    await orm.migrator.up();
+  } catch (error) {
+    await orm.close(true);
+    throw error;
+  }
   return { orm, dialect, close: () => orm.close(true) };
 }
 

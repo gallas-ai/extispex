@@ -12,8 +12,8 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 1    | [Prompt service](#1-prompt-service)                                                                    | Done   |
 | 2    | [Projects and API keys](#2-projects-and-api-keys)                                                      | Done   |
 | 3    | [Users, Groups, Roles and tokens](#3-users-groups-roles-and-tokens)                                    | Done   |
-| 4    | [Datasets and Client-Driven Execution](#4-datasets-and-client-driven-execution)                        | Next   |
-| 5    | [Trace completion and Telemetry Evaluator](#5-trace-completion-and-telemetry-evaluator)                |        |
+| 4    | [Datasets and Client-Driven Execution](#4-datasets-and-client-driven-execution)                        | Done   |
+| 5    | [Trace completion and Telemetry Evaluator](#5-trace-completion-and-telemetry-evaluator)                | Next   |
 | 6    | [Server-Driven Execution and Session Test Cases](#6-server-driven-execution-and-session-test-cases)    |        |
 | 7    | [LLM providers, Grading Evaluator and LLM Summary](#7-llm-providers-grading-evaluator-and-llm-summary) |        |
 | 8    | [Reports](#8-reports)                                                                                  |        |
@@ -435,6 +435,11 @@ deployments.
 - OTLP/gRPC behind an L7 load balancer.
 - CI installs the chart into a local cluster such as kind and runs the e2e tests against it.
 - Published images on `ghcr.io` with one version set.
+- Left over from step 4: replacing the retry in `openServiceDatabase` of `packages/service-storage`.
+  When replicas start together they race to create the database and apply migrations, and the loser
+  now tries again. That hides the race instead of removing it, and only the Evaluation service has a
+  test for it. Settle it together with how migrations run during an upgrade, and cover every
+  service.
 - Left over from step 3: rotating Identity's signing key. Services already read the keys again for
   an unknown key ID; what is missing is adding a new key, choosing which key signs, and removing the
   old one after the longest token lifetime.

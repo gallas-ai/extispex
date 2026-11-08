@@ -2,6 +2,12 @@
  * Local deployment: every service runs in this one process, each with its own SQLite file.
  * Services call each other through their request handlers instead of the network.
  */
+import {
+  createEvaluationApiService,
+  createEvaluationWorker,
+  openEvaluationDatabase,
+  openJobQueue,
+} from "@extispex/evaluation-service";
 import { createGatewayService } from "@extispex/gateway-service";
 import { MINIMUM_PASSWORD_LENGTH } from "@extispex/contracts";
 import {
@@ -44,6 +50,7 @@ const identityDatabase = await openIdentityDatabase(`sqlite:${dataDirectory}/ide
 const serviceClientSecrets = new Map([
   ["telemetry", generateServiceClientSecret()],
   ["prompt", generateServiceClientSecret()],
+  ["evaluation", generateServiceClientSecret()],
 ]);
 const identityService = createIdentityService({
   database: identityDatabase,
@@ -76,11 +83,33 @@ const promptService = createPromptService({
   logger: createStructuredLogger("prompt"),
 });
 
+const evaluationDatabaseUrl = `sqlite:${dataDirectory}/evaluation.sqlite`;
+const evaluationDatabase = await openEvaluationDatabase(evaluationDatabaseUrl);
+const evaluationLogger = createStructuredLogger("evaluation");
+const evaluationJobQueue = await openJobQueue(
+  evaluationDatabaseUrl,
+  evaluationDatabase,
+  evaluationLogger,
+);
+const evaluationApiService = createEvaluationApiService({
+  database: evaluationDatabase,
+  jobQueue: evaluationJobQueue,
+  requestAuthenticator: createRequestAuthenticator("evaluation"),
+  logger: evaluationLogger,
+});
+const evaluationWorker = createEvaluationWorker({
+  database: evaluationDatabase,
+  jobQueue: evaluationJobQueue,
+  logger: evaluationLogger,
+});
+await evaluationWorker.start();
+
 const gatewayService = createGatewayService({
   serviceClients: {
     telemetry: createInProcessServiceClient(telemetryService.handleRequest),
     prompt: createInProcessServiceClient(promptService.handleRequest),
     identity: createInProcessServiceClient(identityService.handleRequest),
+    evaluation: createInProcessServiceClient(evaluationApiService.handleRequest),
   },
   webAssetsDirectory: readOptionalEnvironmentVariable("WEB_ASSETS_DIRECTORY") ??
     new URL("../../web/dist", import.meta.url).pathname,
@@ -118,7 +147,13 @@ runOnTerminationSignal(logger, async () => {
     otlpHttpServer.shutdown(),
     shutdownOtlpGrpcServer(grpcServer),
   ]);
-  await Promise.all([telemetryDatabase.close(), promptDatabase.close(), identityDatabase.close()]);
+  await evaluationWorker.stop();
+  await Promise.all([
+    telemetryDatabase.close(),
+    promptDatabase.close(),
+    identityDatabase.close(),
+    evaluationDatabase.close(),
+  ]);
 });
 
 function readGrpcTlsFiles(): GrpcTlsFiles | null {

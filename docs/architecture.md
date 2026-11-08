@@ -57,6 +57,7 @@ flowchart LR
   company -- "OIDC, SCIM, file import" --> identity
   telemetry -- "public keys, service token, API key resolution cached 60 s" --> identity
   prompt -- "public keys, service token, API key resolution cached 60 s" --> identity
+  evaluation_api -- "public keys, service token, API key resolution cached 60 s" --> identity
   evaluation_worker -- "service token for a Project" --> identity
   evaluation_worker -- "read traces and sessions" --> telemetry
   evaluation_worker -- "read Prompt Versions" --> prompt
@@ -201,6 +202,55 @@ Without this check, a reused Session could let an Iteration pass because of a to
 earlier Iteration. Comparing the platform's receive times avoids problems with skewed client clocks.
 A retried Iteration is expected to produce new values.
 
+### Client-Driven Execution
+
+Built in roadmap step 4. See [ADR 0009](adr/0009-client-driven-execution-as-a-pull-protocol.md) for
+the reasons.
+
+A Test Case holds what the script needs and how to judge the Output:
+
+```json
+{
+  "name": "refund-mentions-30-days",
+  "scope": "trace",
+  "input": { "message": "What is your refund policy?" },
+  "expectedOutput": "Refunds within 30 days.",
+  "evaluators": [
+    { "type": "regex", "name": "mentions-days", "pattern": "30\\s*days", "flags": "i" }
+  ],
+  "iterations": 3,
+  "passThreshold": 0.66
+}
+```
+
+- **Copies:** starting a run copies its Test Cases, so editing or deleting them never changes a run.
+- **The script's loop:** `POST /v1/evaluation-runs`, `POST /v1/evaluation-runs/{id}/reports` and
+  `GET /v1/evaluation-runs/{id}/work` all answer with `runId`, `status`, `verdict`, `items` and
+  `evaluationsInProgress`. The script runs `items` and reports them, up to the run's `batchSize` of
+  at most 100. With no `items` and the status `running`, it waits for the worker.
+- **Attempts:** an Error, reported by the script or found by an Evaluator, puts the Iteration back
+  into `items` with the next `attempt`, up to three in total. Each attempt is stored.
+- **Reports** are handled one by one, and refused ones are listed in `rejected`. Repeating an
+  identical report changes nothing.
+- **The end of a run:** a run finishes when every Iteration has a result. `POST .../finish` ends it
+  early, and a run without a report for 24 hours ends too
+  (`EVALUATION_INACTIVE_RUN_TIMEOUT_MILLISECONDS`). Evaluations may take many hours, so the limit
+  counts from the last report rather than from the start. Open Iterations then end as Error, without
+  retries. The run's verdict is `failed` on any failure, otherwise `error` on any Error, otherwise
+  `passed`.
+- **Results** are paged, so their size does not grow with the run. `GET /v1/evaluation-runs/{id}` is
+  the run's state, `.../test-cases` a page of Test Case results, and
+  `.../test-cases/{name}/iterations` a page of one Test Case's Iterations with their attempts. A
+  page holds at most 50 entries and gives a `nextCursor`.
+- **Concurrency:** every change to a run first increments its `revision`, which locks the row until
+  commit, so exactly one transaction sees the last Iteration end and sets the verdicts.
+- **Job queue:** the API stores a report first and queues its job afterwards. A job can be lost
+  between the two, so the worker queues attempts again after two minutes, and judging an attempt
+  twice changes nothing. pg-boss keeps its tables in its own schema of the Evaluation database. The
+  local image polls a table in its SQLite file.
+- **Regular expressions** run in a new Web Worker that is terminated after one second
+  (`EVALUATION_REGEX_TIMEOUT_MILLISECONDS`). A timeout is an Error.
+
 ### Evaluators
 
 | Evaluator     | Trace Test Case           | Session Test Case                                                      |
@@ -306,8 +356,9 @@ those definitions, and the Gateway builds its forwarding table and the combined 
 - **UI and REST:** Identity issues short-lived access tokens, JWTs scoped to at most one Project and
   carrying the caller's Role there. Each service verifies them locally. See
   [ADR 0008](adr/0008-project-scoped-access-tokens-signed-by-identity.md).
-- **Scripts and OTLP:** a Project API key, which Telemetry and Prompt resolve through Identity and
-  cache for 60 seconds, so a revocation takes effect within a minute. An API key acts as `editor`.
+- **Scripts and OTLP:** a Project API key, which Telemetry, Prompt and Evaluation resolve through
+  Identity and cache for 60 seconds, so a revocation takes effect within a minute. An API key acts
+  as `editor`.
 - **Service to service:** each service obtains a short-lived service token from Identity. The worker
   uses one per Project to read Telemetry and Prompt data for the Project it is evaluating.
 
@@ -555,6 +606,18 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The Datasets and Client-Driven Execution step added these checks on 2026-11-08.
+
+| Tested                                                    | Result                                                                                                                  |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Evaluation service on SQLite and PostgreSQL               | Datasets, runs, retries, repeated reports, copies of Test Cases, early finish and inactive runs work on both            |
+| Concurrent evaluations of one run                         | Two deliveries each of eight jobs at once finish the run once with eight attempts, on both databases                    |
+| pg-boss 12.38.1 on PostgreSQL 17 in a container           | Delivers jobs and retries a failing one exactly up to its limit, from the Evaluation service's API and worker processes |
+| A slow regular expression                                 | `^(a+)+$` on 40 characters is terminated in its Web Worker at the time limit and ends as Error                          |
+| Five replicas starting at once on an empty server         | They create one database and apply its migrations once. API and worker starting together first exposed this race        |
+| The example scripts in TypeScript and Python              | Both run a Dataset to the verdict `passed` through the Gateway, in all-in-one and in separate services                  |
+| Datasets, Test Cases and run results in headless Chromium | Creating, editing, an invalid pattern and a run's results work, and nothing scrolls sideways from 360px to 2,000px      |
+
 The Users, Groups, Roles and tokens step added these checks on 2026-11-08.
 
 | Tested                                           | Result                                                                                                                                                     |
@@ -598,7 +661,9 @@ The Prompt service step added these checks on 2026-11-07.
 - Signing key rotation, which is not built, and many replicas creating the first signing key at once
 - Brute-force protection for sign-in: there is no rate limit or lockout yet
 - Browsers other than Chromium with the sign-in cookie
-- pg-boss under sustained load, in a container and on a managed PostgreSQL service
+- pg-boss under sustained load and on a managed PostgreSQL service
+- Very large Outputs in a result page: 50 Iterations with three attempts of 1 MB each can still
+  reach 150 MB in one response
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
 - The web UI's colours, spacing and typography, and browsers other than Chromium
@@ -622,3 +687,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0006: Public API routes in the shared contracts](adr/0006-public-api-routes-in-shared-contracts.md)
 - [ADR 0007: Prefixed API keys resolved through Identity](adr/0007-prefixed-api-keys-resolved-through-identity.md)
 - [ADR 0008: Project-scoped access tokens signed by Identity](adr/0008-project-scoped-access-tokens-signed-by-identity.md)
+- [ADR 0009: Client-Driven Execution as a pull protocol](adr/0009-client-driven-execution-as-a-pull-protocol.md)

@@ -9,6 +9,7 @@
     "services/telemetry",
     "services/prompt",
     "services/identity",
+    "services/evaluation",
     "services/gateway",
     "apps/all-in-one",
     "apps/web",

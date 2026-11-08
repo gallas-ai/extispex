@@ -3,6 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserRouter, Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router";
 import { AccessPage } from "./access/access-page.tsx";
 import { isSignInRequired } from "./api/api-request.ts";
+import { DatasetPage } from "./datasets/dataset-page.tsx";
+import { DatasetsPage } from "./datasets/datasets-page.tsx";
+import { EditTestCasePage, NewTestCasePage } from "./datasets/test-case-editor-page.tsx";
+import { EvaluationRunPage } from "./evaluation-runs/evaluation-run-page.tsx";
+import { EvaluationRunsPage } from "./evaluation-runs/evaluation-runs-page.tsx";
 import { getCurrentUser, listProjects } from "./api/identity-api.ts";
 import { signOut } from "./api/sign-in-api.ts";
 import { ProjectPage } from "./projects/project-page.tsx";
@@ -23,9 +28,11 @@ import {
   ActivityIcon,
   AlertIcon,
   BrandMark,
+  DatasetIcon,
   FolderIcon,
   InboxIcon,
   PromptIcon,
+  RunIcon,
   ShieldIcon,
 } from "./ui/icons.tsx";
 
@@ -177,6 +184,14 @@ function AppShell() {
                   <PromptIcon size={15} />
                   <span className="navigation-link-text">Prompts</span>
                 </Link>
+                <NavLink className="navigation-link" to="/datasets">
+                  <DatasetIcon size={15} />
+                  <span className="navigation-link-text">Datasets</span>
+                </NavLink>
+                <NavLink className="navigation-link" to="/evaluation-runs">
+                  <RunIcon size={15} />
+                  <span className="navigation-link-text">Runs</span>
+                </NavLink>
               </>
             )}
             <NavLink className="navigation-link" to="/projects">
@@ -230,6 +245,30 @@ function AppShell() {
                 <Route
                   path="/prompts/:promptName/compare"
                   element={<PromptComparisonPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/datasets"
+                  element={<DatasetsPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/datasets/:datasetName"
+                  element={<DatasetPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/datasets/:datasetName/new-test-case"
+                  element={<NewTestCasePage {...pageProps} />}
+                />
+                <Route
+                  path="/datasets/:datasetName/test-cases/:testCaseName"
+                  element={<EditTestCasePage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/evaluation-runs"
+                  element={<EvaluationRunsPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/evaluation-runs/:runId"
+                  element={<EvaluationRunPage key={selectedProject.id} {...pageProps} />}
                 />
                 <Route path="*" element={<PageNotFound />} />
               </>

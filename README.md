@@ -13,9 +13,10 @@ their Groups, and applications send its API keys.
 > judged whether an undertaking would end well. Looking inside and judging the outcome is tracing
 > and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
 
-**Status:** early development. The trace pipeline, versioned prompts, Projects with API keys, and
-users with Groups and Roles work end to end. Logs, metrics, evaluations and company sign-in (OIDC,
-SCIM) are designed in [docs/architecture.md](docs/architecture.md) but not built yet.
+**Status:** early development. The trace pipeline, versioned prompts, Projects with API keys, users
+with Groups and Roles, and Datasets judged by Regex Evaluators work end to end. Logs, metrics, the
+other Evaluators and company sign-in (OIDC, SCIM) are designed in
+[docs/architecture.md](docs/architecture.md) but not built yet.
 
 ## Try it locally
 
@@ -119,20 +120,33 @@ curl localhost:8080/v1/prompts/support-agent/labels/production \
 
 The full API, including comparing two versions, is described at `/v1/openapi.json`.
 
+## Evaluating your application
+
+A Dataset holds Test Cases: an input and the Regex Evaluators that judge your application's Output.
+Your own script runs the application and reports each Output, so this works from any CI job. Create
+Datasets under **Datasets** in the UI or through the REST API, and see the results under **Runs**.
+[examples/](examples/README.md) has a complete script in TypeScript and Python:
+
+```sh
+cd examples/typescript && API_KEY=$EXTISPEX_API_KEY deno task run-dataset
+```
+
+The script exits with 0 only when the run's verdict is `passed`.
+
 ## Container images
 
 Images are published to the GitHub Container Registry as `ghcr.io/gallas-ai/extispex-<service>`. The
 all-in-one image takes the bare name because it is the one to try first.
 
-| Image                                          | Runs                                       | Status  |
-| ---------------------------------------------- | ------------------------------------------ | ------- |
-| `ghcr.io/gallas-ai/extispex`                   | Every service in one process, with SQLite  | Built   |
-| `ghcr.io/gallas-ai/extispex-gateway`           | Gateway and web UI                         | Built   |
-| `ghcr.io/gallas-ai/extispex-telemetry`         | Telemetry service: OTLP ingestion, queries | Built   |
-| `ghcr.io/gallas-ai/extispex-evaluation`        | Evaluation service API                     | Planned |
-| `ghcr.io/gallas-ai/extispex-evaluation-worker` | Evaluation worker                          | Planned |
-| `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Built   |
-| `ghcr.io/gallas-ai/extispex-identity`          | Identity service: users, Roles, API keys   | Built   |
+| Image                                          | Runs                                       | Status |
+| ---------------------------------------------- | ------------------------------------------ | ------ |
+| `ghcr.io/gallas-ai/extispex`                   | Every service in one process, with SQLite  | Built  |
+| `ghcr.io/gallas-ai/extispex-gateway`           | Gateway and web UI                         | Built  |
+| `ghcr.io/gallas-ai/extispex-telemetry`         | Telemetry service: OTLP ingestion, queries | Built  |
+| `ghcr.io/gallas-ai/extispex-evaluation`        | Evaluation service API                     | Built  |
+| `ghcr.io/gallas-ai/extispex-evaluation-worker` | Evaluation worker                          | Built  |
+| `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Built  |
+| `ghcr.io/gallas-ai/extispex-identity`          | Identity service: users, Roles, API keys   | Built  |
 
 ## Development
 

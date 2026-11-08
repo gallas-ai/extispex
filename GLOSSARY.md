@@ -37,7 +37,10 @@ whether a tool was called or which model version was used. _Avoid_: Span test
 Summary. _Avoid_: Eval job, experiment
 
 **Iteration**: One of the configured repeated executions of a Test Case within an Evaluation Run. It
-passes only if all of its Evaluators pass. _Avoid_: Repeat, attempt
+passes only if all of its Evaluators pass. _Avoid_: Repeat, Attempt (one try within an Iteration)
+
+**Attempt**: One try at getting an Iteration's result: the first one, or one of the two retries that
+follow an Error. _Avoid_: Retry (for the first try), Iteration
 
 **Error**: The outcome of an Iteration or Test Case whose result could not be obtained. It says
 nothing about the application's quality, unlike a failure. _Avoid_: Failure

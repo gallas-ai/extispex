@@ -51,6 +51,7 @@ const E2E_ADMIN: LocalAccount = {
 const SERVICE_CLIENT_SECRETS = {
   telemetry: "e2e-telemetry-client-secret-0000000000",
   prompt: "e2e-prompt-client-secret-000000000000000",
+  evaluation: "e2e-evaluation-client-secret-0000000000",
   e2e: "e2e-test-client-secret-00000000000000000",
 };
 const STARTUP_TIMEOUT_MILLISECONDS = 60_000;
@@ -116,8 +117,8 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   }
   const workingDirectory = await Deno.makeTempDir({ prefix: "extispex-e2e-" });
   const tlsFiles = await createSelfSignedCertificate(workingDirectory);
-  const [otlpHttpPort, otlpGrpcPort, promptPort, identityPort, gatewayPort] =
-    await reserveFreePorts(5);
+  const [otlpHttpPort, otlpGrpcPort, promptPort, identityPort, evaluationPort, gatewayPort] =
+    await reserveFreePorts(6);
   const identityUrl = `http://127.0.0.1:${identityPort}`;
   const identityProcess = startDenoProcess("identity", "services/identity/src/main.ts", {
     IDENTITY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "identity_e2e"),
@@ -145,10 +146,27 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.prompt,
     PROMPT_PORT: String(promptPort),
   });
+  const evaluationDatabaseUrl = replaceDatabaseName(postgresServerUrl, "evaluation_e2e");
+  const evaluationApiProcess = startDenoProcess(
+    "evaluation-api",
+    "services/evaluation/src/main-api.ts",
+    {
+      EVALUATION_DATABASE_URL: evaluationDatabaseUrl,
+      IDENTITY_URL: identityUrl,
+      IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.evaluation,
+      EVALUATION_PORT: String(evaluationPort),
+    },
+  );
+  const evaluationWorkerProcess = startDenoProcess(
+    "evaluation-worker",
+    "services/evaluation/src/main-worker.ts",
+    { EVALUATION_DATABASE_URL: evaluationDatabaseUrl },
+  );
   const gatewayProcess = startDenoProcess("gateway", "services/gateway/src/main.ts", {
     TELEMETRY_URL: `http://127.0.0.1:${otlpHttpPort}`,
     PROMPT_URL: `http://127.0.0.1:${promptPort}`,
     IDENTITY_URL: identityUrl,
+    EVALUATION_URL: `http://127.0.0.1:${evaluationPort}`,
     GATEWAY_PORT: String(gatewayPort),
     WEB_ASSETS_DIRECTORY: `${REPOSITORY_ROOT}apps/web/dist`,
   });
@@ -168,6 +186,8 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
       await Promise.all([
         gatewayProcess.stop(),
         promptProcess.stop(),
+        evaluationApiProcess.stop(),
+        evaluationWorkerProcess.stop(),
         telemetryProcess.stop(),
         identityProcess.stop(),
       ]);
@@ -175,8 +195,21 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     },
   };
   await waitUntilHealthy(
-    [identityUrl, deployment.gatewayUrl, deployment.otlpHttpUrl, `http://127.0.0.1:${promptPort}`],
-    [identityProcess, telemetryProcess, promptProcess, gatewayProcess],
+    [
+      identityUrl,
+      deployment.gatewayUrl,
+      deployment.otlpHttpUrl,
+      `http://127.0.0.1:${promptPort}`,
+      `http://127.0.0.1:${evaluationPort}`,
+    ],
+    [
+      identityProcess,
+      telemetryProcess,
+      promptProcess,
+      evaluationApiProcess,
+      evaluationWorkerProcess,
+      gatewayProcess,
+    ],
   );
   return deployment;
 }

@@ -322,6 +322,8 @@ Deno.test({
 
         await page.keyboard.press("Escape");
         await page.locator(".trace-detail-panel").waitFor({ state: "detached" });
+        // The list loads apart from the open trace, and `j` moves through the list.
+        await page.locator(".trace-row").first().waitFor();
         await page.keyboard.press("j");
         await page.locator(".trace-detail-panel [role=tree]").waitFor();
         assertEquals(

@@ -32,6 +32,7 @@ const SERVICE_DISPLAY_NAMES: Record<PublicApiServiceName, string> = {
   telemetry: "Telemetry",
   prompt: "Prompt",
   identity: "Identity",
+  evaluation: "Evaluation",
 };
 
 export function createGatewayService(dependencies: GatewayServiceDependencies): GatewayService {
