@@ -1,0 +1,19 @@
+{
+  "name": "@extispex/evaluation-service",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/create-service.ts"
+  },
+  "imports": {
+    "@hono/zod-openapi": "npm:@hono/zod-openapi@^1.1.0",
+    "@mikro-orm/core": "npm:@mikro-orm/core@7.2.7",
+    "@mikro-orm/migrations": "npm:@mikro-orm/migrations@7.2.7",
+    "@mikro-orm/sql": "npm:@mikro-orm/sql@7.2.7",
+    "@std/assert": "jsr:@std/assert@^1.0.0",
+    "pg-boss": "npm:pg-boss@12.38.1"
+  },
+  "tasks": {
+    "start:api": "deno run --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-sys src/main-api.ts",
+    "start:worker": "deno run --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-sys src/main-worker.ts"
+  }
+}

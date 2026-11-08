@@ -189,6 +189,20 @@ export const PromptIcon = (props: IconProps) => (
   </StrokeIcon>
 );
 
+export const DatasetIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <ellipse cx="12" cy="5" rx="8" ry="3" />
+    <path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" />
+    <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+  </StrokeIcon>
+);
+
+export const RunIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="M6 4l14 8-14 8Z" />
+  </StrokeIcon>
+);
+
 export const PlusIcon = (props: IconProps) => (
   <StrokeIcon {...props}>
     <path d="M5 12h14M12 5v14" />

@@ -41,7 +41,7 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@extispex.local}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-development-admin-password}
       BOOTSTRAP_PROJECT_API_KEY: ${BOOTSTRAP_PROJECT_API_KEY:-development-project-api-key-not-for-production}
-      SERVICE_CLIENTS: telemetry:${TELEMETRY_CLIENT_SECRET:-development-telemetry-client-secret-0000},prompt:${PROMPT_CLIENT_SECRET:-development-prompt-client-secret-00000000}
+      SERVICE_CLIENTS: telemetry:${TELEMETRY_CLIENT_SECRET:-development-telemetry-client-secret-0000},prompt:${PROMPT_CLIENT_SECRET:-development-prompt-client-secret-00000000},evaluation:${EVALUATION_CLIENT_SECRET:-development-evaluation-client-secret-000}
     # No published port: the internal endpoints for tokens and API keys stay inside the network.
     depends_on:
       postgres:
@@ -78,6 +78,32 @@ services:
       identity:
         condition: service_started
 
+  evaluation:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/evaluation.Dockerfile
+    environment:
+      EVALUATION_DATABASE_URL: postgresql://extispex:extispex@postgres:5432/evaluation
+      IDENTITY_URL: http://identity:8082
+      IDENTITY_CLIENT_SECRET: ${EVALUATION_CLIENT_SECRET:-development-evaluation-client-secret-000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_started
+
+  evaluation-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/evaluation-worker.Dockerfile
+    environment:
+      EVALUATION_DATABASE_URL: postgresql://extispex:extispex@postgres:5432/evaluation
+    depends_on:
+      postgres:
+        condition: service_healthy
+      evaluation:
+        condition: service_started
+
   gateway:
     build:
       context: ../..
@@ -86,12 +112,14 @@ services:
       TELEMETRY_URL: http://telemetry:4318
       PROMPT_URL: http://prompt:8081
       IDENTITY_URL: http://identity:8082
+      EVALUATION_URL: http://evaluation:8083
     ports:
       - "${GATEWAY_HOST_PORT:-8080}:8080"
     depends_on:
       - telemetry
       - prompt
       - identity
+      - evaluation
 
 volumes:
   postgres-data:

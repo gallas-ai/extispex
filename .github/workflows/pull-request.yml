@@ -97,6 +97,8 @@ jobs:
           docker build -f deploy/docker/gateway.Dockerfile -t ghcr.io/gallas-ai/extispex-gateway:ci .
           docker build -f deploy/docker/prompt.Dockerfile -t ghcr.io/gallas-ai/extispex-prompt:ci .
           docker build -f deploy/docker/identity.Dockerfile -t ghcr.io/gallas-ai/extispex-identity:ci .
+          docker build -f deploy/docker/evaluation.Dockerfile -t ghcr.io/gallas-ai/extispex-evaluation:ci .
+          docker build -f deploy/docker/evaluation-worker.Dockerfile -t ghcr.io/gallas-ai/extispex-evaluation-worker:ci .
       - name: Start the all-in-one image as an arbitrary user, as OpenShift does
         run: |
           mkdir -p "$RUNNER_TEMP/certs"
