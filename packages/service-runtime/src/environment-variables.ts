@@ -29,6 +29,21 @@ export function readPortEnvironmentVariable(variableName: string, defaultPort: n
   return port;
 }
 
+export function readPositiveIntegerEnvironmentVariable(
+  variableName: string,
+  defaultValue: number,
+): number {
+  const variableValue = readOptionalEnvironmentVariable(variableName);
+  if (variableValue === undefined) return defaultValue;
+  const parsedValue = Number(variableValue);
+  if (!Number.isInteger(parsedValue) || parsedValue <= 0) {
+    throw new InvalidConfigurationError(
+      `Environment variable ${variableName} must be a positive whole number, got "${variableValue}".`,
+    );
+  }
+  return parsedValue;
+}
+
 /** Reads a secret such as a key, which must be long enough not to be guessed. */
 export function readSecretEnvironmentVariable(
   variableName: string,

@@ -189,7 +189,31 @@ follows Honeycomb Refinery's root-span rule, adapted for evaluation.
 - Spans that arrive after evaluation are stored and flagged, and they do not change the verdict.
 - A Session Test Case needs no idle timer, because its last step marks its end.
 
-Both timers are configurable.
+Both timers are configurable: `EVALUATION_ROOT_SPAN_SETTLE_MILLISECONDS` and
+`EVALUATION_ROOT_SPAN_TIMEOUT_MILLISECONDS`, with Telemetry asked every
+`EVALUATION_TELEMETRY_POLL_INTERVAL_MILLISECONDS` (2 seconds by default).
+
+Built in roadmap step 5:
+
+- **Only Test Cases with a Telemetry Evaluator wait.** An Output alone cannot be incomplete, so a
+  Test Case with only Regex Evaluators is judged at once and needs no telemetry.
+- **Several traces:** a Correlation ID can have several traces, for example after a retry. Each one
+  needs a root span, and the latest root span must have been stored for 10 seconds. A root span that
+  arrives just before the timeout still gets its full 10 seconds.
+- **No job waits in a worker slot.** A job that has to wait queues itself again with a delay, so
+  waiting Iterations do not hold back the others. Its age comes from the stored time of the Output,
+  so the job carries no state.
+- **Clocks:** Telemetry answers with its own current time, `readAt`, so the 10 seconds are measured
+  on one clock.
+- **Telemetry unavailable:** the attempt keeps waiting until the 60-second timeout, then ends as
+  Error.
+- **Telemetry's internal API** is `GET /internal/v1/correlations/{id}`, `.../spans`,
+  `POST .../evaluated` and `GET /internal/v1/sessions/{id}`. The Gateway does not forward them.
+  Telemetry's port is open to OTLP exporters, so they take only a service token for the Project. A
+  user's token or an API key gets `401`, even with the Role `admin`.
+- **Marking spans as evaluated:** the worker reports the `readAt` of the spans it judged, and
+  Telemetry stores it per Correlation ID. A span received later has `arrivedAfterEvaluation`, which
+  is worked out when reading, so spans are never rewritten.
 
 ### Protection against mixed telemetry
 
@@ -201,6 +225,15 @@ An Iteration ends as Error when its `session.id` or Correlation ID:
 Without this check, a reused Session could let an Iteration pass because of a tool call made by an
 earlier Iteration. Comparing the platform's receive times avoids problems with skewed client clocks.
 A retried Iteration is expected to produce new values.
+
+Built in roadmap step 5, and applied to Test Cases with a Telemetry Evaluator:
+
+- **When an attempt starts:** when the platform makes it available, which is the start of the run
+  for the first attempt and the end of the previous attempt for a retry. Client-Driven Execution has
+  no earlier signal, because handing out work is a repeatable read.
+- **Other attempts:** the first rule's "another Iteration" includes the other attempts of the same
+  Iteration, so a retry that repeats its IDs ends as Error. An ID found only after another Iteration
+  has already been judged ends the later Iteration as Error and leaves the earlier result alone.
 
 ### Client-Driven Execution
 
@@ -258,6 +291,27 @@ A Test Case holds what the script needs and how to judge the Output:
 | **Regex**     | The Output                | The last Output by default, or any step                                |
 | **Grading**   | The prompt and Transcript | The prompt and whole Transcript. Spans are added only when configured. |
 | **Telemetry** | Spans of that trace       | Spans of all traces with that `session.id`                             |
+
+A Telemetry Evaluator counts the spans that meet its conditions, see
+[ADR 0010](adr/0010-telemetry-evaluator-conditions-as-json.md):
+
+```json
+{
+  "type": "telemetry",
+  "name": "called-refund-tool",
+  "match": {
+    "name": "execute_tool",
+    "status": "ok",
+    "attributes": { "gen_ai.tool.name": "lookup_refund" }
+  },
+  "count": { "min": 1 }
+}
+```
+
+`name`, `status` and `attributes` are each optional, but one is required, and attribute values are
+compared exactly. `count` defaults to at least one, and `{ "min": 0, "max": 0 }` forbids such a
+span. More than 10,000 spans for one Correlation ID make the attempt an Error, because judging part
+of them could produce a false failure.
 
 ### Results
 
@@ -606,6 +660,19 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The Trace completion and Telemetry Evaluator step added these checks on 2026-11-09.
+
+| Tested                                               | Result                                                                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Telemetry Evaluator on real spans                    | OTLP spans through the Gateway pass and fail as expected, in all-in-one and in separate services                                           |
+| Missing root span                                    | Three attempts end as Error and the run's verdict is `error`, with shortened timers                                                        |
+| Reused Correlation ID                                | Telemetry from before the attempt and an ID used by the previous attempt both end as Error; a retry with a new ID passes                   |
+| A span that arrives after evaluation                 | Stored and flagged by `GET /v1/traces/{traceId}`, and the verdict does not change                                                          |
+| Trace completion and mixed telemetry, on both stores | The root-span rule, timeouts, a Telemetry outage and every mixed-telemetry rule on SQLite and PostgreSQL, against a stand-in for Telemetry |
+| Delayed jobs                                         | pg-boss and the SQLite queue hold a job back for its delay                                                                                 |
+| Internal endpoints                                   | Refuse a user's token, even as `admin`, and API keys; the Gateway does not forward them                                                    |
+| Telemetry Evaluator editor and results in Chromium   | Creating one, an invalid attribute, matched spans, the link to the span in its trace, and nothing scrolls sideways from 360px to 2,000px   |
+
 The Datasets and Client-Driven Execution step added these checks on 2026-11-08.
 
 | Tested                                                    | Result                                                                                                                  |
@@ -662,6 +729,14 @@ The Prompt service step added these checks on 2026-11-07.
 - Brute-force protection for sign-in: there is no rate limit or lockout yet
 - Browsers other than Chromium with the sign-in cookie
 - pg-boss under sustained load and on a managed PostgreSQL service
+- Mixed-telemetry protection with clock differences between Evaluation and Telemetry: it compares
+  the start of an attempt on Evaluation's clock with receive times on Telemetry's. Servers are
+  assumed to be synchronized, so a difference larger than the time a script needs to start could
+  reject an attempt
+- The default timers of 10 and 60 seconds end to end; the e2e tests shorten them
+- The evaluation worker's new environment in Docker Compose: its configuration was only validated,
+  not started
+- The 10,000-span limit for one Correlation ID: a read that large has not been measured
 - Very large Outputs in a result page: 50 Iterations with three attempts of 1 MB each can still
   reach 150 MB in one response
 - The rule that modules inside a service import each other only through their public entry points;
@@ -688,3 +763,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0007: Prefixed API keys resolved through Identity](adr/0007-prefixed-api-keys-resolved-through-identity.md)
 - [ADR 0008: Project-scoped access tokens signed by Identity](adr/0008-project-scoped-access-tokens-signed-by-identity.md)
 - [ADR 0009: Client-Driven Execution as a pull protocol](adr/0009-client-driven-execution-as-a-pull-protocol.md)
+- [ADR 0010: Telemetry Evaluator conditions as JSON](adr/0010-telemetry-evaluator-conditions-as-json.md)

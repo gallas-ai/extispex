@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { createStructuredLogger } from "@extispex/service-runtime";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import {
@@ -19,6 +19,34 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds = 30_000)
 }
 
 for (const testDatabase of listTestDatabases("evaluation")) {
+  Deno.test({
+    name: `holds a delayed job back until its time (${testDatabase.label})`,
+    sanitizeResources: false,
+    sanitizeOps: false,
+    fn: async () => {
+      const database = await openEvaluationDatabase(testDatabase.url);
+      const jobQueue = await openJobQueue(testDatabase.url, database, logger);
+      const iterationId = crypto.randomUUID();
+      let deliveredAt: number | null = null;
+      try {
+        await jobQueue.startWorking((job) => {
+          if (job.iterationId === iterationId) deliveredAt = Date.now();
+          return Promise.resolve();
+        });
+        const enqueuedAt = Date.now();
+        await jobQueue.enqueue([{ iterationId, attemptNumber: 1 }], { delayMilliseconds: 1_500 });
+        await waitUntil(() => deliveredAt !== null);
+        assert(
+          deliveredAt! - enqueuedAt >= 1_000,
+          `Delivered after ${deliveredAt! - enqueuedAt} ms.`,
+        );
+      } finally {
+        await jobQueue.stop();
+        await database.close();
+      }
+    },
+  });
+
   Deno.test({
     name: `delivers jobs and retries a failing one up to its limit (${testDatabase.label})`,
     // pg-boss keeps its connection pool and timers until the process ends.

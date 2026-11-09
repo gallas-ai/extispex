@@ -7,7 +7,13 @@ import {
 } from "@extispex/service-runtime";
 import { createTestAccessTokens } from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
-import type { ListTracesResponse, TraceDetailResponse } from "@extispex/contracts";
+import type {
+  CorrelationSpansResponse,
+  CorrelationTelemetryResponse,
+  ListTracesResponse,
+  SessionTelemetryResponse,
+  TraceDetailResponse,
+} from "@extispex/contracts";
 import {
   createTelemetryService,
   openTelemetryDatabase,
@@ -96,6 +102,7 @@ async function withTelemetryService(
   const database = await openTelemetryDatabase(databaseUrl);
   try {
     await database.orm.em.fork().execute("delete from spans");
+    await database.orm.em.fork().execute("delete from correlation_evaluations");
     await testBody(createTelemetryService({
       database,
       requestAuthenticator: testRequestAuthenticator,
@@ -359,5 +366,161 @@ defineTelemetryTest("publishes an OpenAPI 3.1 document", async (telemetryService
   const response = await sendRequest(telemetryService, "/openapi.json");
   const openApiDocument = await response.json();
   assertEquals(openApiDocument.openapi, "3.1.0");
-  assertEquals(Object.keys(openApiDocument.paths).sort(), ["/v1/traces", "/v1/traces/{traceId}"]);
+  assertEquals(Object.keys(openApiDocument.paths).sort(), [
+    "/internal/v1/correlations/{correlationId}",
+    "/internal/v1/correlations/{correlationId}/evaluated",
+    "/internal/v1/correlations/{correlationId}/spans",
+    "/internal/v1/sessions/{sessionId}",
+    "/v1/traces",
+    "/v1/traces/{traceId}",
+  ]);
+});
+
+function issueServiceToken(projectId = "project-one") {
+  return testAccessTokens.issueAccessToken({
+    subject: "service:evaluation",
+    projectId,
+    role: "viewer",
+  });
+}
+
+async function readInternal<ResponseBody>(
+  telemetryService: TelemetryService,
+  path: string,
+  projectId?: string,
+): Promise<ResponseBody> {
+  const response = await sendRequest(telemetryService, path, {
+    apiKey: await issueServiceToken(projectId),
+  });
+  const responseText = await response.text();
+  assertEquals(response.status, 200, responseText);
+  return JSON.parse(responseText) as ResponseBody;
+}
+
+async function markEvaluated(
+  telemetryService: TelemetryService,
+  correlationId: string,
+  evaluatedAt: Date,
+) {
+  const response = await sendRequest(
+    telemetryService,
+    `/internal/v1/correlations/${correlationId}/evaluated`,
+    {
+      apiKey: await issueServiceToken(),
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ evaluatedAt: evaluatedAt.toISOString() }),
+    },
+  );
+  assertEquals(response.status, 204, await response.clone().text());
+}
+
+defineTelemetryTest("says when a Correlation ID's telemetry was stored", async (service) => {
+  const emptyState = await readInternal<CorrelationTelemetryResponse>(
+    service,
+    "/internal/v1/correlations/order-42",
+  );
+  assertEquals(emptyState.firstReceivedAt, null);
+  assertEquals(emptyState.traces, []);
+
+  await postJsonTraces(service, createJsonTraceRequest({ includeCorrelationIdOnChild: true }));
+  const state = await readInternal<CorrelationTelemetryResponse>(
+    service,
+    "/internal/v1/correlations/order-42",
+  );
+  assert(state.firstReceivedAt !== null);
+  assertEquals(state.traces.map((trace) => trace.traceId), [TRACE_ID]);
+  assert(state.traces[0].rootSpanStoredAt !== null);
+
+  const sessionState = await readInternal<SessionTelemetryResponse>(
+    service,
+    "/internal/v1/sessions/chat-7",
+  );
+  assertEquals(sessionState.firstReceivedAt, state.firstReceivedAt);
+  const otherProjectState = await readInternal<CorrelationTelemetryResponse>(
+    service,
+    "/internal/v1/correlations/order-42",
+    "project-two",
+  );
+  assertEquals(otherProjectState.traces, []);
+});
+
+defineTelemetryTest("reports a trace without its root span", async (service) => {
+  const payload = createJsonTraceRequest({ includeCorrelationIdOnChild: true });
+  payload.resourceSpans[0].scopeSpans[0].spans.shift();
+  await postJsonTraces(service, payload);
+  const state = await readInternal<CorrelationTelemetryResponse>(
+    service,
+    "/internal/v1/correlations/order-42",
+  );
+  assertEquals(state.traces, [{ traceId: TRACE_ID, rootSpanStoredAt: null }]);
+});
+
+defineTelemetryTest(
+  "finds a Correlation ID with characters that need encoding",
+  async (service) => {
+    const correlationId = "order/42 and more";
+    const payload = createJsonTraceRequest({ includeCorrelationIdOnChild: false });
+    const [rootSpan] = payload.resourceSpans[0].scopeSpans[0].spans;
+    rootSpan.attributes[0] = stringAttribute("correlation.id", correlationId);
+    payload.resourceSpans[0].scopeSpans[0].spans.pop();
+    await postJsonTraces(service, payload);
+    const { spans } = await readInternal<CorrelationSpansResponse>(
+      service,
+      `/internal/v1/correlations/${encodeURIComponent(correlationId)}/spans`,
+    );
+    assertEquals(spans.map((span) => span.correlationId), [correlationId]);
+  },
+);
+
+defineTelemetryTest("flags spans that arrive after their evaluation", async (service) => {
+  const payload = createJsonTraceRequest({ includeCorrelationIdOnChild: true });
+  const allSpans = payload.resourceSpans[0].scopeSpans[0].spans;
+  const [rootSpan, childSpan] = allSpans;
+  allSpans.splice(0, 2, rootSpan);
+  await postJsonTraces(service, payload);
+  const readTrace = async () =>
+    await (await sendRequest(service, `/v1/traces/${TRACE_ID}`)).json() as TraceDetailResponse;
+  assertEquals((await readTrace()).spans[0].arrivedAfterEvaluation, false);
+
+  const evaluatedAt = new Date(Date.parse((await readTrace()).spans[0].receivedAt) + 1);
+  await markEvaluated(service, "order-42", evaluatedAt);
+  // A repeated job changes nothing: the first evaluation stays the cut-off.
+  await markEvaluated(service, "order-42", new Date(evaluatedAt.getTime() + 3_600_000));
+
+  // Exactly the stored time would not count as late, so the second batch waits past it.
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+  allSpans.splice(0, 1, childSpan);
+  await postJsonTraces(service, payload);
+  const { spans } = await readTrace();
+  assertEquals(spans.map((span) => span.arrivedAfterEvaluation), [false, true]);
+  assertEquals(
+    (await readInternal<CorrelationSpansResponse>(
+      service,
+      "/internal/v1/correlations/order-42/spans",
+    )).spans.map((span) => span.arrivedAfterEvaluation),
+    [false, true],
+  );
+});
+
+defineTelemetryTest("keeps its internal endpoints for services", async (service) => {
+  const path = "/internal/v1/correlations/order-42";
+  const userToken = await testAccessTokens.issueAccessToken({
+    subject: "user:person",
+    projectId: "project-one",
+    role: "admin",
+  });
+  for (const apiKey of [API_KEY, userToken, "wrong-key"]) {
+    const readResponse = await sendRequest(service, path, { apiKey });
+    assertEquals(readResponse.status, 401);
+    await readResponse.body?.cancel();
+    const markResponse = await sendRequest(service, `${path}/evaluated`, {
+      apiKey,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ evaluatedAt: new Date().toISOString() }),
+    });
+    assertEquals(markResponse.status, 401);
+    await markResponse.body?.cancel();
+  }
 });

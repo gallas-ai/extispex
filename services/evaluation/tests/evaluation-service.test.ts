@@ -1,8 +1,10 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type {
+  CorrelationTelemetryResponse,
   Dataset,
   EvaluationRunSummary,
   EvaluationRunWork,
+  Evaluator,
   IterationReport,
   ListDatasetsResponse,
   ListEvaluationRunsResponse,
@@ -10,6 +12,7 @@ import type {
   ListTestCaseResultsResponse,
   ListTestCasesResponse,
   ReportIterationsResponse,
+  Span,
   TestCase,
 } from "@extispex/contracts";
 import {
@@ -56,10 +59,51 @@ const MENTIONS_DAYS_EVALUATOR = {
   flags: "i",
 };
 
+/** Stands in for Telemetry's internal API; a test says what it has received. */
+interface FakeTelemetry {
+  correlations: Map<string, Omit<CorrelationTelemetryResponse, "readAt">>;
+  firstReceivedAtBySession: Map<string, string>;
+  spans: Map<string, Span[]>;
+  evaluatedAt: Map<string, string>;
+  isUnavailable: boolean;
+  requestCount: number;
+}
+
+const FAKE_SERVICE_TOKENS = {
+  readServiceToken: (projectId: string | null) => Promise.resolve(`token-for-${projectId}`),
+  forgetServiceToken: () => {},
+};
+
+function createFakeTelemetryService(fake: FakeTelemetry, readClock: () => Date) {
+  return async (request: Request): Promise<Response> => {
+    assertEquals(request.headers.get("authorization"), "Bearer token-for-project-one");
+    fake.requestCount++;
+    if (fake.isUnavailable) return new Response(null, { status: 503 });
+    const readAt = readClock().toISOString();
+    const path = new URL(request.url).pathname.split("/").map(decodeURIComponent);
+    const [resource, id, action] = path.slice(3);
+    if (resource === "sessions") {
+      const firstReceivedAt = fake.firstReceivedAtBySession.get(id) ?? null;
+      return Response.json({ readAt, firstReceivedAt });
+    }
+    if (action === "spans") {
+      return Response.json({ readAt, spans: fake.spans.get(id) ?? [], isTruncated: false });
+    }
+    if (action === "evaluated") {
+      fake.evaluatedAt.set(id, (await request.json()).evaluatedAt);
+      return new Response(null, { status: 204 });
+    }
+    const correlation = fake.correlations.get(id) ?? { firstReceivedAt: null, traces: [] };
+    return Response.json({ readAt, ...correlation });
+  };
+}
+
 interface TestHarness {
   api: EvaluationApiService;
   worker: EvaluationWorker;
   queuedJobs: EvaluateAttemptJob[];
+  telemetry: FakeTelemetry;
+  readClock(): Date;
   advanceClock(milliseconds: number): void;
   /** Judges everything queued so far, as the worker would. */
   drainJobs(): Promise<void>;
@@ -87,9 +131,20 @@ function defineEvaluationTest(testName: string, testBody: EvaluationTestBody): v
           stop: () => Promise.resolve(),
         };
         const logger = createStructuredLogger("evaluation-test");
+        const telemetry: FakeTelemetry = {
+          correlations: new Map(),
+          firstReceivedAtBySession: new Map(),
+          spans: new Map(),
+          evaluatedAt: new Map(),
+          isUnavailable: false,
+          requestCount: 0,
+        };
+        const readClock = () => new Date(clockMilliseconds);
         const worker = createEvaluationWorker({
           database,
           jobQueue,
+          telemetryService: createFakeTelemetryService(telemetry, readClock),
+          serviceTokens: FAKE_SERVICE_TOKENS,
           logger,
           regexTimeoutMilliseconds: 300,
           inactiveRunTimeoutMilliseconds: INACTIVE_RUN_TIMEOUT_MILLISECONDS,
@@ -105,6 +160,8 @@ function defineEvaluationTest(testName: string, testBody: EvaluationTestBody): v
           }),
           worker,
           queuedJobs,
+          telemetry,
+          readClock,
           advanceClock: (milliseconds) => {
             clockMilliseconds += milliseconds;
           },
@@ -259,7 +316,10 @@ defineEvaluationTest("manages Datasets and Test Cases", async (harness) => {
   assertEquals(stored.iterations, 1);
   assertEquals(stored.passThreshold, 1);
   assertEquals(stored.expectedOutput, null);
-  assertEquals(stored.evaluators[0].expectMatch, true);
+  assertEquals(
+    stored.evaluators[0],
+    { ...MENTIONS_DAYS_EVALUATOR, expectMatch: true } as Evaluator,
+  );
 
   const { name: _name, ...replacement } = refundTestCase({ iterations: 3, passThreshold: 0.66 });
   const updated = await expectJson<TestCase>(
@@ -508,7 +568,7 @@ defineEvaluationTest("runs use the copy of a Test Case made when they started", 
   await harness.drainJobs();
   const run = await readRun(harness, work.runId);
   assertEquals(run.verdict, "passed");
-  assertEquals(run.testCases[0].evaluators[0].pattern, "30\\s*days");
+  assertEquals(run.testCases[0].evaluators[0].name, MENTIONS_DAYS_EVALUATOR.name);
   assertEquals((await sendRequest(harness, "DELETE", "/v1/datasets/support-bot")).status, 204);
   assertEquals((await readRun(harness, work.runId)).verdict, "passed");
 });
@@ -666,4 +726,330 @@ defineEvaluationTest("pages through a run's results without gaps", async (harnes
     sendRequest(harness, "GET", iterationsPath, { bearerToken: OTHER_PROJECT_API_KEY }),
     404,
   );
+});
+
+const CALLED_TOOL_EVALUATOR = {
+  type: "telemetry",
+  name: "called-lookup",
+  match: { name: "execute_tool", attributes: { "gen_ai.tool.name": "lookup_refund" } },
+};
+
+function createSpan(overrides: Partial<Span> = {}): Span {
+  return {
+    traceId: "trace-1",
+    spanId: "span-1",
+    parentSpanId: "root-span",
+    name: "execute_tool",
+    kind: "internal",
+    startTimeUnixNano: "1",
+    endTimeUnixNano: "2",
+    durationMilliseconds: 12,
+    statusCode: "ok",
+    statusMessage: null,
+    serviceName: "support-bot",
+    correlationId: "correlation",
+    sessionId: null,
+    attributes: { "gen_ai.tool.name": "lookup_refund", "other.attribute": "not copied" },
+    resourceAttributes: {},
+    receivedAt: "2026-11-08T10:00:00.000Z",
+    arrivedAfterEvaluation: false,
+    ...overrides,
+  };
+}
+
+/** A run of one Test Case with a Telemetry Evaluator; its first Iteration is reported. */
+async function startTelemetryRun(
+  harness: TestHarness,
+  testCaseOverrides: Record<string, unknown> = {},
+) {
+  await createDatasetWithTestCases(harness, [
+    refundTestCase({ evaluators: [CALLED_TOOL_EVALUATOR], ...testCaseOverrides }),
+  ]);
+  return await startRun(harness);
+}
+
+/** Telemetry that has its root span, stored now. */
+function storeCompleteTrace(harness: TestHarness, correlationId: string, spans = [createSpan()]) {
+  const storedAt = harness.readClock().toISOString();
+  harness.telemetry.correlations.set(correlationId, {
+    firstReceivedAt: storedAt,
+    traces: [{ traceId: "trace-1", rootSpanStoredAt: storedAt }],
+  });
+  harness.telemetry.spans.set(correlationId, spans);
+}
+
+function readAttempts(run: Awaited<ReturnType<typeof readRun>>) {
+  return run.testCases[0].iterations[0].attempts;
+}
+
+defineEvaluationTest(
+  "judges spans once the root span has been stored long enough",
+  async (harness) => {
+    const work = await startTelemetryRun(harness);
+    const correlationId = "correlation-settled";
+    await report(harness, work.runId, [{ ...outputReport(work.items[0], "x"), correlationId }]);
+
+    // No telemetry yet: the job comes back later, and the attempt stays open.
+    await harness.drainJobs();
+    assertEquals(harness.queuedJobs.length, 1);
+    assertEquals(readAttempts(await readRun(harness, work.runId))[0].outcome, null);
+
+    // The root span is there, but other services may still be sending theirs.
+    storeCompleteTrace(harness, correlationId);
+    await harness.drainJobs();
+    assertEquals(harness.queuedJobs.length, 1);
+    assertEquals(harness.telemetry.evaluatedAt.size, 0);
+
+    harness.advanceClock(10_000);
+    await harness.drainJobs();
+    assertEquals(harness.queuedJobs.length, 0);
+    const run = await readRun(harness, work.runId);
+    assertEquals(run.verdict, "passed");
+    const [evaluatorResult] = readAttempts(run)[0].evaluatorResults;
+    assertEquals(evaluatorResult.type, "telemetry");
+    assertEquals(evaluatorResult.outcome, "passed");
+    assertEquals(evaluatorResult.matchedSpanCount, 1);
+    // The summary keeps what the Evaluator tested, so it stays readable after retention expires.
+    assertEquals(evaluatorResult.matchedSpans?.[0], {
+      traceId: "trace-1",
+      spanId: "span-1",
+      name: "execute_tool",
+      statusCode: "ok",
+      durationMilliseconds: 12,
+      serviceName: "support-bot",
+      attributes: { "gen_ai.tool.name": "lookup_refund" },
+    });
+    assert(harness.telemetry.evaluatedAt.has(correlationId));
+  },
+);
+
+defineEvaluationTest("fails when the spans do not match", async (harness) => {
+  const work = await startTelemetryRun(harness);
+  const correlationId = "correlation-other-tool";
+  await report(harness, work.runId, [{ ...outputReport(work.items[0], "x"), correlationId }]);
+  storeCompleteTrace(harness, correlationId, [
+    createSpan({ attributes: { "gen_ai.tool.name": "other" } }),
+  ]);
+  harness.advanceClock(11_000);
+  await harness.drainJobs();
+  const run = await readRun(harness, work.runId);
+  assertEquals(run.verdict, "failed");
+  const [evaluatorResult] = readAttempts(run)[0].evaluatorResults;
+  assertEquals(evaluatorResult.matchedSpanCount, 0);
+  assertStringIncludes(evaluatorResult.reason, "expected at least 1");
+});
+
+defineEvaluationTest(
+  "runs the other Evaluators after the telemetry is complete",
+  async (harness) => {
+    const work = await startTelemetryRun(harness, {
+      evaluators: [MENTIONS_DAYS_EVALUATOR, CALLED_TOOL_EVALUATOR],
+    });
+    const correlationId = "correlation-both";
+    await report(harness, work.runId, [{
+      ...outputReport(work.items[0], "30 days"),
+      correlationId,
+    }]);
+    storeCompleteTrace(harness, correlationId);
+    harness.advanceClock(11_000);
+    await harness.drainJobs();
+    const run = await readRun(harness, work.runId);
+    assertEquals(readAttempts(run)[0].evaluatorResults.map((result) => result.outcome), [
+      "passed",
+      "passed",
+    ]);
+  },
+);
+
+defineEvaluationTest(
+  "ends an attempt as Error when no root span arrives in time",
+  async (harness) => {
+    const work = await startTelemetryRun(harness, { iterations: 1 });
+    const [item] = work.items;
+    const correlationId = "correlation-no-root";
+    await report(harness, work.runId, [{ ...outputReport(item, "x"), correlationId }]);
+    harness.telemetry.correlations.set(correlationId, {
+      firstReceivedAt: harness.readClock().toISOString(),
+      traces: [{ traceId: "trace-1", rootSpanStoredAt: null }],
+    });
+    harness.advanceClock(50_000);
+    await harness.drainJobs();
+    assertEquals(harness.queuedJobs.length, 1);
+    harness.advanceClock(10_000);
+    await harness.drainJobs();
+
+    const [attempt] = readAttempts(await readRun(harness, work.runId));
+    assertEquals(attempt.outcome, "error");
+    assertStringIncludes(attempt.error ?? "", "No root span arrived within 60 s");
+    assertEquals(harness.telemetry.evaluatedAt.size, 0);
+    // An Error gets another attempt, which must use new IDs.
+    const nextWork = await expectJson<EvaluationRunWork>(
+      sendRequest(harness, "GET", `/v1/evaluation-runs/${work.runId}/work`),
+      200,
+    );
+    assertEquals(nextWork.items.map((workItem) => workItem.attempt), [2]);
+  },
+);
+
+defineEvaluationTest("reports when no telemetry arrived at all", async (harness) => {
+  const work = await startTelemetryRun(harness);
+  await report(harness, work.runId, [outputReport(work.items[0], "x")]);
+  harness.advanceClock(61_000);
+  await harness.drainJobs();
+  assertStringIncludes(
+    readAttempts(await readRun(harness, work.runId))[0].error ?? "",
+    "No telemetry for this Correlation ID",
+  );
+});
+
+defineEvaluationTest("rejects telemetry received before the attempt started", async (harness) => {
+  const earlier = new Date(harness.readClock().getTime() - 5_000).toISOString();
+  const work = await startTelemetryRun(harness);
+  const correlationId = "correlation-reused";
+  harness.telemetry.correlations.set(correlationId, { firstReceivedAt: earlier, traces: [] });
+  await report(harness, work.runId, [{ ...outputReport(work.items[0], "x"), correlationId }]);
+  await harness.drainJobs();
+  const [attempt] = readAttempts(await readRun(harness, work.runId));
+  assertEquals(attempt.outcome, "error");
+  assertStringIncludes(attempt.error ?? "", "already had telemetry");
+  assertEquals(harness.queuedJobs.length, 0);
+});
+
+defineEvaluationTest("rejects a Session that already had telemetry", async (harness) => {
+  const earlier = new Date(harness.readClock().getTime() - 5_000).toISOString();
+  const work = await startTelemetryRun(harness);
+  const correlationId = "correlation-new";
+  harness.telemetry.firstReceivedAtBySession.set("chat-reused", earlier);
+  storeCompleteTrace(harness, correlationId);
+  await report(harness, work.runId, [{
+    ...outputReport(work.items[0], "x"),
+    correlationId,
+    sessionId: "chat-reused",
+  }]);
+  await harness.drainJobs();
+  assertStringIncludes(
+    readAttempts(await readRun(harness, work.runId))[0].error ?? "",
+    "This session.id already had telemetry",
+  );
+});
+
+defineEvaluationTest(
+  "rejects a Correlation ID used by another Iteration of the run",
+  async (harness) => {
+    const work = await startTelemetryRun(harness, { iterations: 2 });
+    const correlationId = "correlation-shared";
+    storeCompleteTrace(harness, correlationId);
+    await report(
+      harness,
+      work.runId,
+      work.items.map((item) => ({ ...outputReport(item, "x"), correlationId })),
+    );
+    harness.advanceClock(11_000);
+    await harness.drainJobs();
+    const run = await readRun(harness, work.runId);
+    for (const iteration of run.testCases[0].iterations) {
+      assertEquals(iteration.attempts[0].outcome, "error");
+      assertStringIncludes(iteration.attempts[0].error ?? "", "also used by Test Case refund");
+    }
+  },
+);
+
+defineEvaluationTest("rejects a Session used by another Iteration of the run", async (harness) => {
+  const work = await startTelemetryRun(harness, { iterations: 2 });
+  await report(
+    harness,
+    work.runId,
+    work.items.map((item) => ({ ...outputReport(item, "x"), sessionId: "chat-shared" })),
+  );
+  await harness.drainJobs();
+  const run = await readRun(harness, work.runId);
+  assertStringIncludes(
+    run.testCases[0].iterations[0].attempts[0].error ?? "",
+    "This session.id is also used",
+  );
+});
+
+defineEvaluationTest("expects new IDs from a retried attempt", async (harness) => {
+  const work = await startTelemetryRun(harness);
+  const [item] = work.items;
+  const correlationId = "correlation-retried";
+  await report(harness, work.runId, [{ ...errorReport(item), correlationId }]);
+  await report(harness, work.runId, [{
+    ...outputReport({ ...item, attempt: 2 }, "x"),
+    correlationId,
+  }]);
+  storeCompleteTrace(harness, correlationId);
+  await harness.drainJobs();
+  assertStringIncludes(
+    readAttempts(await readRun(harness, work.runId))[1].error ?? "",
+    "also used by Test Case refund, Iteration 1, attempt 1",
+  );
+});
+
+defineEvaluationTest("waits out a Telemetry outage until the timeout", async (harness) => {
+  const work = await startTelemetryRun(harness);
+  const correlationId = "correlation-outage";
+  await report(harness, work.runId, [{ ...outputReport(work.items[0], "x"), correlationId }]);
+  storeCompleteTrace(harness, correlationId);
+  harness.telemetry.isUnavailable = true;
+  harness.advanceClock(11_000);
+  await harness.drainJobs();
+  assertEquals(harness.queuedJobs.length, 1);
+  assertEquals(readAttempts(await readRun(harness, work.runId))[0].outcome, null);
+
+  harness.advanceClock(60_000);
+  await harness.drainJobs();
+  assertStringIncludes(
+    readAttempts(await readRun(harness, work.runId))[0].error ?? "",
+    "could not be read in time",
+  );
+});
+
+defineEvaluationTest("keeps a waiting job from counting as stalled", async (harness) => {
+  const work = await startTelemetryRun(harness);
+  await report(harness, work.runId, [outputReport(work.items[0], "x")]);
+  await harness.drainJobs();
+  assertEquals(harness.queuedJobs.length, 1);
+  harness.advanceClock(100_000);
+  await harness.worker.runMaintenance();
+  assertEquals(harness.queuedJobs.length, 1);
+});
+
+defineEvaluationTest("judges an Output at once when no Evaluator reads spans", async (harness) => {
+  await createDatasetWithTestCases(harness, [refundTestCase()]);
+  const work = await startRun(harness);
+  await report(harness, work.runId, [outputReport(work.items[0], "30 days")]);
+  await harness.drainJobs();
+  assertEquals((await readRun(harness, work.runId)).verdict, "passed");
+  assertEquals(harness.telemetry.requestCount, 0);
+});
+
+defineEvaluationTest("refuses an invalid Telemetry Evaluator", async (harness) => {
+  await expectJson(
+    sendRequest(harness, "POST", "/v1/datasets", { body: { name: "support-bot" } }),
+    201,
+  );
+  for (
+    const invalidEvaluator of [
+      { type: "telemetry", name: "no-condition", match: {} },
+      { type: "telemetry", name: "misspelt", match: { nam: "execute_tool" } },
+      { ...CALLED_TOOL_EVALUATOR, count: { min: 0 } },
+      { ...CALLED_TOOL_EVALUATOR, count: { min: 3, max: 2 } },
+    ]
+  ) {
+    await expectJson(
+      sendRequest(harness, "POST", "/v1/datasets/support-bot/test-cases", {
+        body: refundTestCase({ evaluators: [invalidEvaluator] }),
+      }),
+      400,
+    );
+  }
+  const stored = await expectJson<TestCase>(
+    sendRequest(harness, "POST", "/v1/datasets/support-bot/test-cases", {
+      body: refundTestCase({ evaluators: [CALLED_TOOL_EVALUATOR] }),
+    }),
+    201,
+  );
+  // The default asks for at least one matching span.
+  assertEquals(stored.evaluators[0], { ...CALLED_TOOL_EVALUATOR, count: { min: 1 } } as Evaluator);
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { spanStatusCodeSchema } from "../telemetry/trace-contracts.ts";
 
 /** Letters, digits, `.`, `_` and `-`, starting with a letter or digit, so names are safe in URLs. */
 const URL_SAFE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -62,8 +63,47 @@ export const regexEvaluatorSchema = z.strictObject({
   { message: "This is not a valid regular expression.", path: ["pattern"] },
 );
 
-/** Grading and Telemetry Evaluators join this list in later steps. */
-export const evaluatorSchema = regexEvaluatorSchema;
+/** Which spans a Telemetry Evaluator counts. A span must meet every condition that is given. */
+export const spanMatchSchema = z.strictObject({
+  name: z.string().min(1).max(512).optional(),
+  status: spanStatusCodeSchema.optional(),
+  /** Attribute values are compared exactly, including their type. */
+  attributes: z.record(
+    z.string().min(1).max(256),
+    z.union([z.string().max(10_000), z.number(), z.boolean()]),
+  ).default({}),
+}).refine(
+  (match) =>
+    match.name !== undefined || match.status !== undefined ||
+    Object.keys(match.attributes).length > 0,
+  "Give at least one condition: a span name, a status or an attribute.",
+);
+
+/** How many spans must match. `{ "min": 0, "max": 0 }` means that no span may match. */
+export const spanCountSchema = z.strictObject({
+  min: z.number().int().min(0).default(1),
+  max: z.number().int().min(0).optional(),
+}).refine(
+  (count) => count.max === undefined || count.max >= count.min,
+  "max must not be below min.",
+).refine(
+  (count) => count.min > 0 || count.max !== undefined,
+  "With min 0 and no max, any number of spans would pass. Give a max.",
+);
+
+/** Judges the spans of the Iteration's traces: which ones exist, and how many. */
+export const telemetryEvaluatorSchema = z.strictObject({
+  type: z.literal("telemetry"),
+  name: z.string().min(1).max(128),
+  match: spanMatchSchema,
+  count: spanCountSchema.default({ min: 1 }),
+});
+
+/** Grading Evaluators join this list in a later step. */
+export const evaluatorSchema = z.discriminatedUnion("type", [
+  regexEvaluatorSchema,
+  telemetryEvaluatorSchema,
+]);
 
 /** A Test Case as a client writes it. Its scope is `trace`; Session scope arrives with its steps. */
 export const testCaseDefinitionSchema = z.strictObject({
@@ -192,11 +232,29 @@ export const reportIterationsResponseSchema = evaluationRunWorkSchema.extend({
   rejected: z.array(rejectedReportSchema),
 });
 
+/** How many matched spans one result keeps a summary of. */
+export const MAXIMUM_MATCHED_SPAN_SUMMARIES = 20;
+
+/** A copy of a matched span's main fields, readable after the telemetry's retention expires. */
+export const matchedSpanSummarySchema = z.object({
+  traceId: z.string(),
+  spanId: z.string(),
+  name: z.string(),
+  statusCode: spanStatusCodeSchema,
+  durationMilliseconds: z.number(),
+  serviceName: z.string().nullable(),
+  /** Only the attributes the Evaluator tested. */
+  attributes: z.record(z.string(), z.unknown()),
+});
+
 export const evaluatorResultSchema = z.object({
   name: z.string(),
-  type: z.literal("regex"),
+  type: z.enum(["regex", "telemetry"]),
   outcome: verdictSchema,
   reason: z.string(),
+  /** Telemetry Evaluators only: how many spans matched, which may exceed the summaries kept. */
+  matchedSpanCount: z.number().int().optional(),
+  matchedSpans: z.array(matchedSpanSummarySchema).optional(),
 });
 
 export const iterationAttemptSchema = z.object({
@@ -274,6 +332,9 @@ export const listEvaluationRunsResponseSchema = z.object({
 });
 
 export type Evaluator = z.infer<typeof evaluatorSchema>;
+export type RegexEvaluator = z.infer<typeof regexEvaluatorSchema>;
+export type TelemetryEvaluator = z.infer<typeof telemetryEvaluatorSchema>;
+export type MatchedSpanSummary = z.infer<typeof matchedSpanSummarySchema>;
 export type TestCaseDefinition = z.infer<typeof testCaseDefinitionSchema>;
 export type TestCaseDefinitionInput = z.input<typeof testCaseDefinitionSchema>;
 export type CreateTestCaseRequest = z.input<typeof createTestCaseRequestSchema>;

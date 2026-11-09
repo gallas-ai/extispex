@@ -60,8 +60,24 @@ export interface ResultPage {
 }
 
 export interface AttemptToEvaluate {
+  projectId: string;
   output: string;
+  /** Always set: a report with an Output must carry one. */
+  correlationId: string;
+  sessionId: string | null;
   definition: TestCaseDefinition;
+  /** When the platform made this attempt available: the run's start, or the previous attempt's end. */
+  startedAt: Date;
+  /** When the Output was reported. */
+  reportedAt: Date;
+}
+
+/** Another attempt of the same run that used one of this attempt's IDs. */
+export interface TelemetryIdConflict {
+  idName: "Correlation ID" | "session.id";
+  testCaseName: string;
+  iterationNumber: number;
+  attemptNumber: number;
 }
 
 export interface EvaluationRunRepository {
@@ -103,11 +119,27 @@ export interface EvaluationRunRepository {
     outcome: Verdict,
     evaluatorResults: EvaluatorResult[],
     evaluatedAt: Date,
+    /** Why the attempt ended as Error, when no Evaluator could say so. */
+    errorMessage?: string,
   ): Promise<void>;
+  /** Finds another attempt of the run that used the attempt's Correlation ID or `session.id`. */
+  findTelemetryIdConflict(
+    job: EvaluateAttemptJob,
+    telemetryIds: { correlationId: string; sessionId: string | null },
+  ): Promise<TelemetryIdConflict | null>;
+  /** The attempt is still waiting for telemetry, so its job does not count as stalled. */
+  keepEvaluationWaiting(job: EvaluateAttemptJob, requestedAt: Date): Promise<void>;
   /** Attempts whose job was queued before the cutoff; their request time is set to now. */
   claimStalledEvaluations(cutoff: Date, claimedAt: Date): Promise<EvaluateAttemptJob[]>;
   /** Ends runs without activity since the cutoff; resolves to how many ended. */
   endInactiveRuns(cutoff: Date, endedAt: Date): Promise<number>;
+}
+
+interface TelemetryIdConflictRow {
+  correlation_id: string | null;
+  attempt_number: number | string;
+  iteration_number: number | string;
+  test_case_name: string;
 }
 
 function chunk<Item>(items: Item[]): Item[][] {
@@ -547,10 +579,68 @@ export function createEvaluationRunRepository(
       const testCaseRow = await entityManager.findOneOrFail(RunTestCaseRecord, {
         id: iterationRow.runTestCaseId,
       });
-      return { output: attemptRow.output ?? "", definition: testCaseRow.definition };
+      const runRow = await entityManager.findOneOrFail(EvaluationRunRecord, {
+        id: iterationRow.runId,
+      });
+      const previousAttempt = job.attemptNumber === 1
+        ? null
+        : await entityManager.findOne(IterationAttemptRecord, {
+          iterationId: job.iterationId,
+          attemptNumber: job.attemptNumber - 1,
+        });
+      return {
+        projectId: runRow.projectId,
+        output: attemptRow.output ?? "",
+        correlationId: attemptRow.correlationId ?? "",
+        sessionId: attemptRow.sessionId ?? null,
+        definition: testCaseRow.definition,
+        startedAt: previousAttempt === null
+          ? runRow.createdAt
+          : previousAttempt.evaluatedAt ?? previousAttempt.reportedAt,
+        reportedAt: attemptRow.reportedAt,
+      };
     },
 
-    async recordEvaluation(job, outcome, evaluatorResults, evaluatedAt) {
+    async findTelemetryIdConflict(job, { correlationId, sessionId }) {
+      const idCondition = sessionId === null
+        ? "attempt.correlation_id = ?"
+        : "(attempt.correlation_id = ? or attempt.session_id = ?)";
+      const rows = await database.orm.em.fork().execute<TelemetryIdConflictRow[]>(
+        `select attempt.correlation_id, attempt.attempt_number, iteration.iteration_number,
+            test_case.name as test_case_name
+          from iteration_attempts attempt
+          join iterations iteration on iteration.id = attempt.iteration_id
+          join run_test_cases test_case on test_case.id = iteration.run_test_case_id
+          where iteration.run_id = (select run_id from iterations where id = ?)
+            and ${idCondition}
+            and not (attempt.iteration_id = ? and attempt.attempt_number = ?)
+          limit 1`,
+        [
+          job.iterationId,
+          correlationId,
+          ...(sessionId === null ? [] : [sessionId]),
+          job.iterationId,
+          job.attemptNumber,
+        ],
+      );
+      if (rows.length === 0) return null;
+      return {
+        idName: rows[0].correlation_id === correlationId ? "Correlation ID" : "session.id",
+        testCaseName: rows[0].test_case_name,
+        iterationNumber: Number(rows[0].iteration_number),
+        attemptNumber: Number(rows[0].attempt_number),
+      };
+    },
+
+    async keepEvaluationWaiting(job, requestedAt) {
+      await database.orm.em.fork().nativeUpdate(IterationRecord, {
+        id: job.iterationId,
+        status: "evaluating",
+        currentAttempt: job.attemptNumber,
+      }, { evaluationRequestedAt: requestedAt });
+    },
+
+    async recordEvaluation(job, outcome, evaluatorResults, evaluatedAt, errorMessage) {
       await database.orm.em.fork().transactional(async (entityManager) => {
         const unlockedRow = await entityManager.findOne(IterationRecord, { id: job.iterationId });
         if (unlockedRow === null) return;
@@ -570,7 +660,12 @@ export function createEvaluationRunRepository(
         await entityManager.nativeUpdate(IterationAttemptRecord, {
           iterationId: job.iterationId,
           attemptNumber: job.attemptNumber,
-        }, { outcome, evaluatorResults, evaluatedAt });
+        }, {
+          outcome,
+          evaluatorResults,
+          evaluatedAt,
+          ...(errorMessage === undefined ? {} : { error: errorMessage }),
+        });
         if (outcome === "error") {
           await applyAttemptError(entityManager, runRow, job.iterationId, job.attemptNumber);
         } else {

@@ -66,6 +66,42 @@ Deno.test("takes the Project and Role from a valid access token", async () => {
   assertEquals(await authenticate("not.a.token"), null);
 });
 
+Deno.test("takes a service token for a Project as a service caller, and nothing else", async () => {
+  const testTokens = await createTestAccessTokens();
+  const requestAuthenticator = createRequestAuthenticator({
+    projectResolver: testProjectResolver,
+    accessTokenVerifier: testTokens.accessTokenVerifier,
+  });
+  const authenticate = async (bearerToken: string) =>
+    await requestAuthenticator.authenticateServiceRequest(`Bearer ${bearerToken}`);
+
+  assertEquals(
+    await authenticate(
+      await testTokens.issueAccessToken({
+        subject: "service:evaluation",
+        projectId: "project-one",
+        role: "viewer",
+      }),
+    ),
+    { projectId: "project-one", role: "viewer" },
+  );
+  assertEquals(
+    await authenticate(
+      await testTokens.issueAccessToken({
+        subject: "user:person",
+        projectId: "project-one",
+        role: "admin",
+      }),
+    ),
+    null,
+  );
+  assertEquals(
+    await authenticate(await testTokens.issueAccessToken({ subject: "service:evaluation" })),
+    null,
+  );
+  assertEquals(await authenticate("extispex_working"), null);
+});
+
 Deno.test("reads Identity's keys again for a token with a new key ID", async () => {
   const createKey = async (keyId: string) => {
     const keyPair = await crypto.subtle.generateKey(

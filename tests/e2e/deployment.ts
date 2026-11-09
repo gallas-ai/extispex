@@ -55,6 +55,12 @@ const SERVICE_CLIENT_SECRETS = {
   e2e: "e2e-test-client-secret-00000000000000000",
 };
 const STARTUP_TIMEOUT_MILLISECONDS = 60_000;
+/** Short waits, so that a missing root span does not cost a minute per attempt. */
+const TRACE_COMPLETION_ENVIRONMENT = {
+  EVALUATION_TELEMETRY_POLL_INTERVAL_MILLISECONDS: "200",
+  EVALUATION_ROOT_SPAN_SETTLE_MILLISECONDS: "500",
+  EVALUATION_ROOT_SPAN_TIMEOUT_MILLISECONDS: "3000",
+};
 const SERVICE_PERMISSIONS = [
   "--allow-net",
   "--allow-env",
@@ -92,6 +98,7 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
     GATEWAY_PORT: String(gatewayPort),
     TELEMETRY_GRPC_TLS_CERTIFICATE_FILE: tlsFiles.certificateFile,
     TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE: tlsFiles.privateKeyFile,
+    ...TRACE_COMPLETION_ENVIRONMENT,
   });
   const deployment = {
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
@@ -160,7 +167,13 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   const evaluationWorkerProcess = startDenoProcess(
     "evaluation-worker",
     "services/evaluation/src/main-worker.ts",
-    { EVALUATION_DATABASE_URL: evaluationDatabaseUrl },
+    {
+      EVALUATION_DATABASE_URL: evaluationDatabaseUrl,
+      TELEMETRY_URL: `http://127.0.0.1:${otlpHttpPort}`,
+      IDENTITY_URL: identityUrl,
+      IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.evaluation,
+      ...TRACE_COMPLETION_ENVIRONMENT,
+    },
   );
   const gatewayProcess = startDenoProcess("gateway", "services/gateway/src/main.ts", {
     TELEMETRY_URL: `http://127.0.0.1:${otlpHttpPort}`,

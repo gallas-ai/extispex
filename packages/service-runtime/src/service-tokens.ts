@@ -116,18 +116,20 @@ export function createIdentityServiceTokenSource(
 }
 
 /**
- * Sends every request with this service's token without a Project, as Identity's internal API
- * requires. A refused token is replaced once, for example after Identity's keys changed.
+ * Sends every request with this service's token: without a Project, as Identity's internal API
+ * requires, or for the given Project. A refused token is replaced once, for example after
+ * Identity's keys changed.
  */
 export function createServiceTokenClient(
   serviceClient: ServiceClient,
   serviceTokens: ServiceTokenSource,
+  projectId: string | null = null,
 ): ServiceClient {
   const sendWithToken = async (request: Request) => {
     const authenticatedRequest = new Request(request);
     authenticatedRequest.headers.set(
       "authorization",
-      `Bearer ${await serviceTokens.readServiceToken(null)}`,
+      `Bearer ${await serviceTokens.readServiceToken(projectId)}`,
     );
     return await serviceClient(authenticatedRequest);
   };
@@ -137,7 +139,7 @@ export function createServiceTokenClient(
     const response = await sendWithToken(request);
     if (response.status !== 401) return response;
     await response.body?.cancel();
-    serviceTokens.forgetServiceToken(null);
+    serviceTokens.forgetServiceToken(projectId);
     return await sendWithToken(retryRequest);
   };
 }

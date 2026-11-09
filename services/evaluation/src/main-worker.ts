@@ -1,6 +1,8 @@
+import { createHttpServiceClient } from "@extispex/service-client";
 import {
+  createIdentityServiceTokenSource,
   createStructuredLogger,
-  readOptionalEnvironmentVariable,
+  readPositiveIntegerEnvironmentVariable,
   readRequiredEnvironmentVariable,
   runOnTerminationSignal,
 } from "@extispex/service-runtime";
@@ -8,21 +10,12 @@ import {
   createEvaluationWorker,
   DEFAULT_INACTIVE_RUN_TIMEOUT_MILLISECONDS,
   DEFAULT_REGEX_TIMEOUT_MILLISECONDS,
+  DEFAULT_TRACE_COMPLETION_TIMING,
   openEvaluationDatabase,
   openJobQueue,
 } from "./create-service.ts";
 
 const logger = createStructuredLogger("evaluation-worker");
-
-function readPositiveInteger(variableName: string, defaultValue: number): number {
-  const configuredValue = readOptionalEnvironmentVariable(variableName);
-  if (configuredValue === undefined) return defaultValue;
-  const parsedValue = Number(configuredValue);
-  if (!Number.isInteger(parsedValue) || parsedValue <= 0) {
-    throw new Error(`${variableName} must be a positive whole number.`);
-  }
-  return parsedValue;
-}
 
 const databaseUrl = readRequiredEnvironmentVariable("EVALUATION_DATABASE_URL");
 const database = await openEvaluationDatabase(databaseUrl);
@@ -30,12 +23,32 @@ const jobQueue = await openJobQueue(databaseUrl, database, logger);
 const evaluationWorker = createEvaluationWorker({
   database,
   jobQueue,
+  telemetryService: createHttpServiceClient(readRequiredEnvironmentVariable("TELEMETRY_URL")),
+  serviceTokens: createIdentityServiceTokenSource({
+    identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
+    clientId: "evaluation",
+    clientSecret: readRequiredEnvironmentVariable("IDENTITY_CLIENT_SECRET"),
+  }),
   logger,
-  regexTimeoutMilliseconds: readPositiveInteger(
+  traceCompletionTiming: {
+    pollIntervalMilliseconds: readPositiveIntegerEnvironmentVariable(
+      "EVALUATION_TELEMETRY_POLL_INTERVAL_MILLISECONDS",
+      DEFAULT_TRACE_COMPLETION_TIMING.pollIntervalMilliseconds,
+    ),
+    rootSpanSettleMilliseconds: readPositiveIntegerEnvironmentVariable(
+      "EVALUATION_ROOT_SPAN_SETTLE_MILLISECONDS",
+      DEFAULT_TRACE_COMPLETION_TIMING.rootSpanSettleMilliseconds,
+    ),
+    rootSpanTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
+      "EVALUATION_ROOT_SPAN_TIMEOUT_MILLISECONDS",
+      DEFAULT_TRACE_COMPLETION_TIMING.rootSpanTimeoutMilliseconds,
+    ),
+  },
+  regexTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
     "EVALUATION_REGEX_TIMEOUT_MILLISECONDS",
     DEFAULT_REGEX_TIMEOUT_MILLISECONDS,
   ),
-  inactiveRunTimeoutMilliseconds: readPositiveInteger(
+  inactiveRunTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
     "EVALUATION_INACTIVE_RUN_TIMEOUT_MILLISECONDS",
     DEFAULT_INACTIVE_RUN_TIMEOUT_MILLISECONDS,
   ),

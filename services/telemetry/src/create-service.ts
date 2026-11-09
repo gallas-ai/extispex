@@ -11,6 +11,7 @@ import { registerOtlpHttpRoutes } from "./ingestion/otlp-http-routes.ts";
 import { createTraceIngestion } from "./ingestion/trace-ingestion.ts";
 import { createSpanRepository } from "./storage/span-repository.ts";
 import type { TelemetryDatabase } from "./storage/telemetry-database.ts";
+import { registerIterationTelemetryRoutes } from "./traces/iteration-telemetry-routes.ts";
 import { registerTraceQueryRoutes } from "./traces/trace-query-routes.ts";
 
 export {
@@ -38,10 +39,8 @@ export function createTelemetryService(
   dependencies: TelemetryServiceDependencies,
 ): TelemetryService {
   const spanRepository = createSpanRepository(dependencies.database);
-  const traceIngestion = createTraceIngestion(
-    spanRepository,
-    dependencies.readCurrentTime ?? (() => new Date()),
-  );
+  const readCurrentTime = dependencies.readCurrentTime ?? (() => new Date());
+  const traceIngestion = createTraceIngestion(spanRepository, readCurrentTime);
 
   const app = createServiceHttpApp<ProjectAccessEnvironment>({
     apiTitle: "Extispex: Telemetry API",
@@ -55,6 +54,11 @@ export function createTelemetryService(
   registerTraceQueryRoutes(app, {
     spanRepository,
     requestAuthenticator: dependencies.requestAuthenticator,
+  });
+  registerIterationTelemetryRoutes(app, {
+    spanRepository,
+    requestAuthenticator: dependencies.requestAuthenticator,
+    readCurrentTime,
   });
 
   return {

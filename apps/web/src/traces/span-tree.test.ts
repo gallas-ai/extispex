@@ -20,6 +20,8 @@ function createSpan(spanId: string, parentSpanId: string | null, startTimeUnixNa
     sessionId: null,
     attributes: {},
     resourceAttributes: {},
+    receivedAt: "2026-11-08T10:00:00.000Z",
+    arrivedAfterEvaluation: false,
   };
 }
 

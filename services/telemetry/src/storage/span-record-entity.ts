@@ -33,6 +33,20 @@ export const SpanRecord = defineEntity({
   ],
 });
 
+/**
+ * When the Evaluation worker judged a Correlation ID's spans. A span received later arrived after
+ * evaluation; that is worked out when reading, so that spans are never rewritten.
+ */
+export const CorrelationEvaluationRecord = defineEntity({
+  name: "CorrelationEvaluationRecord",
+  tableName: "correlation_evaluations",
+  properties: {
+    projectId: p.string().primary(),
+    correlationId: p.text().primary(),
+    evaluatedAt: p.datetime(),
+  },
+});
+
 const UNIX_NANOSECONDS_TEXT_LENGTH = 20;
 
 export function formatUnixNanosecondsForStorage(unixNanoseconds: bigint): string {
