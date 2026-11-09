@@ -19,7 +19,7 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 8    | [Reports](#8-reports)                                                                                  |        |
 | 9    | [OIDC sign-in](#9-oidc-sign-in)                                                                        | Done   |
 | 10   | [SCIM and file import](#10-scim-and-file-import)                                                       |        |
-| 11   | [Logs](#11-logs)                                                                                       |        |
+| 11   | [Logs](#11-logs)                                                                                       | Done   |
 | 12   | [Metrics](#12-metrics)                                                                                 |        |
 | 13   | [Retention and Project deletion](#13-retention-and-project-deletion)                                   |        |
 | 14   | [Helm chart](#14-helm-chart)                                                                           |        |
