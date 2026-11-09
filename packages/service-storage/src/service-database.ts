@@ -1,11 +1,7 @@
-import {
-  type MigrationObject,
-  type Options,
-  TableExistsException,
-  UniqueConstraintViolationException,
-} from "@mikro-orm/core";
+import type { MigrationObject, Options } from "@mikro-orm/core";
 import { Migrator } from "@mikro-orm/migrations";
 import type { MikroORM } from "@mikro-orm/sql";
+import { isLostInitializationRace } from "./initialization-race.ts";
 
 export type DatabaseDialect = "postgresql" | "sqlite";
 
@@ -51,22 +47,6 @@ export async function openServiceDatabase(
 
 const MAXIMUM_OPEN_ATTEMPTS = 8;
 const OPEN_RETRY_DELAY_MILLISECONDS = 250;
-
-/**
- * Replicas that start together race to create the database and apply the migrations. Migrations run
- * in one transaction, so the loser has changed nothing and finds the work done when it tries again.
- */
-function isLostInitializationRace(error: unknown): boolean {
-  for (let current = error; current instanceof Error; current = current.cause) {
-    if (
-      current instanceof UniqueConstraintViolationException ||
-      current instanceof TableExistsException
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
 
 async function openAndMigrate(options: ServiceDatabaseOptions): Promise<ServiceDatabase> {
   const { databaseUrl } = options;
