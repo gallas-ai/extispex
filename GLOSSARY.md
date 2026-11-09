@@ -15,6 +15,12 @@ traces with the same Correlation ID. _Avoid_: Custom ID, user ID, request ID
 application assigns. It exists as soon as its first trace arrives and has no explicit start or end.
 _Avoid_: Conversation, thread
 
+**Log Record**: One entry of an application's log, received over OTLP. It has a time, a severity, a
+body and attributes. _Avoid_: Log line, log entry, event
+
+**Uncorrelated Log**: A Log Record that belongs to no trace, such as a startup message. It needs no
+Correlation ID. _Avoid_: Orphan log
+
 ### Evaluation
 
 **Dataset**: A named collection of Test Cases. _Avoid_: Test suite

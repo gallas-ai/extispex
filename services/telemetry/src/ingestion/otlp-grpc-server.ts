@@ -6,17 +6,20 @@ import {
   type RequestAuthenticator,
   type StructuredLogger,
 } from "@extispex/service-runtime";
+import type { LogIngestion } from "./log-ingestion.ts";
 import {
+  decodeProtobufLogsRequest,
   decodeProtobufTraceRequest,
+  encodeProtobufLogsResponse,
   encodeProtobufTraceResponse,
   MAXIMUM_OTLP_PAYLOAD_BYTES,
   OtlpPayloadError,
 } from "./otlp-protocol.ts";
-import type { TraceExportOutcome } from "./otlp-trace-types.ts";
 import type { TraceIngestion } from "./trace-ingestion.ts";
 
 export interface OtlpGrpcServerDependencies {
   traceIngestion: TraceIngestion;
+  logIngestion: LogIngestion;
   requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
 }
@@ -28,29 +31,59 @@ export interface GrpcTlsFiles {
 
 type RawPayload = Buffer;
 
-/** Messages pass through as raw bytes so that the handler can answer a bad payload properly. */
-const traceServiceDefinition: grpc.ServiceDefinition<grpc.UntypedServiceImplementation> = {
-  export: {
-    path: "/opentelemetry.proto.collector.trace.v1.TraceService/Export",
-    requestStream: false,
-    responseStream: false,
-    requestSerialize: (payload: RawPayload) => payload,
-    requestDeserialize: (payload: RawPayload) => payload,
-    responseSerialize: (outcome: TraceExportOutcome) =>
-      Buffer.from(encodeProtobufTraceResponse(outcome)),
-    responseDeserialize: (payload: RawPayload) => payload,
-  },
-};
+interface OtlpGrpcSignal<ExportRequest, ExportOutcome> {
+  /** The fully qualified method, for example `/…TraceService/Export`. */
+  methodPath: string;
+  /** How messages call the signal's records, for example "Spans". */
+  recordsName: string;
+  decodeRequest(payload: Uint8Array): ExportRequest;
+  encodeResponse(outcome: ExportOutcome): Uint8Array;
+  ingest(projectId: string, request: ExportRequest): Promise<ExportOutcome>;
+}
 
 export function createOtlpGrpcServer(dependencies: OtlpGrpcServerDependencies): grpc.Server {
   // grpc-js applies this limit after decompression, so it also bounds gzip and deflate messages.
   const grpcServer = new grpc.Server({
     "grpc.max_receive_message_length": MAXIMUM_OTLP_PAYLOAD_BYTES,
   });
-  grpcServer.addService(traceServiceDefinition, {
+  addOtlpSignalService(grpcServer, dependencies, {
+    methodPath: "/opentelemetry.proto.collector.trace.v1.TraceService/Export",
+    recordsName: "Spans",
+    decodeRequest: decodeProtobufTraceRequest,
+    encodeResponse: encodeProtobufTraceResponse,
+    ingest: dependencies.traceIngestion.ingestTraces,
+  });
+  addOtlpSignalService(grpcServer, dependencies, {
+    methodPath: "/opentelemetry.proto.collector.logs.v1.LogsService/Export",
+    recordsName: "Log records",
+    decodeRequest: decodeProtobufLogsRequest,
+    encodeResponse: encodeProtobufLogsResponse,
+    ingest: dependencies.logIngestion.ingestLogs,
+  });
+  return grpcServer;
+}
+
+function addOtlpSignalService<ExportRequest, ExportOutcome>(
+  grpcServer: grpc.Server,
+  dependencies: OtlpGrpcServerDependencies,
+  signal: OtlpGrpcSignal<ExportRequest, ExportOutcome>,
+): void {
+  /** Messages pass through as raw bytes so that the handler can answer a bad payload properly. */
+  const serviceDefinition: grpc.ServiceDefinition<grpc.UntypedServiceImplementation> = {
+    export: {
+      path: signal.methodPath,
+      requestStream: false,
+      responseStream: false,
+      requestSerialize: (payload: RawPayload) => payload,
+      requestDeserialize: (payload: RawPayload) => payload,
+      responseSerialize: (outcome: ExportOutcome) => Buffer.from(signal.encodeResponse(outcome)),
+      responseDeserialize: (payload: RawPayload) => payload,
+    },
+  };
+  grpcServer.addService(serviceDefinition, {
     export: async (
-      call: grpc.ServerUnaryCall<RawPayload, TraceExportOutcome>,
-      respond: grpc.sendUnaryData<TraceExportOutcome>,
+      call: grpc.ServerUnaryCall<RawPayload, ExportOutcome>,
+      respond: grpc.sendUnaryData<ExportOutcome>,
     ) => {
       const authorizationHeader = call.metadata.get("authorization")[0]?.toString();
       let projectAccess: ProjectAccess | null;
@@ -61,7 +94,7 @@ export function createOtlpGrpcServer(dependencies: OtlpGrpcServerDependencies): 
       } catch (error) {
         if (!(error instanceof IdentityUnavailableError)) throw error;
         dependencies.logger.warn("Credentials could not be checked", { error });
-        // OTLP exporters retry UNAVAILABLE, so the spans are not lost while Identity is down.
+        // OTLP exporters retry UNAVAILABLE, so the records are not lost while Identity is down.
         respond({
           code: grpc.status.UNAVAILABLE,
           details: "The credentials could not be checked. Retry later.",
@@ -84,22 +117,24 @@ export function createOtlpGrpcServer(dependencies: OtlpGrpcServerDependencies): 
       }
       const { projectId } = projectAccess;
       try {
-        const exportRequest = decodeProtobufTraceRequest(call.request);
-        respond(null, await dependencies.traceIngestion.ingestTraces(projectId, exportRequest));
+        const exportRequest = signal.decodeRequest(call.request);
+        respond(null, await signal.ingest(projectId, exportRequest));
       } catch (error) {
         if (error instanceof OtlpPayloadError) {
           respond({ code: grpc.status.INVALID_ARGUMENT, details: error.message });
           return;
         }
-        dependencies.logger.error("Storing spans failed", { error, projectId });
+        dependencies.logger.error(`Storing ${signal.recordsName.toLowerCase()} failed`, {
+          error,
+          projectId,
+        });
         respond({
           code: grpc.status.UNAVAILABLE,
-          details: "Spans could not be stored. Retry later.",
+          details: `${signal.recordsName} could not be stored. Retry later.`,
         });
       }
     },
   });
-  return grpcServer;
 }
 
 /** Binds the server to all interfaces and resolves with the bound port. */

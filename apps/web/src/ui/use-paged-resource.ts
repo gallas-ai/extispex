@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isSignInRequired } from "../api/api-request.ts";
 
-export interface ResourcePage<Item> {
+export interface ResourcePage<Item, Cursor = number> {
   items: Item[];
-  nextCursor: number | null;
+  nextCursor: Cursor | null;
 }
 
 export type PagedResourceState<Item> =
   | { status: "loading" }
-  | { status: "failed"; message: string }
+  | { status: "failed"; message: string; isSignInRequired: boolean }
   | { status: "loaded"; items: Item[]; hasMore: boolean; isLoadingMore: boolean };
 
 /**
@@ -15,14 +16,14 @@ export type PagedResourceState<Item> =
  * that results still arriving appear without losing what the user has opened. Pass a memoized
  * `loadPage`.
  */
-export function usePagedResource<Item>(
-  loadPage: (cursor: number | null) => Promise<ResourcePage<Item>>,
+export function usePagedResource<Item, Cursor = number>(
+  loadPage: (cursor: Cursor | null) => Promise<ResourcePage<Item, Cursor>>,
   refreshKey: string,
 ): { state: PagedResourceState<Item>; loadMore: () => void; retry: () => void } {
   const [state, setState] = useState<PagedResourceState<Item>>({ status: "loading" });
   const [retryCount, setRetryCount] = useState(0);
   const pageCountRef = useRef(1);
-  const nextCursorRef = useRef<number | null>(null);
+  const nextCursorRef = useRef<Cursor | null>(null);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -30,9 +31,9 @@ export function usePagedResource<Item>(
     (async () => {
       try {
         const items: Item[] = [];
-        let cursor: number | null = null;
+        let cursor: Cursor | null = null;
         for (let pageIndex = 0; pageIndex < pageCountRef.current; pageIndex++) {
-          const page: ResourcePage<Item> = await loadPage(cursor);
+          const page: ResourcePage<Item, Cursor> = await loadPage(cursor);
           items.push(...page.items);
           cursor = page.nextCursor;
           if (cursor === null) break;
@@ -42,7 +43,11 @@ export function usePagedResource<Item>(
         setState({ status: "loaded", items, hasMore: cursor !== null, isLoadingMore: false });
       } catch (error) {
         if (requestId === requestIdRef.current) {
-          setState({ status: "failed", message: (error as Error).message });
+          setState({
+            status: "failed",
+            message: (error as Error).message,
+            isSignInRequired: isSignInRequired(error),
+          });
         }
       }
     })();
@@ -70,7 +75,11 @@ export function usePagedResource<Item>(
       );
     } catch (error) {
       if (requestId === requestIdRef.current) {
-        setState({ status: "failed", message: (error as Error).message });
+        setState({
+          status: "failed",
+          message: (error as Error).message,
+          isSignInRequired: isSignInRequired(error),
+        });
       }
     }
   }, [loadPage]);

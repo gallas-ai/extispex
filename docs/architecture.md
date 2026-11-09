@@ -134,10 +134,34 @@ The check runs on every record because spans of one trace can arrive in differen
 span processor in the application copies both values from OTel baggage onto every span. The
 TypeScript helper package provides this, and `examples/` shows it in Python.
 
+### Logs
+
+Built in roadmap step 11. See [ADR 0012](adr/0012-daily-log-partitions-on-the-record-time.md) for
+the table layout.
+
+- **Time:** a Log Record's time is OTLP's `time_unix_nano`, or else `observed_time_unix_nano`, as
+  OTLP advises, or else the receive time. A record more than 30 days old or more than one day ahead
+  is rejected.
+- **Correlation:** a Log Record with a `trace_id` needs `correlation.id`. OTLP says that a malformed
+  `trace_id` means no trace, so such a record is stored as an Uncorrelated Log.
+- **Retried batches:** OTLP has no ID for a Log Record, so its ID is the SHA-256 of its content. An
+  exporter's retry stores nothing twice, and Loki also merges identical lines at one timestamp.
+- **Storage:** PostgreSQL has daily partitions and a `tsvector` with the `simple` configuration.
+  SQLite has one table and FTS5 keeping diacritics. Both index the first 65,536 characters of the
+  body, because PostgreSQL refuses a `tsvector` above 1 MiB. Words are split slightly differently:
+  PostgreSQL keeps a host name or an email address as one word, and SQLite splits it at punctuation.
+- **Text that cannot be stored:** U+0000 and lone surrogates are removed from Log Records, because
+  PostgreSQL refuses them and one such value would fail its batch on every retry.
+- **Rejected records:** ingestion adds spans and Log Records it rejects to a count per Project,
+  signal and hour. `GET /v1/rejected-telemetry` returns the last 24 hours, and the Traces and Logs
+  pages show it. A count that cannot be written is logged and does not fail the export.
+
 ### Queries
 
 - **Traces:** waterfall and span details, inspired by MLflow.
-- **Logs:** time range, attribute filters and full-text search, inspired by Loggly.
+- **Logs:** time range, attribute filters and full-text search, inspired by Loggly. `GET /v1/logs`
+  answers newest first with a `nextCursor`. `search` finds whole words in the body, all of them, and
+  `attribute=key=value` may be repeated.
 - **Metrics:** metric, filters, `sum`, `avg`, `rate`, `p95` and grouping, inspired by Grafana's
   query builder.
 - **Retention:** configurable per Project, 30 days by default.
@@ -712,6 +736,17 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The Logs step added these checks on 2026-11-09.
+
+| Tested                                                             | Result                                                                                                                                       |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| OTel JS log exporters over HTTP/protobuf, HTTP/JSON, gzip and gRPC | Log Records found by a word through the Gateway with their trace, span and Correlation ID, in all-in-one and in separate services            |
+| Telemetry logs on SQLite and PostgreSQL                            | Search, time range, severity, attribute filters, paging, repeated batches and rejection work on both                                         |
+| Eight replicas creating one day's partition                        | All succeed, three rounds in a row. Without the advisory lock the losers fail with `relation already exists`                                 |
+| A time range on PostgreSQL                                         | The query plan reads only the partition of the range                                                                                         |
+| Text a database would refuse                                       | U+0000, a lone surrogate and a 240,000-character body are stored, and search input is never read as query syntax                             |
+| Logs page and a trace's logs in headless Chromium                  | Searching, filtering, a record's details, going to its span, paging and rejected counts work; nothing scrolls sideways from 360px to 2,040px |
+
 The Trace completion and Telemetry Evaluator step added these checks on 2026-11-09.
 
 | Tested                                               | Result                                                                                                                                     |
@@ -810,6 +845,10 @@ The Prompt service step added these checks on 2026-11-07.
 - The 10,000-span limit for one Correlation ID: a read that large has not been measured
 - Very large Outputs in a result page: 50 Iterations with three attempts of 1 MB each can still
   reach 150 MB in one response
+- Log ingestion and search at the capacity target, and how attribute filters behave on a large
+  Project: they have no index, so they read every record that the other filters leave
+- The exclusive lock of creating a partition under load
+- Sending logs from Python: only the TypeScript helper has a log record processor
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
 - The web UI's colours, spacing and typography, and browsers other than Chromium
@@ -836,3 +875,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0009: Client-Driven Execution as a pull protocol](adr/0009-client-driven-execution-as-a-pull-protocol.md)
 - [ADR 0010: Telemetry Evaluator conditions as JSON](adr/0010-telemetry-evaluator-conditions-as-json.md)
 - [ADR 0011: OIDC users identified by issuer and subject](adr/0011-oidc-users-identified-by-issuer-and-subject.md)
+- [ADR 0012: Daily log partitions on the record's own time](adr/0012-daily-log-partitions-on-the-record-time.md)

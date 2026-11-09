@@ -1,4 +1,4 @@
-/** Span and log attribute that carries the Correlation ID. Required on every span. */
+/** Span and log attribute that carries the Correlation ID. Required on spans and on logs of a trace. */
 export const CORRELATION_ID_ATTRIBUTE = "correlation.id";
 
 /** Span attribute that carries the Session ID. Optional. */

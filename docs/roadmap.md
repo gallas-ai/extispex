@@ -413,6 +413,9 @@ data disappears from every service.
 - Each service periodically asks Identity for deleted Projects and removes their data.
 - UI: retention setting, deletion progress per service.
 - The UI shows that a trace is no longer available when a result refers to expired telemetry.
+- Left over from step 11: dropping expired `logs_<yyyymmdd>` partitions on PostgreSQL, see
+  [ADR 0012](adr/0012-daily-log-partitions-on-the-record-time.md), deleting old log records on
+  SQLite, and removing `rejection_counts` rows older than the 24 hours they are shown for.
 
 **Decisions to make first:**
 

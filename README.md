@@ -13,9 +13,9 @@ their Groups, and applications send its API keys.
 > judged whether an undertaking would end well. Looking inside and judging the outcome is tracing
 > and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
 
-**Status:** early development. The trace pipeline, versioned prompts, Projects with API keys, users
-with Groups and Roles, and Datasets judged by Regex Evaluators work end to end. Logs, metrics, the
-other Evaluators and directory sync (SCIM) are designed in
+**Status:** early development. The trace and log pipelines, versioned prompts, Projects with API
+keys, users with Groups and Roles, and Datasets judged by Regex Evaluators work end to end. Metrics,
+the other Evaluators and directory sync (SCIM) are designed in
 [docs/architecture.md](docs/architecture.md) but not built yet.
 
 ## Try it locally
@@ -57,7 +57,7 @@ and each Project gives Groups a Role:
 
 | Role     | May                                                  |
 | -------- | ---------------------------------------------------- |
-| `viewer` | read traces and prompts                              |
+| `viewer` | read traces, logs and prompts                        |
 | `editor` | also change prompts and send telemetry               |
 | `admin`  | also manage the Project's Role assignments, API keys |
 
@@ -107,6 +107,12 @@ API key as `Authorization: Bearer <key>`.
 The [`telemetry-ids` package](packages/telemetry-ids/) and the
 [Python example](examples/python/send_conversation.py) show a span processor that adds both
 attributes to every span.
+
+Logs go to the same ports, at `/v1/logs` over HTTP. A log with a `trace_id` must carry
+`correlation.id` too, and `TelemetryIdsLogRecordProcessor` adds it. A log without a `trace_id`, such
+as a startup message, needs nothing extra. A log more than 30 days old or more than one day ahead is
+rejected. **Traces** and **Logs** in the UI show how many records were rejected in the last 24
+hours, and why.
 
 Requests may be compressed with gzip or deflate, over HTTP (`Content-Encoding`) and gRPC alike.
 Other encodings, such as zstd or snappy, are refused with `415` on HTTP. One export request may hold

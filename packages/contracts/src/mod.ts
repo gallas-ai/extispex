@@ -12,5 +12,8 @@ export * from "./identity/project-routes.ts";
 export * from "./prompt/prompt-contracts.ts";
 export * from "./prompt/prompt-routes.ts";
 export * from "./telemetry/iteration-telemetry.ts";
+export * from "./telemetry/log-contracts.ts";
+export * from "./telemetry/log-routes.ts";
+export * from "./telemetry/rejected-telemetry-contracts.ts";
 export * from "./telemetry/trace-contracts.ts";
 export * from "./telemetry/trace-routes.ts";

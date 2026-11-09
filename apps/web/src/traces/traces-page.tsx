@@ -2,6 +2,7 @@ import type { TraceSummary } from "@extispex/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiCredentials, isSignInRequired } from "../api/api-request.ts";
 import { listTraces, type TraceFilters } from "../api/telemetry-api.ts";
+import { RejectedTelemetryNotice } from "../logs/rejected-telemetry-notice.tsx";
 import { useTracesUrlState } from "../navigation/traces-url-state.ts";
 import { InboxIcon, RefreshIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
@@ -142,6 +143,8 @@ export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
         onApplyFilters={applyFilters}
         correlationIdInputRef={correlationIdInputRef}
       />
+
+      <RejectedTelemetryNotice credentials={credentials} signal="spans" />
 
       <div className="traces-workspace">
         <section className="panel trace-list-panel" aria-label="Trace list">

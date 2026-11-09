@@ -1,5 +1,6 @@
 import protobuf from "protobufjs";
-import otlpTraceDescriptor from "./generated/otlp-trace-descriptor.json" with { type: "json" };
+import otlpDescriptor from "./generated/otlp-descriptor.json" with { type: "json" };
+import type { LogsExportOutcome, OtlpExportLogsRequest } from "./otlp-log-types.ts";
 import type { OtlpExportTraceRequest, TraceExportOutcome } from "./otlp-trace-types.ts";
 
 /**
@@ -12,28 +13,53 @@ export class OtlpPayloadError extends Error {
   override name = "OtlpPayloadError";
 }
 
-const otlpRoot = protobuf.Root.fromJSON(otlpTraceDescriptor as protobuf.INamespace);
+const otlpRoot = protobuf.Root.fromJSON(otlpDescriptor as protobuf.INamespace);
 const exportTraceRequestType = otlpRoot.lookupType(
   "opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest",
 );
 const exportTraceResponseType = otlpRoot.lookupType(
   "opentelemetry.proto.collector.trace.v1.ExportTraceServiceResponse",
 );
+const exportLogsRequestType = otlpRoot.lookupType(
+  "opentelemetry.proto.collector.logs.v1.ExportLogsServiceRequest",
+);
+const exportLogsResponseType = otlpRoot.lookupType(
+  "opentelemetry.proto.collector.logs.v1.ExportLogsServiceResponse",
+);
 
-export function decodeProtobufTraceRequest(payload: Uint8Array): OtlpExportTraceRequest {
+function decodeProtobufMessage<DecodedRequest>(
+  messageType: protobuf.Type,
+  payload: Uint8Array,
+): DecodedRequest {
   try {
-    const decodedMessage = exportTraceRequestType.decode(payload);
-    return exportTraceRequestType.toObject(decodedMessage, {
+    const decodedMessage = messageType.decode(payload);
+    return messageType.toObject(decodedMessage, {
       longs: String,
       enums: Number,
       arrays: true,
-    }) as OtlpExportTraceRequest;
+    }) as DecodedRequest;
   } catch (error) {
     throw new OtlpPayloadError(`Invalid OTLP protobuf payload: ${(error as Error).message}`);
   }
 }
 
+export function decodeProtobufTraceRequest(payload: Uint8Array): OtlpExportTraceRequest {
+  return decodeProtobufMessage(exportTraceRequestType, payload);
+}
+
+export function decodeProtobufLogsRequest(payload: Uint8Array): OtlpExportLogsRequest {
+  return decodeProtobufMessage(exportLogsRequestType, payload);
+}
+
 export function decodeJsonTraceRequest(payloadText: string): OtlpExportTraceRequest {
+  return parseJsonRequest(payloadText) as OtlpExportTraceRequest;
+}
+
+export function decodeJsonLogsRequest(payloadText: string): OtlpExportLogsRequest {
+  return parseJsonRequest(payloadText) as OtlpExportLogsRequest;
+}
+
+function parseJsonRequest(payloadText: string): unknown {
   let parsedPayload: unknown;
   try {
     parsedPayload = JSON.parse(payloadText);
@@ -43,7 +69,7 @@ export function decodeJsonTraceRequest(payloadText: string): OtlpExportTraceRequ
   if (typeof parsedPayload !== "object" || parsedPayload === null || Array.isArray(parsedPayload)) {
     throw new OtlpPayloadError("Invalid OTLP JSON payload: expected an object.");
   }
-  return parsedPayload as OtlpExportTraceRequest;
+  return parsedPayload;
 }
 
 /** OTLP requires `partial_success` to stay unset when every span was accepted. */
@@ -66,4 +92,25 @@ export function encodeProtobufTraceResponse(outcome: TraceExportOutcome): Uint8A
 
 export function createJsonTraceResponse(outcome: TraceExportOutcome): Record<string, unknown> {
   return createTraceResponsePayload(outcome);
+}
+
+function createLogsResponsePayload(outcome: LogsExportOutcome): Record<string, unknown> {
+  if (outcome.rejectedLogRecordCount === 0) {
+    return {};
+  }
+  return {
+    partialSuccess: {
+      rejectedLogRecords: outcome.rejectedLogRecordCount,
+      errorMessage: outcome.errorMessage ?? "",
+    },
+  };
+}
+
+export function encodeProtobufLogsResponse(outcome: LogsExportOutcome): Uint8Array {
+  const responseMessage = exportLogsResponseType.fromObject(createLogsResponsePayload(outcome));
+  return exportLogsResponseType.encode(responseMessage).finish();
+}
+
+export function createJsonLogsResponse(outcome: LogsExportOutcome): Record<string, unknown> {
+  return createLogsResponsePayload(outcome);
 }
