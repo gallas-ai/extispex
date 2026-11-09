@@ -74,11 +74,25 @@ jobs:
       - run: deno install --frozen
       - run: deno task install:browser --with-deps
       - run: deno task build:web
+      # Started here and not under `services:`, which cannot give a container a command or a
+      # file from the checkout.
+      - name: Start Keycloak for the OIDC tests
+        run: |
+          docker run -d --name keycloak -p 8180:8080 \
+            -v "$PWD/tests/e2e/keycloak:/opt/keycloak/data/import:ro" \
+            quay.io/keycloak/keycloak:26.4.7 start-dev --import-realm
+          for attempt in $(seq 1 90); do
+            curl -sf http://localhost:8180/realms/extispex/.well-known/openid-configuration > /dev/null && exit 0
+            sleep 2
+          done
+          docker logs keycloak
+          exit 1
       - run: deno task test:e2e
         env:
           E2E_DEPLOYMENT: ${{ matrix.deployment }}
           # Each service creates its own database <service>_e2e on this server.
           E2E_POSTGRES_URL: postgresql://extispex:extispex@localhost:5432/extispex
+          E2E_OIDC_ISSUER_URL: http://localhost:8180/realms/extispex
 
   container-images:
     name: Container images

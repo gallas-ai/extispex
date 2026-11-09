@@ -5,12 +5,19 @@ import { registerInternalTokenRoutes } from "./access-tokens/internal-token-rout
 import { createAccessTokenSigner } from "./access-tokens/signing-keys.ts";
 import { registerAccessRoutes } from "./access/access-routes.ts";
 import { type IdentityEnvironment, requireSignedInUser } from "./access/user-authentication.ts";
+import { createOidcProvider } from "./oidc/oidc-provider.ts";
+import type { OidcSettings } from "./oidc/oidc-settings.ts";
+import { registerOidcSignInRoutes } from "./oidc/oidc-sign-in-routes.ts";
 import { registerProjectRoutes } from "./projects/project-routes.ts";
+import { createBrowserSignIns } from "./sign-in/browser-sign-ins.ts";
+import { createPasswordAttemptThrottle } from "./sign-in/password-attempt-throttle.ts";
 import { registerSignInRoutes } from "./sign-in/sign-in-routes.ts";
 import { createAccessRepository } from "./storage/access-repository.ts";
 import type { IdentityDatabase } from "./storage/identity-database.ts";
+import { createOidcRepository } from "./storage/oidc-repository.ts";
 import { createProjectRepository } from "./storage/project-repository.ts";
 import { createSignInRepository } from "./storage/sign-in-repository.ts";
+import { createSignInThrottleRepository } from "./storage/sign-in-throttle-repository.ts";
 
 export {
   createFirstAdministratorIfNone,
@@ -24,6 +31,7 @@ export {
   generateServiceClientSecret,
   MINIMUM_CONFIGURED_KEY_LENGTH,
 } from "./api-keys/api-key-secrets.ts";
+export { type OidcSettings, readOidcSettings } from "./oidc/oidc-settings.ts";
 export { createFirstProjectIfNone, FIRST_PROJECT_NAME } from "./projects/first-project.ts";
 export { type IdentityDatabase, openIdentityDatabase } from "./storage/identity-database.ts";
 
@@ -33,6 +41,10 @@ export interface IdentityServiceDependencies {
   areLocalAccountsEnabled: boolean;
   /** Each service's client secret by client ID, from `SERVICE_CLIENTS`. */
   serviceClientSecrets: ReadonlyMap<string, string>;
+  /** Sign-in through the company's identity provider, from the `OIDC_*` variables; null for none. */
+  oidcSettings?: OidcSettings | null;
+  /** How Identity calls the identity provider; tests answer with a fake one. */
+  fetchFromOidcProvider?: typeof fetch;
   logger: StructuredLogger;
   readCurrentTime?: () => Date;
   /** PBKDF2 iterations for new password hashes; tests lower it to stay fast. */
@@ -58,6 +70,9 @@ export function createIdentityService(dependencies: IdentityServiceDependencies)
   const projectRepository = createProjectRepository(dependencies.database);
   const accessRepository = createAccessRepository(dependencies.database);
   const accessTokenSigner = createAccessTokenSigner(dependencies.database, readCurrentTime);
+  const signInRepository = createSignInRepository(dependencies.database);
+  const browserSignIns = createBrowserSignIns(signInRepository, readCurrentTime);
+  const oidcSettings = dependencies.oidcSettings ?? null;
 
   registerInternalTokenRoutes(app, {
     projectRepository,
@@ -68,10 +83,25 @@ export function createIdentityService(dependencies: IdentityServiceDependencies)
   registerSignInRoutes(app, {
     accessRepository,
     projectRepository,
-    signInRepository: createSignInRepository(dependencies.database),
+    signInRepository,
     accessTokenSigner,
+    browserSignIns,
+    passwordAttemptThrottle: createPasswordAttemptThrottle(
+      createSignInThrottleRepository(dependencies.database),
+      readCurrentTime,
+    ),
     areLocalAccountsEnabled: dependencies.areLocalAccountsEnabled,
+    oidcProviderName: oidcSettings?.providerName ?? null,
     passwordHashIterations,
+    readCurrentTime,
+  });
+  registerOidcSignInRoutes(app, {
+    provider: oidcSettings === null
+      ? null
+      : createOidcProvider(oidcSettings, dependencies.fetchFromOidcProvider),
+    oidcRepository: createOidcRepository(dependencies.database),
+    browserSignIns,
+    logger: dependencies.logger,
     readCurrentTime,
   });
   registerAccessRoutes(app, {

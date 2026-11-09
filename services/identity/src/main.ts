@@ -15,6 +15,7 @@ import {
   MINIMUM_CONFIGURED_KEY_LENGTH,
   openIdentityDatabase,
   parseServiceClients,
+  readOidcSettings,
 } from "./create-service.ts";
 
 const logger = createStructuredLogger("identity");
@@ -72,6 +73,7 @@ const identityService = createIdentityService({
   database,
   areLocalAccountsEnabled,
   serviceClientSecrets,
+  oidcSettings: readOidcSettings(readOptionalEnvironmentVariable),
   logger,
 });
 

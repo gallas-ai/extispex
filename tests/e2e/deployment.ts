@@ -1,6 +1,9 @@
 /**
  * Starts the deployment under test. `E2E_DEPLOYMENT` selects it:
  *
+ * With `E2E_OIDC_ISSUER_URL`, the address of Keycloak running with the realm in
+ * `tests/e2e/keycloak`, the first two also sign people in through it. See `oidc-sign-in.test.ts`.
+ *
  * - `all-in-one` (default): the local image's process, with SQLite.
  * - `services`: every service as a separate process on PostgreSQL; needs `E2E_POSTGRES_URL`, a
  *   server on which each service uses its own database `<service>_e2e`, created on first start.
@@ -54,6 +57,7 @@ const SERVICE_CLIENT_SECRETS = {
   evaluation: "e2e-evaluation-client-secret-0000000000",
   e2e: "e2e-test-client-secret-00000000000000000",
 };
+const E2E_OIDC_CLIENT_SECRET = "e2eOidcClientSecret";
 const STARTUP_TIMEOUT_MILLISECONDS = 60_000;
 /** Short waits, so that a missing root span does not cost a minute per attempt. */
 const TRACE_COMPLETION_ENVIRONMENT = {
@@ -84,6 +88,20 @@ export async function startDeployment(): Promise<RunningDeployment> {
   }
 }
 
+/** The `OIDC_*` variables for an Identity behind this Gateway; none without Keycloak. */
+function createOidcEnvironment(gatewayPort: number): Record<string, string> {
+  const issuerUrl = Deno.env.get("E2E_OIDC_ISSUER_URL");
+  if (!issuerUrl) return {};
+  return {
+    OIDC_ISSUER_URL: issuerUrl,
+    OIDC_CLIENT_ID: "extispex",
+    OIDC_CLIENT_SECRET: E2E_OIDC_CLIENT_SECRET,
+    OIDC_REDIRECT_URL: `http://127.0.0.1:${gatewayPort}/v1/sign-in/oidc/callback`,
+    OIDC_PROVIDER_NAME: "Keycloak",
+    OIDC_ALLOW_INSECURE_HTTP: "enabled",
+  };
+}
+
 async function startAllInOneDeployment(): Promise<RunningDeployment> {
   const workingDirectory = await Deno.makeTempDir({ prefix: "extispex-e2e-" });
   const tlsFiles = await createSelfSignedCertificate(workingDirectory);
@@ -99,6 +117,7 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
     TELEMETRY_GRPC_TLS_CERTIFICATE_FILE: tlsFiles.certificateFile,
     TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE: tlsFiles.privateKeyFile,
     ...TRACE_COMPLETION_ENVIRONMENT,
+    ...createOidcEnvironment(gatewayPort),
   });
   const deployment = {
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
@@ -137,6 +156,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     BOOTSTRAP_ADMIN_EMAIL: E2E_ADMIN.email,
     BOOTSTRAP_ADMIN_PASSWORD: E2E_ADMIN.password,
     IDENTITY_PORT: String(identityPort),
+    ...createOidcEnvironment(gatewayPort),
   });
   const telemetryProcess = startDenoProcess("telemetry", "services/telemetry/src/main.ts", {
     TELEMETRY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "telemetry_e2e"),

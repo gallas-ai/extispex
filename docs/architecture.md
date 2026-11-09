@@ -399,9 +399,9 @@ those definitions, and the Gateway builds its forwarding table and the combined 
 - **SCIM 2.0** keeps users and Groups in sync between sign-ins.
 - **JSON or CSV import** serves companies without SCIM.
 - **Local accounts** sign in with a password that Identity stores. The local image always enables
-  them; the separate Identity service enables them with `LOCAL_ACCOUNTS=enabled`, which is how
-  people sign in until OIDC exists (roadmap step 9). Step 9 decides whether they stay as a
-  break-glass account in production.
+  them; the separate Identity service enables them with `LOCAL_ACCOUNTS=enabled`, and they are off
+  by default there. In production they are the break-glass way in when the identity provider is
+  unavailable.
 - Permissions are not imported. A company's group is mapped to a Group, and a Project admin assigns
   it a Role: `viewer`, `editor` or `admin`.
 
@@ -463,6 +463,58 @@ sequenceDiagram
   before it expires.
 - **Gateway:** forwards cookies only to Identity, so the sign-in cookie never reaches another
   service.
+
+### OIDC sign-in
+
+Built in roadmap step 9. See [ADR 0011](adr/0011-oidc-users-identified-by-issuer-and-subject.md) for
+why a user is found by issuer and subject and how Groups follow Company groups.
+
+```mermaid
+sequenceDiagram
+  participant browser as Browser
+  participant identity as Identity
+  participant provider as Identity provider
+  browser->>identity: GET /v1/sign-in/oidc/authorize?returnTo=/traces
+  identity-->>browser: 302 to the provider, state, nonce, S256 code_challenge, cookie extispex_oidc_attempt
+  browser->>provider: The company's sign-in page
+  provider-->>browser: 302 to /v1/sign-in/oidc/callback?code=…&state=…
+  browser->>identity: GET the callback + cookie extispex_oidc_attempt
+  identity->>provider: POST the token endpoint with the code, code_verifier and client secret
+  provider-->>identity: ID token
+  identity->>identity: verify it, find or create the user, follow the Company groups
+  identity-->>browser: 302 to /traces, Set-Cookie extispex_sign_in
+```
+
+- **Identity is the client.** It is confidential and uses the authorization code flow with PKCE
+  through `openid-client`. The provider's tokens never reach the browser, which afterwards holds the
+  same sign-in cookie as after a password.
+- **An attempt** is a row found by the hash of `state`, holding the nonce and code verifier. A
+  second value in the `SameSite=Lax` cookie `extispex_oidc_attempt` ties it to the browser that
+  started it, it lasts ten minutes and it works once. It is a row and not a cookie, so that any
+  replica can complete it and nothing secret is sent to the browser.
+- **Configuration** is `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and
+  `OIDC_REDIRECT_URL`, and optionally `OIDC_SCOPES`, `OIDC_GROUPS_CLAIM` (default `groups`),
+  `OIDC_PROVIDER_NAME` and, for development without TLS, `OIDC_ALLOW_INSECURE_HTTP=enabled`.
+  Identity reads the provider's discovery document on the first sign-in, so a provider that is down
+  does not stop it from starting.
+- **A user** gets the email and name of each sign-in. An address that the provider says it has not
+  verified is refused, and one held by another user refuses a first sign-in.
+- **Failures** redirect to the UI with `signInError`, because the browser arrives by navigating.
+- **The Gateway** does not follow redirects, so each reaches the browser.
+- **Signing out** ends the Extispex sign-in only. The browser stays signed in at the provider.
+
+### Guessing passwords
+
+Built in roadmap step 9. A password attempt counts against the account and against the browser's
+address before the hash is computed, in fixed windows of 15 minutes kept in the database: at most 10
+per account and 100 per address, then `429` with `Retry-After`. A right password forgets the
+account's attempts and takes back its own on the address. An unknown email counts like a known one,
+so the answer does not reveal who has an account. Changing one's own password counts the same way
+and ends the user's other sign-ins.
+
+The Gateway passes the browser's address to Identity in `X-Forwarded-For`. Without proxies in front
+of it that is the connection's peer. Behind them, `GATEWAY_TRUSTED_PROXY_COUNT` says how many
+entries from the right are real, so a client cannot choose its own address.
 
 ### Projects and API keys
 
@@ -685,6 +737,16 @@ The Datasets and Client-Driven Execution step added these checks on 2026-11-08.
 | The example scripts in TypeScript and Python              | Both run a Dataset to the verdict `passed` through the Gateway, in all-in-one and in separate services                  |
 | Datasets, Test Cases and run results in headless Chromium | Creating, editing, an invalid pattern and a run's results work, and nothing scrolls sideways from 360px to 2,000px      |
 
+The OIDC sign-in step added these checks on 2026-11-09.
+
+| Tested                                                | Result                                                                                                                                             |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OIDC against Keycloak 26.4.7 in headless Chromium     | Authorization code flow with PKCE across sites, a new user with the Role of the mapped Group, in all-in-one on SQLite and services on PostgreSQL   |
+| OIDC against a fake provider on SQLite and PostgreSQL | Replayed `state`, another browser, a wrong nonce, a rejected code, an unverified or taken email and an unreachable provider all refuse the sign-in |
+| Company groups                                        | A sign-in adds and removes memberships from Company groups, and leaves members added by hand                                                       |
+| Guessing passwords                                    | The limits per account and per address hold on both databases and through the Gateway, and end with the window                                     |
+| Changing one's own password in Chromium               | The wrong current password is refused, and the change ends the user's other sign-ins                                                               |
+
 The Users, Groups, Roles and tokens step added these checks on 2026-11-08.
 
 | Tested                                           | Result                                                                                                                                                     |
@@ -726,7 +788,16 @@ The Prompt service step added these checks on 2026-11-07.
   process, and no other client reaches Identity's internal API there. The all-in-one e2e tests cover
   them only indirectly, because API key resolution needs one
 - Signing key rotation, which is not built, and many replicas creating the first signing key at once
-- Brute-force protection for sign-in: there is no rate limit or lockout yet
+- OIDC with Microsoft Entra ID, Okta or any provider other than Keycloak. Entra replaces the groups
+  claim with a link to Microsoft Graph for a user in more than 200 groups, which Extispex does not
+  follow, and such a user gets no Company groups
+- OIDC in the all-in-one image and Docker Compose, where the Instance must reach the provider at the
+  address the browser uses; the e2e tests run OIDC only in the all-in-one process and separate
+  services
+- That guessing protection cannot be used to lock someone out: anyone who can reach the sign-in
+  endpoint can keep a known email blocked for local accounts. Users signing in through OIDC are not
+  affected
+- `GATEWAY_TRUSTED_PROXY_COUNT` behind a real load balancer
 - Browsers other than Chromium with the sign-in cookie
 - pg-boss under sustained load and on a managed PostgreSQL service
 - Mixed-telemetry protection with clock differences between Evaluation and Telemetry: it compares
@@ -764,3 +835,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0008: Project-scoped access tokens signed by Identity](adr/0008-project-scoped-access-tokens-signed-by-identity.md)
 - [ADR 0009: Client-Driven Execution as a pull protocol](adr/0009-client-driven-execution-as-a-pull-protocol.md)
 - [ADR 0010: Telemetry Evaluator conditions as JSON](adr/0010-telemetry-evaluator-conditions-as-json.md)
+- [ADR 0011: OIDC users identified by issuer and subject](adr/0011-oidc-users-identified-by-issuer-and-subject.md)

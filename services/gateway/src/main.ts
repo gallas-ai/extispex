@@ -4,6 +4,7 @@ import {
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
+  readTrustedProxyCount,
   runOnTerminationSignal,
 } from "@extispex/service-runtime";
 import { createGatewayService } from "./create-service.ts";
@@ -18,6 +19,7 @@ const gatewayService = createGatewayService({
     evaluation: createHttpServiceClient(readRequiredEnvironmentVariable("EVALUATION_URL")),
   },
   webAssetsDirectory: readOptionalEnvironmentVariable("WEB_ASSETS_DIRECTORY") ?? null,
+  trustedProxyCount: readTrustedProxyCount(),
   logger,
 });
 

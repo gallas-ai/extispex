@@ -280,3 +280,69 @@ Deno.test("turns OpenAPI path parameters into Hono path parameters", () => {
     "/v1/prompts/:promptName/versions/:versionNumber",
   );
 });
+
+Deno.test("tells Identity the browser's address, which a client cannot choose", async () => {
+  const forwardedAddresses: (string | null)[] = [];
+  const createGatewayWithProxies = (trustedProxyCount: number) =>
+    createGatewayService({
+      serviceClients: {
+        telemetry: unexpectedServiceCall(),
+        prompt: unexpectedServiceCall(),
+        identity: (request) => {
+          forwardedAddresses.push(request.headers.get("x-forwarded-for"));
+          return Promise.resolve(new Response(null, { status: 204 }));
+        },
+        evaluation: unexpectedServiceCall(),
+      },
+      webAssetsDirectory: null,
+      trustedProxyCount,
+      logger,
+    });
+  const sendFromPeer = async (trustedProxyCount: number) => {
+    const response = await createGatewayWithProxies(trustedProxyCount).handleRequest(
+      new Request("http://gateway.test/v1/sign-in", {
+        method: "DELETE",
+        headers: { "x-forwarded-for": "198.51.100.66, 203.0.113.7" },
+      }),
+      { remoteAddr: { hostname: "10.0.0.5" } },
+    );
+    await response.body?.cancel();
+  };
+
+  await sendFromPeer(0);
+  await sendFromPeer(1);
+  await sendFromPeer(2);
+  await sendFromPeer(3);
+
+  assertEquals(forwardedAddresses, ["10.0.0.5", "203.0.113.7", "198.51.100.66", "10.0.0.5"]);
+});
+
+Deno.test("passes redirects to the browser instead of following them", async () => {
+  let forwardedRedirectMode: string | null = null;
+  const gatewayService = createGatewayService({
+    serviceClients: {
+      telemetry: unexpectedServiceCall(),
+      prompt: unexpectedServiceCall(),
+      identity: (request) => {
+        forwardedRedirectMode = request.redirect;
+        return Promise.resolve(
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://idp.example.test/authorize" },
+          }),
+        );
+      },
+      evaluation: unexpectedServiceCall(),
+    },
+    webAssetsDirectory: null,
+    logger,
+  });
+
+  const response = await gatewayService.handleRequest(
+    new Request("http://gateway.test/v1/sign-in/oidc/authorize?returnTo=%2Ftraces"),
+  );
+
+  assertEquals(response.status, 302);
+  assertEquals(response.headers.get("location"), "https://idp.example.test/authorize");
+  assertEquals(forwardedRedirectMode, "manual");
+});

@@ -1,0 +1,45 @@
+{
+  "realm": "extispex",
+  "enabled": true,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "extispex",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "e2eOidcClientSecret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["*"],
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "groups": [{ "name": "e2e-engineering" }, { "name": "e2e-unmapped" }],
+  "users": [
+    {
+      "id": "6f1d3a52-5c4e-4f6a-9d11-2a7f0c8b1e01",
+      "username": "ada",
+      "email": "ada@e2e.extispex.test",
+      "firstName": "Ada",
+      "lastName": "Lovelace",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "ada-e2e-password" }],
+      "groups": ["/e2e-engineering", "/e2e-unmapped"]
+    }
+  ]
+}

@@ -34,6 +34,9 @@ export const passwordSchema = z.string().min(MINIMUM_PASSWORD_LENGTH).max(256);
 
 export const groupNameSchema = z.string().trim().min(1).max(64);
 
+/** A group's name or ID in the company's identity system, exactly as its token carries it. */
+export const companyGroupNameSchema = z.string().trim().min(1).max(255);
+
 export const userSchema = z.object({
   id: z.string(),
   email: z.string(),
@@ -68,6 +71,8 @@ export const groupMemberSchema = z.object({
   id: z.string(),
   email: z.string(),
   displayName: z.string(),
+  /** Whether a Company group added the user. Sign-in then adds or removes them again. */
+  isFromCompanyGroup: z.boolean(),
 });
 
 export const groupSchema = z.object({
@@ -76,11 +81,18 @@ export const groupSchema = z.object({
   createdAt: z.string(),
   /** By email. */
   members: z.array(groupMemberSchema),
+  /** The Company groups whose members join this Group when they sign in, by name. */
+  companyGroups: z.array(z.string()),
 });
 
 export const createGroupRequestSchema = z.object({ name: groupNameSchema });
 
 export const listGroupsResponseSchema = z.object({ groups: z.array(groupSchema) });
+
+/** Replaces all the Group's Company groups. Permissions are never imported, only membership. */
+export const setCompanyGroupsRequestSchema = z.object({
+  companyGroups: z.array(companyGroupNameSchema).max(100),
+});
 
 export const roleAssignmentSchema = z.object({
   groupId: z.string(),
@@ -98,6 +110,19 @@ export const listRoleAssignmentsResponseSchema = z.object({
 export const signInRequestSchema = z.object({
   email: emailSchema,
   password: z.string().min(1).max(256),
+});
+
+/** What the sign-in page offers on this Instance. */
+export const signInOptionsSchema = z.object({
+  /** Whether users can sign in with a password stored by Identity. */
+  areLocalAccountsEnabled: z.boolean(),
+  /** The name to show for the company's identity provider, or null without OIDC. */
+  oidcProviderName: z.string().nullable(),
+});
+
+export const changeOwnPasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: passwordSchema,
 });
 
 export const issueAccessTokenRequestSchema = z.object({
@@ -125,5 +150,8 @@ export type RoleAssignment = z.infer<typeof roleAssignmentSchema>;
 export type AssignRoleRequest = z.infer<typeof assignRoleRequestSchema>;
 export type ListRoleAssignmentsResponse = z.infer<typeof listRoleAssignmentsResponseSchema>;
 export type SignInRequest = z.infer<typeof signInRequestSchema>;
+export type SignInOptions = z.infer<typeof signInOptionsSchema>;
+export type ChangeOwnPasswordRequest = z.infer<typeof changeOwnPasswordRequestSchema>;
+export type SetCompanyGroupsRequest = z.infer<typeof setCompanyGroupsRequestSchema>;
 export type IssueAccessTokenRequest = z.infer<typeof issueAccessTokenRequestSchema>;
 export type AccessTokenResponse = z.infer<typeof accessTokenResponseSchema>;

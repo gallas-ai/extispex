@@ -8,8 +8,10 @@ import {
   listGroups,
   listUsers,
   removeGroupMember,
+  setCompanyGroups,
   updateUser,
 } from "../api/identity-api.ts";
+import { getSignInOptions } from "../api/sign-in-api.ts";
 import { useAccess } from "../sign-in/access-context.ts";
 import { MINIMUM_PASSWORD_LENGTH } from "./access-rules.ts";
 import { AlertIcon, PlusIcon, ShieldIcon, TrashIcon } from "../ui/icons.tsx";
@@ -19,17 +21,19 @@ import { useApiResource } from "../ui/use-api-resource.ts";
 interface AccessDirectory {
   users: User[];
   groups: Group[];
+  isOidcEnabled: boolean;
 }
 
 /** Users and Groups, for Instance admins. Roles are given per Project, on each Project's page. */
 export function AccessPage() {
   const { credentials, showSignIn } = useAccess();
   const loadDirectory = useCallback(async (): Promise<AccessDirectory> => {
-    const [{ users }, { groups }] = await Promise.all([
+    const [{ users }, { groups }, signInOptions] = await Promise.all([
       listUsers(credentials),
       listGroups(credentials),
+      getSignInOptions(),
     ]);
-    return { users, groups };
+    return { users, groups, isOidcEnabled: signInOptions.oidcProviderName !== null };
   }, [credentials]);
   const [directoryState, reloadDirectory] = useApiResource(loadDirectory);
 
@@ -60,6 +64,7 @@ export function AccessPage() {
           <GroupsPanel
             groups={directoryState.resource.groups}
             users={directoryState.resource.users}
+            isOidcEnabled={directoryState.resource.isOidcEnabled}
             onChange={reloadDirectory}
           />
           <UsersPanel users={directoryState.resource.users} onChange={reloadDirectory} />
@@ -101,7 +106,12 @@ function FormProblem({ problem }: { problem: string | null }) {
 }
 
 function GroupsPanel(
-  { groups, users, onChange }: { groups: Group[]; users: User[]; onChange: () => void },
+  { groups, users, isOidcEnabled, onChange }: {
+    groups: Group[];
+    users: User[];
+    isOidcEnabled: boolean;
+    onChange: () => void;
+  },
 ) {
   const { credentials, reloadAccess } = useAccess();
   const [groupName, setGroupName] = useState("");
@@ -151,6 +161,7 @@ function GroupsPanel(
                 key={group.id}
                 group={group}
                 users={users}
+                isOidcEnabled={isOidcEnabled}
                 isChanging={isChanging}
                 runChange={runChange}
               />
@@ -162,9 +173,10 @@ function GroupsPanel(
 }
 
 function GroupItem(
-  { group, users, isChanging, runChange }: {
+  { group, users, isOidcEnabled, isChanging, runChange }: {
     group: Group;
     users: User[];
+    isOidcEnabled: boolean;
     isChanging: boolean;
     runChange: (makeChange: () => Promise<unknown>) => Promise<boolean>;
   },
@@ -224,7 +236,14 @@ function GroupItem(
         <ul className="member-list" aria-label={`Members of ${group.name}`}>
           {group.members.map((member) => (
             <li key={member.id} className="member-chip">
-              <span className="member-chip-name" title={member.email}>{member.displayName}</span>
+              <span
+                className="member-chip-name"
+                title={member.isFromCompanyGroup
+                  ? `${member.email}, from a Company group: their next sign-in decides again`
+                  : member.email}
+              >
+                {member.displayName}
+              </span>
               <button
                 type="button"
                 className="member-chip-remove"
@@ -268,7 +287,50 @@ function GroupItem(
           </button>
         </form>
       )}
+      {isOidcEnabled && (
+        <CompanyGroupsForm group={group} isChanging={isChanging} runChange={runChange} />
+      )}
     </li>
+  );
+}
+
+/** One name per line, because a directory's group name may contain commas. */
+function CompanyGroupsForm(
+  { group, isChanging, runChange }: {
+    group: Group;
+    isChanging: boolean;
+    runChange: (makeChange: () => Promise<unknown>) => Promise<boolean>;
+  },
+) {
+  const { credentials } = useAccess();
+  const [companyGroupsText, setCompanyGroupsText] = useState(group.companyGroups.join("\n"));
+  const inputId = `company-groups-${group.id}`;
+
+  return (
+    <form
+      className="company-groups-form"
+      onSubmit={(submitEvent) => {
+        submitEvent.preventDefault();
+        const companyGroups = companyGroupsText.split("\n").map((name) => name.trim())
+          .filter((name) => name !== "");
+        runChange(() => setCompanyGroups(credentials, group.id, companyGroups));
+      }}
+    >
+      <label htmlFor={inputId} className="field-label">
+        Company groups whose members join {group.name}, one per line
+      </label>
+      <textarea
+        id={inputId}
+        className="text-input"
+        rows={2}
+        spellCheck={false}
+        value={companyGroupsText}
+        onChange={(changeEvent) => setCompanyGroupsText(changeEvent.target.value)}
+      />
+      <button type="submit" className="button button-secondary button-small" disabled={isChanging}>
+        Save Company groups
+      </button>
+    </form>
   );
 }
 

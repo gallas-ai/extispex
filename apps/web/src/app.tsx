@@ -20,6 +20,7 @@ import { NEW_PROMPT_PATH, PromptsPage } from "./prompts/prompts-page.tsx";
 import { AccessContext, type AccessContextValue, useAccess } from "./sign-in/access-context.ts";
 import { createAccessTokenCredentials } from "./sign-in/access-token-credentials.ts";
 import { readStoredProjectId, storeProjectId } from "./sign-in/selected-project-storage.ts";
+import { AccountPage } from "./sign-in/account-page.tsx";
 import { SignInPage } from "./sign-in/sign-in-page.tsx";
 import { UserMenu } from "./sign-in/user-menu.tsx";
 import { ThemeSwitcher } from "./theme/theme-switcher.tsx";
@@ -220,6 +221,7 @@ function AppShell() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:projectId" element={<ProjectPage />} />
           {user.isInstanceAdmin && <Route path="/access" element={<AccessPage />} />}
+          {user.isLocalAccount && <Route path="/account" element={<AccountPage />} />}
           {hasProject
             ? (
               <>

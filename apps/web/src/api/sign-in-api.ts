@@ -1,6 +1,8 @@
 import type {
   AccessTokenResponse,
+  ChangeOwnPasswordRequest,
   IssueAccessTokenRequest,
+  SignInOptions,
   SignInRequest,
   User,
 } from "@extispex/contracts";
@@ -14,6 +16,22 @@ export async function signIn(request: SignInRequest): Promise<User> {
   return await readJsonResponse(
     await fetch("/v1/sign-in", {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    }),
+  );
+}
+
+/** How people sign in on this Instance; needs no sign-in. */
+export async function getSignInOptions(): Promise<SignInOptions> {
+  return await readJsonResponse(await fetch("/v1/sign-in/options"));
+}
+
+/** Changes the signed-in user's own password. The cookie proves who they are. */
+export async function changeOwnPassword(request: ChangeOwnPasswordRequest): Promise<void> {
+  await readJsonResponse(
+    await fetch("/v1/sign-in/password", {
+      method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request),
     }),
