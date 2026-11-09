@@ -57,3 +57,20 @@ export function readSecretEnvironmentVariable(
   }
   return variableValue;
 }
+
+/**
+ * How many reverse proxies stand in front of the Gateway, from `GATEWAY_TRUSTED_PROXY_COUNT`. Each
+ * appends the address it saw to `X-Forwarded-For`, so this many entries from the right are real
+ * and anything further left could be written by the client.
+ */
+export function readTrustedProxyCount(): number {
+  const configuredValue = readOptionalEnvironmentVariable("GATEWAY_TRUSTED_PROXY_COUNT");
+  if (configuredValue === undefined) return 0;
+  const proxyCount = Number(configuredValue);
+  if (!Number.isInteger(proxyCount) || proxyCount < 0) {
+    throw new InvalidConfigurationError(
+      `GATEWAY_TRUSTED_PROXY_COUNT must be a whole number, got "${configuredValue}".`,
+    );
+  }
+  return proxyCount;
+}

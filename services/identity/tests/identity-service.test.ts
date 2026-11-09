@@ -22,6 +22,11 @@ import {
   type IdentityService,
   openIdentityDatabase,
 } from "../src/create-service.ts";
+import {
+  MAXIMUM_ATTEMPTS_PER_ACCOUNT,
+  MAXIMUM_ATTEMPTS_PER_ADDRESS,
+  THROTTLE_WINDOW_SECONDS,
+} from "../src/sign-in/password-attempt-throttle.ts";
 
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "first-admin-password";
@@ -49,6 +54,9 @@ function defineIdentityTest(testName: string, testBody: IdentityTestBody): void 
 }
 
 const IDENTITY_TABLES = [
+  "company_group_mappings",
+  "oidc_sign_in_attempts",
+  "sign_in_throttles",
   "sign_ins",
   "group_members",
   "role_assignments",
@@ -888,4 +896,152 @@ defineIdentityTest("publishes an OpenAPI 3.1 document", async ({ identityService
   ) {
     assert(documentedPaths.includes(expectedPath), expectedPath);
   }
+});
+
+defineIdentityTest("limits wrong passwords per account", async ({ identityService }) => {
+  const attempt = (password: string) =>
+    sendRequest(identityService, "POST", "/v1/sign-in", {
+      body: { email: "guessed@example.com", password },
+    });
+  await createUser(
+    await signIn(identityService, ADMIN_EMAIL, ADMIN_PASSWORD),
+    "guessed@example.com",
+  );
+  for (let attemptNumber = 1; attemptNumber <= MAXIMUM_ATTEMPTS_PER_ACCOUNT; attemptNumber++) {
+    await expectErrorCode(attempt("not-the-password"), 401);
+  }
+  // From here even the right password is refused, without computing its hash.
+  const blockedResponse = await attempt(USER_PASSWORD);
+  assertEquals(await expectErrorCode(Promise.resolve(blockedResponse), 429), "too_many_attempts");
+  assert(Number(blockedResponse.headers.get("retry-after")) > 0);
+});
+
+defineIdentityTest(
+  "throttles an unknown email the same way, so the answer reveals nothing",
+  async ({ identityService }) => {
+    const attempt = () =>
+      sendRequest(identityService, "POST", "/v1/sign-in", {
+        body: { email: "nobody@example.com", password: "not-the-password" },
+      });
+    for (let attemptNumber = 1; attemptNumber <= MAXIMUM_ATTEMPTS_PER_ACCOUNT; attemptNumber++) {
+      assertEquals(await expectErrorCode(attempt(), 401), "invalid_credentials");
+    }
+    assertEquals(await expectErrorCode(attempt(), 429), "too_many_attempts");
+  },
+);
+
+defineIdentityTest("forgets an account's wrong passwords after a right one", async (
+  { identityService },
+) => {
+  for (let round = 1; round <= 3; round++) {
+    for (let attemptNumber = 1; attemptNumber < MAXIMUM_ATTEMPTS_PER_ACCOUNT; attemptNumber++) {
+      await expectErrorCode(
+        sendRequest(identityService, "POST", "/v1/sign-in", {
+          body: { email: ADMIN_EMAIL, password: "not-the-password" },
+        }),
+        401,
+      );
+    }
+    await signIn(identityService, ADMIN_EMAIL, ADMIN_PASSWORD);
+  }
+});
+
+defineIdentityTest("limits wrong passwords per address, across accounts", async (
+  { identityService },
+) => {
+  const attemptFrom = (clientAddress: string, attemptNumber: number) =>
+    sendRequest(identityService, "POST", "/v1/sign-in", {
+      headers: { "x-forwarded-for": clientAddress },
+      body: { email: `sprayed-${attemptNumber}@example.com`, password: "not-the-password" },
+    });
+  for (let attemptNumber = 1; attemptNumber <= MAXIMUM_ATTEMPTS_PER_ADDRESS; attemptNumber++) {
+    await expectErrorCode(attemptFrom("203.0.113.7", attemptNumber), 401);
+  }
+  await expectErrorCode(attemptFrom("203.0.113.7", 0), 429);
+  await expectErrorCode(attemptFrom("203.0.113.8", 0), 401);
+});
+
+defineIdentityTest("lets an account try again after the window ends", async ({ database }) => {
+  let nowMilliseconds = Date.parse("2026-11-07T10:00:00Z");
+  const identityService = createIdentityService({
+    database,
+    areLocalAccountsEnabled: true,
+    serviceClientSecrets: new Map(),
+    logger: createStructuredLogger("identity-test"),
+    passwordHashIterations: PASSWORD_HASH_ITERATIONS,
+    readCurrentTime: () => new Date(nowMilliseconds),
+  });
+  const attempt = (password: string) =>
+    sendRequest(identityService, "POST", "/v1/sign-in", {
+      body: { email: ADMIN_EMAIL, password },
+    });
+  for (let attemptNumber = 1; attemptNumber <= MAXIMUM_ATTEMPTS_PER_ACCOUNT; attemptNumber++) {
+    await expectErrorCode(attempt("not-the-password"), 401);
+  }
+  await expectErrorCode(attempt(ADMIN_PASSWORD), 429);
+  nowMilliseconds += (THROTTLE_WINDOW_SECONDS + 1) * 1000;
+  await expectJson<User>(attempt(ADMIN_PASSWORD), 200);
+});
+
+defineIdentityTest("lets a user change their own password", async ({ identityService, admin }) => {
+  const member = await createUser(admin, "changer@example.com");
+  const firstBrowser = await signIn(identityService, member.email, USER_PASSWORD);
+  const secondBrowser = await signIn(identityService, member.email, USER_PASSWORD);
+  const changePassword = (cookie: string | undefined, currentPassword: string) =>
+    sendRequest(identityService, "PUT", "/v1/sign-in/password", {
+      cookie,
+      body: { currentPassword, newPassword: "a-new-long-password" },
+    });
+
+  await expectErrorCode(changePassword(undefined, USER_PASSWORD), 401);
+  await expectErrorCode(changePassword(firstBrowser.cookie, "not-the-password"), 403);
+  await expectErrorCode(
+    sendRequest(identityService, "PUT", "/v1/sign-in/password", {
+      cookie: firstBrowser.cookie,
+      body: { currentPassword: USER_PASSWORD, newPassword: "short" },
+    }),
+    400,
+  );
+  await expectJson(changePassword(firstBrowser.cookie, USER_PASSWORD), 204);
+
+  await expectJson<AccessTokenResponse>(firstBrowser.requestAccessToken(), 200);
+  await expectErrorCode(secondBrowser.requestAccessToken(), 401);
+  await expectErrorCode(
+    sendRequest(identityService, "POST", "/v1/sign-in", {
+      body: { email: member.email, password: USER_PASSWORD },
+    }),
+    401,
+  );
+  await signIn(identityService, member.email, "a-new-long-password");
+});
+
+defineIdentityTest("keeps Company groups on a Group, for Instance admins only", async (
+  { identityService, admin },
+) => {
+  const group = await expectJson<Group>(admin.send("POST", "/v1/groups", { name: "Support" }), 201);
+  assertEquals(group.companyGroups, []);
+  const updated = await expectJson<Group>(
+    admin.send("PUT", `/v1/groups/${group.id}/company-groups`, {
+      companyGroups: ["team-support", " CN=Support,OU=Teams ", "team-support"],
+    }),
+    200,
+  );
+  assertEquals(updated.companyGroups, ["CN=Support,OU=Teams", "team-support"]);
+  const { groups } = await expectJson<{ groups: Group[] }>(admin.send("GET", "/v1/groups"), 200);
+  assertEquals(
+    groups.find(({ id }) => id === group.id)?.companyGroups,
+    ["CN=Support,OU=Teams", "team-support"],
+  );
+  await expectJson(
+    admin.send("PUT", "/v1/groups/unknown-group/company-groups", { companyGroups: [] }),
+    404,
+  );
+  await createUser(admin, "plain@example.com");
+  const plainUser = await signIn(identityService, "plain@example.com", USER_PASSWORD);
+  await expectErrorCode(
+    plainUser.send("PUT", `/v1/groups/${group.id}/company-groups`, { companyGroups: [] }),
+    403,
+  );
+  // Deleting the Group removes its mappings with it.
+  await expectJson(admin.send("DELETE", `/v1/groups/${group.id}`), 204);
 });

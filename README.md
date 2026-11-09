@@ -15,7 +15,7 @@ their Groups, and applications send its API keys.
 
 **Status:** early development. The trace pipeline, versioned prompts, Projects with API keys, users
 with Groups and Roles, and Datasets judged by Regex Evaluators work end to end. Logs, metrics, the
-other Evaluators and company sign-in (OIDC, SCIM) are designed in
+other Evaluators and directory sync (SCIM) are designed in
 [docs/architecture.md](docs/architecture.md) but not built yet.
 
 ## Try it locally
@@ -66,9 +66,31 @@ administrator is one, in the Group `Administrators`, which has the Role `admin` 
 Project's `admin` gives Groups Roles and creates API keys on the Project's page.
 
 The browser signs in with an HttpOnly cookie and gets access tokens that last five minutes, so a
-removed Role or a deactivated user loses access within five minutes. Until company sign-in through
-OIDC arrives, people sign in with local accounts, which the all-in-one image always enables and the
-separate Identity service enables with `LOCAL_ACCOUNTS=enabled`.
+removed Role or a deactivated user loses access within five minutes.
+
+People sign in through the company's identity provider, or with local accounts. Local accounts are
+always on in the all-in-one image, and in the separate Identity service only with
+`LOCAL_ACCOUNTS=enabled`, as a way in when the provider is unavailable. Set these to use OIDC, on
+the Identity service or the all-in-one image:
+
+| Variable                   | Meaning                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| `OIDC_ISSUER_URL`          | The provider's issuer. Setting it turns OIDC on.                                |
+| `OIDC_CLIENT_ID`           | This Instance's client at the provider.                                         |
+| `OIDC_CLIENT_SECRET`       | Its secret.                                                                     |
+| `OIDC_REDIRECT_URL`        | `https://<your Instance>/v1/sign-in/oidc/callback`, registered at the provider. |
+| `OIDC_SCOPES`              | Optional, default `openid profile email`.                                       |
+| `OIDC_GROUPS_CLAIM`        | Optional, default `groups`: the ID token claim that lists Company groups.       |
+| `OIDC_PROVIDER_NAME`       | Optional, shown on the sign-in button.                                          |
+| `OIDC_ALLOW_INSECURE_HTTP` | `enabled` allows a provider without TLS, for local development only.            |
+
+A user appears on their first sign-in. An Instance admin maps Company groups to Groups under
+**Access**, and each sign-in then follows them. Give the first start `LOCAL_ACCOUNTS=enabled` with
+`BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`, because nobody else can make that mapping
+yet; use an address that nobody has at the provider.
+
+Behind a reverse proxy, set `GATEWAY_TRUSTED_PROXY_COUNT` on the Gateway to the number of proxies,
+so that the limit on wrong passwords per address sees browsers and not the proxy.
 
 Applications and scripts send one of the Project's API keys, and the key alone decides the Project.
 A key acts as an `editor`. It looks like `extispex_` followed by 43 letters and digits, and is shown

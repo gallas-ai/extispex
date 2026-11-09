@@ -26,6 +26,17 @@ function groupPath(groupId: string): string {
   return `/v1/groups/${encodeURIComponent(groupId)}`;
 }
 
+export function setCompanyGroups(
+  credentials: ApiCredentials,
+  groupId: string,
+  companyGroups: string[],
+): Promise<Group> {
+  return requestJson(credentials, `${groupPath(groupId)}/company-groups`, {
+    method: "PUT",
+    body: { companyGroups },
+  });
+}
+
 export function getCurrentUser(credentials: ApiCredentials): Promise<User> {
   return requestJson(credentials, "/v1/me");
 }

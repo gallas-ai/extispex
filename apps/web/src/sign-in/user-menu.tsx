@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { ThemeSwitcher } from "../theme/theme-switcher.tsx";
 import { LogOutIcon, ShieldIcon } from "../ui/icons.tsx";
 import { usePopover } from "../ui/use-popover.ts";
@@ -37,6 +38,15 @@ export function UserMenu() {
             <ThemeSwitcher />
           </div>
           <div className="popover-section">
+            {user.isLocalAccount && (
+              <Link
+                className="button button-ghost button-block-start"
+                to="/account"
+                onClick={() => setIsOpen(false)}
+              >
+                Change password
+              </Link>
+            )}
             <button
               type="button"
               className="button button-ghost button-danger button-block-start"

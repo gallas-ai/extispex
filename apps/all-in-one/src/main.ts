@@ -22,6 +22,7 @@ import {
   type IdentityDatabase,
   MINIMUM_CONFIGURED_KEY_LENGTH,
   openIdentityDatabase,
+  readOidcSettings,
 } from "@extispex/identity-service";
 import { createPromptService, openPromptDatabase } from "@extispex/prompt-service";
 import { createInProcessServiceClient } from "@extispex/service-client";
@@ -33,6 +34,7 @@ import {
   readPortEnvironmentVariable,
   readPositiveIntegerEnvironmentVariable,
   readSecretEnvironmentVariable,
+  readTrustedProxyCount,
   runOnTerminationSignal,
 } from "@extispex/service-runtime";
 import {
@@ -60,6 +62,7 @@ const identityService = createIdentityService({
   // Local accounts are how people sign in to the local image.
   areLocalAccountsEnabled: true,
   serviceClientSecrets,
+  oidcSettings: readOidcSettings(readOptionalEnvironmentVariable),
   logger: createStructuredLogger("identity"),
 });
 await createFirstProjectOnFirstStart(identityDatabase);
@@ -136,6 +139,7 @@ const gatewayService = createGatewayService({
   },
   webAssetsDirectory: readOptionalEnvironmentVariable("WEB_ASSETS_DIRECTORY") ??
     new URL("../../web/dist", import.meta.url).pathname,
+  trustedProxyCount: readTrustedProxyCount(),
   logger: createStructuredLogger("gateway"),
 });
 

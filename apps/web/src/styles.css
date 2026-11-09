@@ -3712,3 +3712,48 @@ textarea {
   display: flex;
   margin: 0 auto 12px;
 }
+
+.sign-in-failure {
+  margin: 0 0 12px;
+  text-align: left;
+}
+
+.sign-in-provider {
+  text-decoration: none;
+}
+
+.sign-in-divider {
+  margin: 16px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.account-form .button {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
+.form-success {
+  margin: 0;
+  font-size: 13px;
+}
+
+.company-groups-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.company-groups-form .text-input {
+  width: 100%;
+  resize: vertical;
+}

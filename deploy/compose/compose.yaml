@@ -9,8 +9,9 @@
 # characters each) before anyone else can reach the ports. Sign in to the UI as
 # admin@extispex.local, or as BOOTSTRAP_ADMIN_EMAIL.
 #
-# Local accounts are enabled here. Production signs users in through the company's identity
-# provider once OIDC exists; until then, LOCAL_ACCOUNTS=enabled is the only way to sign in.
+# Local accounts are enabled here, for development. Production signs users in through the
+# company's identity provider: set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and
+# OIDC_REDIRECT_URL, as the README describes.
 #
 # One PostgreSQL server hosts a separate database for each service. Each service creates its own
 # database on first start, which needs a user that may create databases.
@@ -38,6 +39,10 @@ services:
     environment:
       IDENTITY_DATABASE_URL: postgresql://extispex:extispex@postgres:5432/identity
       LOCAL_ACCOUNTS: enabled
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@extispex.local}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-development-admin-password}
       BOOTSTRAP_PROJECT_API_KEY: ${BOOTSTRAP_PROJECT_API_KEY:-development-project-api-key-not-for-production}

@@ -10,7 +10,9 @@
     "@mikro-orm/migrations": "npm:@mikro-orm/migrations@7.2.7",
     "@mikro-orm/sql": "npm:@mikro-orm/sql@7.2.7",
     "@std/assert": "jsr:@std/assert@^1.0.0",
-    "hono": "npm:hono@^4.10.0"
+    "hono": "npm:hono@^4.10.0",
+    "jose": "npm:jose@6.2.15",
+    "openid-client": "npm:openid-client@6.8.9"
   },
   "tasks": {
     "start": "deno run --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-sys src/main.ts"

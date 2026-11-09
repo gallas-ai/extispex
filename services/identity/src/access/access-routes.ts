@@ -11,6 +11,7 @@ import {
   listUsersRoute,
   removeGroupMemberRoute,
   removeRoleAssignmentRoute,
+  setCompanyGroupsRoute,
   updateUserRoute,
 } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
@@ -180,6 +181,17 @@ export function registerAccessRoutes(
     }
     const { groupId, userId } = context.req.valid("param");
     const group = await accessRepository.removeGroupMember(groupId, userId);
+    if (group === null) return context.json(groupNotFoundError(groupId), 404);
+    return context.json(group, 200);
+  });
+
+  app.openapi(setCompanyGroupsRoute, async (context) => {
+    if (!context.get("currentUser").isInstanceAdmin) {
+      return context.json(INSTANCE_ADMIN_REQUIRED, 403);
+    }
+    const { groupId } = context.req.valid("param");
+    const { companyGroups } = context.req.valid("json");
+    const group = await accessRepository.setCompanyGroups(groupId, companyGroups);
     if (group === null) return context.json(groupNotFoundError(groupId), 404);
     return context.json(group, 200);
   });

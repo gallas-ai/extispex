@@ -12,6 +12,7 @@ import {
 } from "@mikro-orm/core";
 import type { IdentityDatabase } from "./identity-database.ts";
 import {
+  CompanyGroupMappingRecord,
   GroupMemberRecord,
   GroupRecord,
   ProjectRecord,
@@ -87,6 +88,8 @@ export interface AccessRepository {
   addGroupMember(groupId: string, userId: string, addedAt: Date): Promise<AddGroupMemberResult>;
   /** Null for an unknown Group; removing a user who is not a member changes nothing. */
   removeGroupMember(groupId: string, userId: string): Promise<Group | null>;
+  /** Replaces the Group's Company groups. Null for an unknown Group. */
+  setCompanyGroups(groupId: string, companyGroupNames: string[]): Promise<Group | null>;
 
   /** By Group name. */
   listRoleAssignments(projectId: string): Promise<RoleAssignment[]>;
@@ -119,7 +122,10 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
     const memberUsers = memberRows.length === 0 ? [] : await entityManager.find(UserRecord, {
       id: { $in: [...new Set(memberRows.map((memberRow) => memberRow.userId))] },
     }, { orderBy: { email: "asc" } });
-    return groupRows.map((groupRow) => toGroup(groupRow, memberRows, memberUsers));
+    const mappingRows = await entityManager.find(CompanyGroupMappingRecord, {
+      groupId: { $in: groupRows.map((groupRow) => groupRow.id) },
+    }, { orderBy: { companyGroupName: "asc" } });
+    return groupRows.map((groupRow) => toGroup(groupRow, memberRows, memberUsers, mappingRows));
   };
 
   const findGroupWith = async (entityManager: EntityManager, groupId: string) =>
@@ -156,6 +162,7 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
             groupId,
             userId: userRow.id,
             addedAt: createdAt,
+            isFromCompanyGroup: false,
           });
           const projectRows = await entityManager.find(ProjectRecord, { deletedAt: null });
           for (const projectRow of projectRows) {
@@ -239,7 +246,7 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
         if (error instanceof UniqueConstraintViolationException) return { status: "name_taken" };
         throw error;
       }
-      return { status: "created", group: toGroup(groupRow, [], []) };
+      return { status: "created", group: toGroup(groupRow, [], [], []) };
     },
 
     async listGroups() {
@@ -249,6 +256,7 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
     async deleteGroup(groupId) {
       return await database.orm.em.fork().transactional(async (entityManager) => {
         await entityManager.nativeDelete(GroupMemberRecord, { groupId });
+        await entityManager.nativeDelete(CompanyGroupMappingRecord, { groupId });
         await entityManager.nativeDelete(RoleAssignmentRecord, { groupId });
         return await entityManager.nativeDelete(GroupRecord, { id: groupId }) > 0;
       });
@@ -263,7 +271,12 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
           return { status: "user_not_found" } as const;
         }
         if (await entityManager.count(GroupMemberRecord, { groupId, userId }) === 0) {
-          await entityManager.insert(GroupMemberRecord, { groupId, userId, addedAt });
+          await entityManager.insert(GroupMemberRecord, {
+            groupId,
+            userId,
+            addedAt,
+            isFromCompanyGroup: false,
+          });
         }
         return { status: "added", group: (await findGroupWith(entityManager, groupId))! } as const;
       });
@@ -273,6 +286,17 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
       const entityManager = database.orm.em.fork();
       await entityManager.nativeDelete(GroupMemberRecord, { groupId, userId });
       return await findGroupWith(entityManager, groupId);
+    },
+
+    async setCompanyGroups(groupId, companyGroupNames) {
+      return await database.orm.em.fork().transactional(async (entityManager) => {
+        if (await entityManager.count(GroupRecord, { id: groupId }) === 0) return null;
+        await entityManager.nativeDelete(CompanyGroupMappingRecord, { groupId });
+        for (const companyGroupName of new Set(companyGroupNames)) {
+          await entityManager.insert(CompanyGroupMappingRecord, { companyGroupName, groupId });
+        }
+        return await findGroupWith(entityManager, groupId);
+      });
     },
 
     async listRoleAssignments(projectId) {
@@ -363,10 +387,17 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
 }
 
 function createUserRow(newUser: NewUser, createdAt: Date): UserRow {
-  return { id: generateTimeOrderedId(createdAt), ...newUser, createdAt, deactivatedAt: null };
+  return {
+    id: generateTimeOrderedId(createdAt),
+    ...newUser,
+    oidcIssuer: null,
+    oidcSubject: null,
+    createdAt,
+    deactivatedAt: null,
+  };
 }
 
-function toUser(userRow: UserRow): User {
+export function toUser(userRow: UserRow): User {
   return {
     id: userRow.id,
     email: userRow.email,
@@ -386,22 +417,27 @@ function toGroup(
   groupRow: GroupRow,
   memberRows: InferEntity<typeof GroupMemberRecord>[],
   memberUsers: UserRow[],
+  mappingRows: InferEntity<typeof CompanyGroupMappingRecord>[],
 ): Group {
-  const memberUserIds = new Set(
-    memberRows.filter((memberRow) => memberRow.groupId === groupRow.id).map((memberRow) =>
-      memberRow.userId
-    ),
+  const membershipsByUser = new Map(
+    memberRows
+      .filter((memberRow) => memberRow.groupId === groupRow.id)
+      .map((memberRow) => [memberRow.userId, memberRow]),
   );
   return {
     id: groupRow.id,
     name: groupRow.name,
     createdAt: groupRow.createdAt.toISOString(),
     members: memberUsers
-      .filter((memberUser) => memberUserIds.has(memberUser.id))
+      .filter((memberUser) => membershipsByUser.has(memberUser.id))
       .map((memberUser) => ({
         id: memberUser.id,
         email: memberUser.email,
         displayName: memberUser.displayName,
+        isFromCompanyGroup: Boolean(membershipsByUser.get(memberUser.id)!.isFromCompanyGroup),
       })),
+    companyGroups: mappingRows
+      .filter((mappingRow) => mappingRow.groupId === groupRow.id)
+      .map((mappingRow) => mappingRow.companyGroupName),
   };
 }

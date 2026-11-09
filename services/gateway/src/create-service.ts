@@ -16,11 +16,24 @@ export interface GatewayServiceDependencies {
   serviceClients: Record<PublicApiServiceName, ServiceClient>;
   /** Directory with the built web UI, or null to serve the API only. */
   webAssetsDirectory: string | null;
+  /** Reverse proxies in front of the Gateway, which decide the browser's address; 0 for none. */
+  trustedProxyCount?: number;
   logger: StructuredLogger;
 }
 
+/** The server gives the handler the connection, whose peer is the browser or the nearest proxy. */
+export interface GatewayConnectionInfo {
+  remoteAddr: { hostname?: string };
+}
+
 export interface GatewayService {
-  handleRequest: ServiceRequestHandler;
+  handleRequest: (request: Request, connectionInfo?: GatewayConnectionInfo) => ReturnType<
+    ServiceRequestHandler
+  >;
+}
+
+interface GatewayEnvironment {
+  Bindings: { clientAddress: string | null };
 }
 
 /** Forwarded request headers. Everything else stays at the gateway. */
@@ -36,7 +49,7 @@ const SERVICE_DISPLAY_NAMES: Record<PublicApiServiceName, string> = {
 };
 
 export function createGatewayService(dependencies: GatewayServiceDependencies): GatewayService {
-  const app = new Hono();
+  const app = new Hono<GatewayEnvironment>();
 
   app.get("/health", (context) => context.json({ status: "ok" }));
 
@@ -48,7 +61,7 @@ export function createGatewayService(dependencies: GatewayServiceDependencies): 
       app.on(
         route.method.toUpperCase(),
         convertOpenApiPathToHonoPath(route.path),
-        (context) => forwardToService(context.req.raw),
+        (context) => forwardToService(context.req.raw, context.env.clientAddress),
       );
     }
   }
@@ -79,20 +92,50 @@ export function createGatewayService(dependencies: GatewayServiceDependencies): 
     });
   }
 
-  return { handleRequest: (request) => app.fetch(request) };
+  return {
+    handleRequest: (request, connectionInfo) =>
+      app.fetch(request, {
+        clientAddress: readClientAddress(
+          request,
+          connectionInfo?.remoteAddr.hostname ?? null,
+          dependencies.trustedProxyCount ?? 0,
+        ),
+      }),
+  };
+}
+
+/**
+ * The browser's address. Addresses that a proxy we do not count could have written are ignored,
+ * so a client cannot pick its own by sending `X-Forwarded-For`.
+ */
+export function readClientAddress(
+  request: Request,
+  peerAddress: string | null,
+  trustedProxyCount: number,
+): string | null {
+  if (trustedProxyCount === 0) return peerAddress;
+  const forwardedAddresses = (request.headers.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((address) => address.trim())
+    .filter((address) => address !== "");
+  return forwardedAddresses.at(-trustedProxyCount) ?? peerAddress;
 }
 
 function createForwarder(
   serviceName: PublicApiServiceName,
   dependencies: GatewayServiceDependencies,
-): (request: Request) => Promise<Response> {
+): (request: Request, clientAddress: string | null) => Promise<Response> {
   const serviceClient = dependencies.serviceClients[serviceName];
   const serviceDisplayName = SERVICE_DISPLAY_NAMES[serviceName];
-  return async (request) => {
+  return async (request, clientAddress) => {
     const forwardedRequest = await createForwardedRequest(
       request,
       serviceName === "identity" ? IDENTITY_FORWARDED_HEADER_NAMES : FORWARDED_HEADER_NAMES,
     );
+    // Identity limits password guesses per address; no other service needs the address.
+    if (serviceName === "identity" && clientAddress !== null) {
+      forwardedRequest.headers.set("x-forwarded-for", clientAddress);
+    }
     try {
       return await serviceClient(forwardedRequest);
     } catch (error) {
@@ -135,6 +178,8 @@ async function createForwardedRequest(
     method: request.method,
     headers: forwardedHeaders,
     body: hasBody ? await request.arrayBuffer() : undefined,
+    // An OIDC sign-in redirects the browser, so the Gateway must not follow it itself.
+    redirect: "manual",
   });
 }
 

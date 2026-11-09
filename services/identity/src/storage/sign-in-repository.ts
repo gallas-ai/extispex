@@ -15,6 +15,8 @@ export interface SignInRepository {
   extendSignIn(signInId: string, expiresAt: Date): Promise<void>;
   /** Ends the sign-in; an unknown hash changes nothing. */
   deleteSignIn(tokenHash: string): Promise<void>;
+  /** Stores a new password hash and ends the user's sign-ins other than this one. */
+  changePassword(userId: string, passwordHash: string, keptSignInId: string): Promise<void>;
   /** Removes expired sign-ins, so that the table does not grow with abandoned browsers. */
   deleteExpiredSignIns(now: Date): Promise<void>;
 }
@@ -51,6 +53,13 @@ export function createSignInRepository(database: IdentityDatabase): SignInReposi
 
     async deleteSignIn(tokenHash) {
       await database.orm.em.fork().nativeDelete(SignInRecord, { tokenHash });
+    },
+
+    async changePassword(userId, passwordHash, keptSignInId) {
+      await database.orm.em.fork().transactional(async (entityManager) => {
+        await entityManager.nativeUpdate(UserRecord, { id: userId }, { passwordHash });
+        await entityManager.nativeDelete(SignInRecord, { userId, id: { $ne: keptSignInId } });
+      });
     },
 
     async deleteExpiredSignIns(now) {

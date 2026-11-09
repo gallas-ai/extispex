@@ -126,4 +126,8 @@ services. _Avoid_: Machine token, internal key
 **Group**: A set of users, imported from the company's identity system or created locally, that
 receives a Role in a Project. _Avoid_: Team
 
+**Company group**: A group in the company's identity system, named as its ID tokens name it. An
+Instance admin maps it to a Group, and its members then join that Group when they sign in. _Avoid_:
+External group, IdP group
+
 **Role**: What a Group may do in a Project: `viewer`, `editor` or `admin`. _Avoid_: Permission set
