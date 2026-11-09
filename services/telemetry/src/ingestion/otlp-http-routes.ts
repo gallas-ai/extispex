@@ -8,15 +8,19 @@ import {
   RETRY_AFTER_SECONDS,
   type StructuredLogger,
 } from "@extispex/service-runtime";
+import type { LogIngestion } from "./log-ingestion.ts";
 import {
+  createJsonLogsResponse,
   createJsonTraceResponse,
+  decodeJsonLogsRequest,
   decodeJsonTraceRequest,
+  decodeProtobufLogsRequest,
   decodeProtobufTraceRequest,
+  encodeProtobufLogsResponse,
   encodeProtobufTraceResponse,
   MAXIMUM_OTLP_PAYLOAD_BYTES,
   OtlpPayloadError,
 } from "./otlp-protocol.ts";
-import type { OtlpExportTraceRequest } from "./otlp-trace-types.ts";
 import type { TraceIngestion } from "./trace-ingestion.ts";
 
 type PayloadEncoding = "protobuf" | "json";
@@ -27,16 +31,53 @@ type ContentEncoding = typeof SUPPORTED_CONTENT_ENCODINGS[number] | "identity";
 
 export interface OtlpHttpRouteDependencies {
   traceIngestion: TraceIngestion;
+  logIngestion: LogIngestion;
   requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
 }
 
-/** Registers the OTLP/HTTP trace endpoint, accepting protobuf and JSON payloads. */
+interface OtlpHttpSignal<ExportRequest, ExportOutcome> {
+  path: string;
+  /** How error messages call the signal's records, for example "Spans". */
+  recordsName: string;
+  decodeProtobufRequest(payload: Uint8Array): ExportRequest;
+  decodeJsonRequest(payloadText: string): ExportRequest;
+  encodeProtobufResponse(outcome: ExportOutcome): Uint8Array;
+  createJsonResponse(outcome: ExportOutcome): Record<string, unknown>;
+  ingest(projectId: string, request: ExportRequest): Promise<ExportOutcome>;
+}
+
+/** Registers the OTLP/HTTP endpoints, accepting protobuf and JSON payloads. */
 export function registerOtlpHttpRoutes<Environment extends Env>(
   app: OpenAPIHono<Environment>,
   dependencies: OtlpHttpRouteDependencies,
 ): void {
-  app.post("/v1/traces", async (context) => {
+  registerOtlpSignalRoute(app, dependencies, {
+    path: "/v1/traces",
+    recordsName: "Spans",
+    decodeProtobufRequest: decodeProtobufTraceRequest,
+    decodeJsonRequest: decodeJsonTraceRequest,
+    encodeProtobufResponse: encodeProtobufTraceResponse,
+    createJsonResponse: createJsonTraceResponse,
+    ingest: dependencies.traceIngestion.ingestTraces,
+  });
+  registerOtlpSignalRoute(app, dependencies, {
+    path: "/v1/logs",
+    recordsName: "Log records",
+    decodeProtobufRequest: decodeProtobufLogsRequest,
+    decodeJsonRequest: decodeJsonLogsRequest,
+    encodeProtobufResponse: encodeProtobufLogsResponse,
+    createJsonResponse: createJsonLogsResponse,
+    ingest: dependencies.logIngestion.ingestLogs,
+  });
+}
+
+function registerOtlpSignalRoute<Environment extends Env, ExportRequest, ExportOutcome>(
+  app: OpenAPIHono<Environment>,
+  dependencies: OtlpHttpRouteDependencies,
+  signal: OtlpHttpSignal<ExportRequest, ExportOutcome>,
+): void {
+  app.post(signal.path, async (context) => {
     const payloadEncoding = detectPayloadEncoding(context.req.header("content-type"));
     if (payloadEncoding === null) {
       return respondWithError(
@@ -91,12 +132,12 @@ export function registerOtlpHttpRoutes<Environment extends Env>(
       );
     }
     const { projectId } = projectAccess;
-    let exportRequest: OtlpExportTraceRequest;
+    let exportRequest: ExportRequest;
     try {
       const payload = await readPayload(context.req.raw, contentEncoding);
       exportRequest = payloadEncoding === "protobuf"
-        ? decodeProtobufTraceRequest(payload)
-        : decodeJsonTraceRequest(new TextDecoder().decode(payload));
+        ? signal.decodeProtobufRequest(payload)
+        : signal.decodeJsonRequest(new TextDecoder().decode(payload));
     } catch (error) {
       if (error instanceof PayloadTooLargeError) {
         return respondWithError(context, 413, "payload_too_large", error.message);
@@ -107,28 +148,28 @@ export function registerOtlpHttpRoutes<Environment extends Env>(
       throw error;
     }
     try {
-      const exportOutcome = await dependencies.traceIngestion.ingestTraces(
-        projectId,
-        exportRequest,
-      );
+      const exportOutcome = await signal.ingest(projectId, exportRequest);
       if (payloadEncoding === "json") {
-        return context.json(createJsonTraceResponse(exportOutcome));
+        return context.json(signal.createJsonResponse(exportOutcome));
       }
       return context.body(
-        encodeProtobufTraceResponse(exportOutcome) as Uint8Array<ArrayBuffer>,
+        signal.encodeProtobufResponse(exportOutcome) as Uint8Array<ArrayBuffer>,
         200,
         {
           "content-type": "application/x-protobuf",
         },
       );
     } catch (error) {
-      dependencies.logger.error("Storing spans failed", { error, projectId });
+      dependencies.logger.error(`Storing ${signal.recordsName.toLowerCase()} failed`, {
+        error,
+        projectId,
+      });
       context.header("retry-after", RETRY_AFTER_SECONDS);
       return respondWithError(
         context,
         503,
         "storage_unavailable",
-        "Spans could not be stored. Retry later.",
+        `${signal.recordsName} could not be stored. Retry later.`,
       );
     }
   });

@@ -3,6 +3,8 @@ import { Migration0001CreateSpans as PostgresMigration0001 } from "./migrations/
 import { Migration0001CreateSpans as SqliteMigration0001 } from "./migrations/sqlite/migration-0001-create-spans.ts";
 import { Migration0002CreateCorrelationEvaluations as PostgresMigration0002 } from "./migrations/postgres/migration-0002-create-correlation-evaluations.ts";
 import { Migration0002CreateCorrelationEvaluations as SqliteMigration0002 } from "./migrations/sqlite/migration-0002-create-correlation-evaluations.ts";
+import { Migration0003CreateLogs as PostgresMigration0003 } from "./migrations/postgres/migration-0003-create-logs.ts";
+import { Migration0003CreateLogs as SqliteMigration0003 } from "./migrations/sqlite/migration-0003-create-logs.ts";
 import { CorrelationEvaluationRecord, SpanRecord } from "./span-record-entity.ts";
 
 export type TelemetryDatabase = ServiceDatabase;
@@ -21,10 +23,12 @@ export function openTelemetryDatabase(databaseUrl: string): Promise<TelemetryDat
       postgresql: [
         { name: "0001-create-spans", class: PostgresMigration0001 },
         { name: "0002-create-correlation-evaluations", class: PostgresMigration0002 },
+        { name: "0003-create-logs", class: PostgresMigration0003 },
       ],
       sqlite: [
         { name: "0001-create-spans", class: SqliteMigration0001 },
         { name: "0002-create-correlation-evaluations", class: SqliteMigration0002 },
+        { name: "0003-create-logs", class: SqliteMigration0003 },
       ],
     },
   });

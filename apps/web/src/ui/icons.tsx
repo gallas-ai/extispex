@@ -181,6 +181,17 @@ export const HashIcon = (props: IconProps) => (
   </StrokeIcon>
 );
 
+export const LogsIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="M4 6h1" />
+    <path d="M9 6h11" />
+    <path d="M4 12h1" />
+    <path d="M9 12h11" />
+    <path d="M4 18h1" />
+    <path d="M9 18h11" />
+  </StrokeIcon>
+);
+
 export const PromptIcon = (props: IconProps) => (
   <StrokeIcon {...props}>
     <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />

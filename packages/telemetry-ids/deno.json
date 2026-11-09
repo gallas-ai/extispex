@@ -8,6 +8,7 @@
   },
   "imports": {
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/sdk-logs": "npm:@opentelemetry/sdk-logs@^3.0.0",
     "@opentelemetry/sdk-trace": "npm:@opentelemetry/sdk-trace@^3.0.0"
   }
 }

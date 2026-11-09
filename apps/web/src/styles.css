@@ -3071,7 +3071,8 @@ textarea {
 }
 
 /* On narrow screens the top bar keeps only icons; the names stay available to screen readers. */
-@media (max-width: 720px) {
+/* Below this width the section names no longer fit beside the Project switcher. */
+@media (max-width: 1080px) {
   .top-bar-start {
     gap: 12px;
   }
@@ -3756,4 +3757,311 @@ textarea {
 .company-groups-form .text-input {
   width: 100%;
   resize: vertical;
+}
+
+/* Logs */
+
+.callout-warning {
+  border-color: var(--color-tool);
+  background: var(--color-tool-soft);
+  color: var(--color-tool);
+}
+
+.rejected-telemetry-count {
+  font-weight: 600;
+}
+
+.rejected-telemetry-reason {
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+}
+
+.log-filter-bar .filter-field {
+  flex-basis: 220px;
+}
+
+.log-filter-select .select-input {
+  height: 34px;
+}
+
+.log-filter-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+}
+
+.log-filter-date input {
+  height: 34px;
+  max-width: 100%;
+}
+
+.log-trace-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-small);
+  background: var(--color-accent-softer);
+  font-size: 12.5px;
+}
+
+.log-table {
+  table-layout: fixed;
+}
+
+.log-table .column-log-time {
+  width: 186px;
+}
+
+.log-table .column-log-severity {
+  width: 88px;
+}
+
+.log-table .column-log-service {
+  width: 156px;
+}
+
+.log-table td {
+  height: 38px;
+  padding-block: 4px;
+}
+
+.log-table td.column-log-time {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-table td.column-log-service {
+  overflow: hidden;
+}
+
+.log-table .service-badge {
+  max-width: 100%;
+}
+
+.log-row {
+  cursor: pointer;
+}
+
+.log-row:hover td {
+  background: var(--color-surface-hover);
+}
+
+.log-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.log-row-chevron {
+  margin-right: 4px;
+  color: var(--color-text-subtle);
+  vertical-align: -2px;
+  transition: transform 120ms;
+}
+
+.log-row-open .log-row-chevron {
+  transform: rotate(90deg);
+}
+
+.log-message {
+  display: block;
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-detail-row td {
+  height: auto;
+  padding: 12px 16px 16px;
+  background: var(--color-surface-sunken);
+  white-space: normal;
+}
+
+.log-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.log-detail-body {
+  max-height: 420px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.log-detail-trace-link {
+  justify-self: start;
+}
+
+.log-table-footer {
+  justify-content: center;
+}
+
+.severity-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.severity-unspecified,
+.severity-trace,
+.severity-debug {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+}
+
+.severity-info {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+
+.severity-warn {
+  background: var(--color-tool-soft);
+  color: var(--color-tool);
+}
+
+.severity-error,
+.severity-fatal {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.trace-logs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.trace-logs-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.text-link {
+  color: var(--color-accent-text);
+  font-size: 12.5px;
+}
+
+.trace-logs-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.trace-log-list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  list-style: none;
+}
+
+.trace-log-row + .trace-log-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.trace-log-content {
+  display: grid;
+  grid-template-columns: 72px auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.trace-log-button {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.trace-log-button:hover {
+  background: var(--color-surface-hover);
+}
+
+.trace-log-offset {
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.trace-log-message {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* The column stays with no width, so that a detail row spanning all columns still fills the table. */
+@media (max-width: 900px) {
+  .log-table th.column-log-service,
+  .log-table td.column-log-service {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .log-table td.column-log-service > * {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .top-bar-start {
+    gap: 8px;
+  }
+
+  .primary-navigation {
+    gap: 0;
+  }
+
+  .navigation-link {
+    padding: 0 5px;
+  }
+}
+
+@media (max-width: 640px) {
+  .log-table .column-log-time {
+    width: 112px;
+  }
+
+  .log-table .column-log-severity {
+    width: 72px;
+  }
+
+  .log-table th,
+  .log-table td {
+    padding-inline: 6px;
+  }
+
+  .log-time-date {
+    display: none;
+  }
+
+  .log-filter-bar .filter-field {
+    flex-basis: 100%;
+  }
+
+  .log-filter-select {
+    flex: 1 1 140px;
+  }
+
+  .log-filter-select .select-input {
+    width: 100%;
+  }
 }

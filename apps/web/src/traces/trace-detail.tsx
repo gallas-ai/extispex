@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { getTrace } from "../api/telemetry-api.ts";
 import { CopyButton } from "../ui/copy-button.tsx";
 import { AlertIcon, CloseIcon, FilterIcon, HashIcon, SessionIcon } from "../ui/icons.tsx";
+import { TraceLogs } from "../logs/trace-logs.tsx";
 import { SpanDetails } from "./span-details.tsx";
 import { buildSpanTreeRows } from "./span-tree.ts";
 import { SpanWaterfall, type TraceTimeRange } from "./span-waterfall.tsx";
@@ -63,6 +64,7 @@ export function TraceDetail(
       {traceDetailState.status === "loaded" && traceDetailState.trace.spans.length > 0
         ? (
           <LoadedTrace
+            credentials={credentials}
             spans={traceDetailState.trace.spans}
             traceId={traceId}
             selectedSpanId={selectedSpanId}
@@ -104,6 +106,7 @@ export function TraceDetail(
 }
 
 interface LoadedTraceProps {
+  credentials: ApiCredentials;
   spans: Span[];
   traceId: string;
   selectedSpanId: string | null;
@@ -115,6 +118,7 @@ interface LoadedTraceProps {
 
 function LoadedTrace(
   {
+    credentials,
     spans,
     traceId,
     selectedSpanId,
@@ -190,6 +194,13 @@ function LoadedTrace(
           key={selectedSpan.spanId}
           span={selectedSpan}
           traceStartUnixNanoseconds={timeRange.startUnixNanoseconds}
+        />
+
+        <TraceLogs
+          credentials={credentials}
+          traceId={traceId}
+          traceStartUnixNanoseconds={timeRange.startUnixNanoseconds}
+          onSelectSpan={onSelectSpan}
         />
       </div>
     </>

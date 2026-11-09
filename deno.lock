@@ -26,11 +26,16 @@
     "npm:@mikro-orm/sqlite@7.2.7": "7.2.7_@mikro-orm+core@7.2.7",
     "npm:@opentelemetry/api@^1.9.0": "1.10.0",
     "npm:@opentelemetry/context-async-hooks@3": "3.0.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/exporter-logs-otlp-grpc@0.300": "0.300.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/exporter-logs-otlp-http@0.300": "0.300.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/exporter-logs-otlp-proto@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/exporter-trace-otlp-grpc@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/exporter-trace-otlp-http@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/exporter-trace-otlp-proto@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/otlp-exporter-base@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/resources@3": "3.0.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/sdk-logs@3": "3.0.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/sdk-logs@3.0.0": "3.0.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/sdk-trace@3": "3.0.0_@opentelemetry+api@1.10.0",
     "npm:@types/react-dom@19": "19.3.0_@types+react@19.3.0",
     "npm:@types/react@19": "19.3.0",
@@ -500,6 +505,34 @@
       "dependencies": [
         "@opentelemetry/api",
         "@opentelemetry/semantic-conventions"
+      ]
+    },
+    "@opentelemetry/exporter-logs-otlp-grpc@0.300.0_@opentelemetry+api@1.10.0": {
+      "integrity": "sha512-y4BAcN2UBSBs+esuIyXonpV44oeENKdit1BVKvjHf/61KvZVf7u1sTRz2VGwBpGJvUD7rNPjOZnb4PpG3vFEvg==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/otlp-exporter-base",
+        "@opentelemetry/otlp-grpc-exporter-base",
+        "@opentelemetry/otlp-transformer",
+        "@opentelemetry/sdk-logs"
+      ]
+    },
+    "@opentelemetry/exporter-logs-otlp-http@0.300.0_@opentelemetry+api@1.10.0": {
+      "integrity": "sha512-S8yP9Fg33CU9+0fr1pnh/afPfgEpSyxQO4JRUZvmDMhAzgR/RLzvYg93MjWjbC1c2VrXffXROMO68RZ1P/ebgQ==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/otlp-exporter-base",
+        "@opentelemetry/otlp-transformer",
+        "@opentelemetry/sdk-logs"
+      ]
+    },
+    "@opentelemetry/exporter-logs-otlp-proto@0.300.0_@opentelemetry+api@1.10.0": {
+      "integrity": "sha512-i9EqF1mvD0IrL6yBAqb2Cnv61WIYjkBxb36MulHf6/iAb/c653onKVWRJbpexBOHq+fd0VjH+1mhn+AtpFIZwQ==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/otlp-exporter-base",
+        "@opentelemetry/otlp-transformer",
+        "@opentelemetry/sdk-logs"
       ]
     },
     "@opentelemetry/exporter-trace-otlp-grpc@0.300.0_@opentelemetry+api@1.10.0": {
@@ -1365,8 +1398,10 @@
         "dependencies": [
           "npm:@opentelemetry/api@^1.9.0",
           "npm:@opentelemetry/context-async-hooks@3",
+          "npm:@opentelemetry/exporter-logs-otlp-proto@0.300",
           "npm:@opentelemetry/exporter-trace-otlp-proto@0.300",
           "npm:@opentelemetry/resources@3",
+          "npm:@opentelemetry/sdk-logs@3",
           "npm:@opentelemetry/sdk-trace@3"
         ]
       },
@@ -1396,6 +1431,7 @@
       "packages/telemetry-ids": {
         "dependencies": [
           "npm:@opentelemetry/api@^1.9.0",
+          "npm:@opentelemetry/sdk-logs@3",
           "npm:@opentelemetry/sdk-trace@3"
         ]
       },
@@ -1466,11 +1502,15 @@
           "npm:@grpc/grpc-js@^1.14.0",
           "npm:@opentelemetry/api@^1.9.0",
           "npm:@opentelemetry/context-async-hooks@3",
+          "npm:@opentelemetry/exporter-logs-otlp-grpc@0.300",
+          "npm:@opentelemetry/exporter-logs-otlp-http@0.300",
+          "npm:@opentelemetry/exporter-logs-otlp-proto@0.300",
           "npm:@opentelemetry/exporter-trace-otlp-grpc@0.300",
           "npm:@opentelemetry/exporter-trace-otlp-http@0.300",
           "npm:@opentelemetry/exporter-trace-otlp-proto@0.300",
           "npm:@opentelemetry/otlp-exporter-base@0.300",
           "npm:@opentelemetry/resources@3",
+          "npm:@opentelemetry/sdk-logs@3",
           "npm:@opentelemetry/sdk-trace@3",
           "npm:playwright-core@1.64.1"
         ]

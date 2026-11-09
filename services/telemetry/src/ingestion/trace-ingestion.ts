@@ -1,6 +1,7 @@
 import type { SpanRepository } from "../storage/span-repository.ts";
 import { applyCorrelationPolicy } from "./correlation-policy.ts";
 import type { OtlpExportTraceRequest, TraceExportOutcome } from "./otlp-trace-types.ts";
+import type { RejectionRecorder } from "./rejection-recorder.ts";
 import { normalizeTraceRequest, type SpanRejection } from "./span-normalization.ts";
 
 export interface TraceIngestion {
@@ -11,20 +12,30 @@ const MAXIMUM_EXAMPLE_SPAN_NAMES = 3;
 
 export function createTraceIngestion(
   spanRepository: SpanRepository,
+  rejectionRecorder: RejectionRecorder,
   readCurrentTime: () => Date,
 ): TraceIngestion {
   return {
     async ingestTraces(projectId, request) {
       const normalizationResult = normalizeTraceRequest(request);
       const policyResult = applyCorrelationPolicy(normalizationResult.spans);
+      const receivedAt = readCurrentTime();
       if (policyResult.acceptedSpans.length > 0) {
-        await spanRepository.insertSpans(projectId, policyResult.acceptedSpans, readCurrentTime());
+        await spanRepository.insertSpans(projectId, policyResult.acceptedSpans, receivedAt);
       }
       const allRejections = [...normalizationResult.rejections, ...policyResult.rejections];
-      return {
-        rejectedSpanCount: allRejections.length,
-        errorMessage: allRejections.length > 0 ? describeRejections(allRejections) : null,
-      };
+      if (allRejections.length === 0) {
+        return { rejectedSpanCount: 0, errorMessage: null };
+      }
+      const errorMessage = describeRejections(allRejections);
+      await rejectionRecorder.recordRejections({
+        projectId,
+        signal: "spans",
+        rejectedCount: allRejections.length,
+        reason: errorMessage,
+        rejectedAt: receivedAt,
+      });
+      return { rejectedSpanCount: allRejections.length, errorMessage };
     },
   };
 }

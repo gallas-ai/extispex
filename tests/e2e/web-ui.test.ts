@@ -106,6 +106,30 @@ Deno.test({
         await uiSession.close();
       });
 
+      await testContext.step("keeps the navigation clear of the Project switcher", async () => {
+        const uiSession = await openUi(openBrowser, deployment, {
+          width: 1280,
+          account: deployment.admin,
+          path: agentSessionPath,
+        });
+        const { page } = uiSession;
+        await waitForTraceRows(page, 2);
+        const lastNavigationLink = page.locator(".primary-navigation .navigation-link").last();
+        const projectSwitcher = page.locator(".project-switcher-trigger");
+        for (const width of SWEPT_WIDTHS) {
+          await page.setViewportSize({ width, height: 900 });
+          const navigationBox = await lastNavigationLink.boundingBox();
+          const switcherBox = await projectSwitcher.boundingBox();
+          assert(navigationBox !== null && switcherBox !== null);
+          assert(
+            navigationBox.x + navigationBox.width <= switcherBox.x,
+            `The navigation runs into the Project switcher at ${width}px.`,
+          );
+        }
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
       for (
         const [width, expectedColumns] of [
           [1000, COLUMNS_ON_A_NARROW_LIST],

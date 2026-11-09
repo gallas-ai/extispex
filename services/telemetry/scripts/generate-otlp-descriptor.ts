@@ -6,7 +6,7 @@ import protobuf from "protobufjs";
 
 const protoDirectory = new URL("../src/ingestion/otlp-proto/opentelemetry/proto/", import.meta.url);
 const descriptorFile = new URL(
-  "../src/ingestion/generated/otlp-trace-descriptor.json",
+  "../src/ingestion/generated/otlp-descriptor.json",
   import.meta.url,
 );
 
@@ -16,6 +16,8 @@ const protoFilesInDependencyOrder = [
   "resource/v1/resource.proto",
   "trace/v1/trace.proto",
   "collector/trace/v1/trace_service.proto",
+  "logs/v1/logs.proto",
+  "collector/logs/v1/logs_service.proto",
 ];
 
 const otlpRoot = new protobuf.Root();

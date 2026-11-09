@@ -6,9 +6,14 @@ import {
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import type * as grpc from "@grpc/grpc-js";
+import { createLogIngestion } from "./ingestion/log-ingestion.ts";
 import { createOtlpGrpcServer } from "./ingestion/otlp-grpc-server.ts";
 import { registerOtlpHttpRoutes } from "./ingestion/otlp-http-routes.ts";
+import { createRejectionRecorder } from "./ingestion/rejection-recorder.ts";
 import { createTraceIngestion } from "./ingestion/trace-ingestion.ts";
+import { registerLogQueryRoutes } from "./logs/log-query-routes.ts";
+import { createLogRepository } from "./storage/log-repository.ts";
+import { createRejectionRepository } from "./storage/rejection-repository.ts";
 import { createSpanRepository } from "./storage/span-repository.ts";
 import type { TelemetryDatabase } from "./storage/telemetry-database.ts";
 import { registerIterationTelemetryRoutes } from "./traces/iteration-telemetry-routes.ts";
@@ -29,7 +34,7 @@ export interface TelemetryServiceDependencies {
 }
 
 export interface TelemetryService {
-  /** Handles OTLP/HTTP ingestion, trace queries, the OpenAPI document and health checks. */
+  /** Handles OTLP/HTTP ingestion, trace and log queries, the OpenAPI document and health checks. */
   handleRequest: ServiceRequestHandler;
   /** Creates an unbound gRPC server for OTLP/gRPC ingestion. */
   createGrpcServer(): grpc.Server;
@@ -38,9 +43,13 @@ export interface TelemetryService {
 export function createTelemetryService(
   dependencies: TelemetryServiceDependencies,
 ): TelemetryService {
-  const spanRepository = createSpanRepository(dependencies.database);
   const readCurrentTime = dependencies.readCurrentTime ?? (() => new Date());
-  const traceIngestion = createTraceIngestion(spanRepository, readCurrentTime);
+  const spanRepository = createSpanRepository(dependencies.database);
+  const logRepository = createLogRepository(dependencies.database);
+  const rejectionRepository = createRejectionRepository(dependencies.database);
+  const rejectionRecorder = createRejectionRecorder(rejectionRepository, dependencies.logger);
+  const traceIngestion = createTraceIngestion(spanRepository, rejectionRecorder, readCurrentTime);
+  const logIngestion = createLogIngestion(logRepository, rejectionRecorder, readCurrentTime);
 
   const app = createServiceHttpApp<ProjectAccessEnvironment>({
     apiTitle: "Extispex: Telemetry API",
@@ -48,6 +57,7 @@ export function createTelemetryService(
   });
   registerOtlpHttpRoutes(app, {
     traceIngestion,
+    logIngestion,
     requestAuthenticator: dependencies.requestAuthenticator,
     logger: dependencies.logger,
   });
@@ -60,12 +70,19 @@ export function createTelemetryService(
     requestAuthenticator: dependencies.requestAuthenticator,
     readCurrentTime,
   });
+  registerLogQueryRoutes(app, {
+    logRepository,
+    rejectionRepository,
+    requestAuthenticator: dependencies.requestAuthenticator,
+    readCurrentTime,
+  });
 
   return {
     handleRequest: (request) => app.fetch(request),
     createGrpcServer: () =>
       createOtlpGrpcServer({
         traceIngestion,
+        logIngestion,
         requestAuthenticator: dependencies.requestAuthenticator,
         logger: dependencies.logger,
       }),

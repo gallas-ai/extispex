@@ -82,7 +82,7 @@ function StatusBadge({ statusCode }: { statusCode: Span["statusCode"] }) {
   );
 }
 
-function Property(
+export function Property(
   { label, value, isIdentifier = false }: {
     label: string;
     value: string;
@@ -112,7 +112,7 @@ interface AttributeSectionProps {
   isInitiallyOpen: boolean;
 }
 
-function AttributeSection({ title, attributes, isInitiallyOpen }: AttributeSectionProps) {
+export function AttributeSection({ title, attributes, isInitiallyOpen }: AttributeSectionProps) {
   const [searchText, setSearchText] = useState("");
   const allEntries = Object.entries(attributes).sort(([firstKey], [secondKey]) =>
     firstKey.localeCompare(secondKey)

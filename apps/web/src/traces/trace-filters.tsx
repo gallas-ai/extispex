@@ -86,13 +86,27 @@ interface FilterFieldProps {
   isApplied: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
   shortcutHint?: string;
+  /** A regular expression the value must match before the form can be sent. */
+  pattern?: string;
+  patternHint?: string;
   onChange: (value: string) => void;
   onClear: () => void;
 }
 
-function FilterField(
-  { id, label, icon, value, isApplied, inputRef, shortcutHint, onChange, onClear }:
-    FilterFieldProps,
+export function FilterField(
+  {
+    id,
+    label,
+    icon,
+    value,
+    isApplied,
+    inputRef,
+    shortcutHint,
+    pattern,
+    patternHint,
+    onChange,
+    onClear,
+  }: FilterFieldProps,
 ) {
   return (
     <div className={`filter-field${isApplied ? " filter-field-applied" : ""}`}>
@@ -107,6 +121,8 @@ function FilterField(
         placeholder={label}
         autoComplete="off"
         spellCheck={false}
+        pattern={pattern}
+        title={patternHint}
         value={value}
         onChange={(changeEvent) => onChange(changeEvent.target.value)}
       />

@@ -9,11 +9,17 @@
  * Environment: API_KEY (required), the key of the Project to send to, and OTLP_HTTP_URL (default
  * http://127.0.0.1:4318).
  */
-import { runWithTelemetryIds, TelemetryIdsSpanProcessor } from "@extispex/telemetry-ids";
-import { context } from "@opentelemetry/api";
+import {
+  runWithTelemetryIds,
+  TelemetryIdsLogRecordProcessor,
+  TelemetryIdsSpanProcessor,
+} from "@extispex/telemetry-ids";
+import { context, SeverityNumber } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
 import { BatchSpanProcessor, TracerProvider } from "@opentelemetry/sdk-trace";
 
 const otlpHttpUrl = Deno.env.get("OTLP_HTTP_URL") ?? "http://127.0.0.1:4318";
@@ -29,8 +35,9 @@ if (!apiKey) {
 // Baggage only flows between spans when a context manager is registered.
 context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
 
+const resource = resourceFromAttributes({ "service.name": "support-bot-example" });
 const tracerProvider = new TracerProvider({
-  resource: resourceFromAttributes({ "service.name": "support-bot-example" }),
+  resource,
   spanProcessors: [
     // Copies the IDs onto every span. It must run before the exporting processor.
     new TelemetryIdsSpanProcessor(),
@@ -44,8 +51,28 @@ const tracerProvider = new TracerProvider({
 });
 const tracer = tracerProvider.getTracer("support-bot-example");
 
+const loggerProvider = new LoggerProvider({
+  resource,
+  processors: [
+    // Copies the IDs onto every log record. It must run before the exporting processor.
+    new TelemetryIdsLogRecordProcessor(),
+    new BatchLogRecordProcessor({
+      exporter: new OTLPLogExporter({
+        url: `${otlpHttpUrl}/v1/logs`,
+        headers: { authorization: `Bearer ${apiKey}` },
+      }),
+    }),
+  ],
+});
+const logger = loggerProvider.getLogger("support-bot-example");
+
 async function answerCustomer(customerMessage: string): Promise<string> {
   return await tracer.startActiveSpan("handle-message", async (rootSpan) => {
+    logger.emit({
+      severityNumber: SeverityNumber.INFO,
+      severityText: "INFO",
+      body: `Received: ${customerMessage}`,
+    });
     const answer = await tracer.startActiveSpan("chat example-model", (llmSpan) => {
       llmSpan.setAttribute("gen_ai.request.model", "example-model");
       llmSpan.end();
@@ -69,4 +96,6 @@ for (const customerMessage of ["Where is my order?", "Can I cancel it?"]) {
 
 await tracerProvider.forceFlush();
 await tracerProvider.shutdown();
+await loggerProvider.forceFlush();
+await loggerProvider.shutdown();
 console.log(`Sent. Search for Session ID ${sessionId} in the UI.`);
