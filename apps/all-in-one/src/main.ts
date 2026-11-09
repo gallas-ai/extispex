@@ -5,6 +5,7 @@
 import {
   createEvaluationApiService,
   createEvaluationWorker,
+  DEFAULT_TRACE_COMPLETION_TIMING,
   openEvaluationDatabase,
   openJobQueue,
 } from "@extispex/evaluation-service";
@@ -26,9 +27,11 @@ import { createPromptService, openPromptDatabase } from "@extispex/prompt-servic
 import { createInProcessServiceClient } from "@extispex/service-client";
 import {
   createIdentityRequestAuthenticator,
+  createIdentityServiceTokenSource,
   createStructuredLogger,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
+  readPositiveIntegerEnvironmentVariable,
   readSecretEnvironmentVariable,
   runOnTerminationSignal,
 } from "@extispex/service-runtime";
@@ -100,7 +103,27 @@ const evaluationApiService = createEvaluationApiService({
 const evaluationWorker = createEvaluationWorker({
   database: evaluationDatabase,
   jobQueue: evaluationJobQueue,
+  telemetryService: createInProcessServiceClient(telemetryService.handleRequest),
+  serviceTokens: createIdentityServiceTokenSource({
+    identityClient,
+    clientId: "evaluation",
+    clientSecret: serviceClientSecrets.get("evaluation")!,
+  }),
   logger: evaluationLogger,
+  traceCompletionTiming: {
+    pollIntervalMilliseconds: readPositiveIntegerEnvironmentVariable(
+      "EVALUATION_TELEMETRY_POLL_INTERVAL_MILLISECONDS",
+      DEFAULT_TRACE_COMPLETION_TIMING.pollIntervalMilliseconds,
+    ),
+    rootSpanSettleMilliseconds: readPositiveIntegerEnvironmentVariable(
+      "EVALUATION_ROOT_SPAN_SETTLE_MILLISECONDS",
+      DEFAULT_TRACE_COMPLETION_TIMING.rootSpanSettleMilliseconds,
+    ),
+    rootSpanTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
+      "EVALUATION_ROOT_SPAN_TIMEOUT_MILLISECONDS",
+      DEFAULT_TRACE_COMPLETION_TIMING.rootSpanTimeoutMilliseconds,
+    ),
+  },
 });
 await evaluationWorker.start();
 

@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { ApiCredentials } from "../api/api-request.ts";
 import { createTestCase, getTestCase, updateTestCase } from "../api/evaluation-api.ts";
@@ -11,8 +11,12 @@ import { datasetPagePath } from "./dataset-paths.ts";
 import {
   checkDraft,
   createDraftFromTestCase,
+  type EvaluatorDraft,
+  NEW_REGEX_EVALUATOR_DRAFT,
+  NEW_TELEMETRY_EVALUATOR_DRAFT,
   NEW_TEST_CASE_DRAFT,
   type RegexEvaluatorDraft,
+  type TelemetryEvaluatorDraft,
   type TestCaseDraft,
 } from "./test-case-draft.ts";
 
@@ -138,12 +142,14 @@ function TestCaseForm(
   const [problem, setProblem] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const updateDraft = (changes: Partial<TestCaseDraft>) => setDraft({ ...draft, ...changes });
-  const updateEvaluator = (evaluatorIndex: number, changes: Partial<RegexEvaluatorDraft>) =>
+  const updateEvaluator = (evaluatorIndex: number, replacement: EvaluatorDraft) =>
     updateDraft({
       evaluators: draft.evaluators.map((evaluator, index) =>
-        index === evaluatorIndex ? { ...evaluator, ...changes } : evaluator
+        index === evaluatorIndex ? replacement : evaluator
       ),
     });
+  const addEvaluator = (newEvaluator: EvaluatorDraft) =>
+    updateDraft({ evaluators: [...draft.evaluators, newEvaluator] });
 
   const submit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
@@ -211,23 +217,25 @@ function TestCaseForm(
         </div>
         <div className="form-card">
           <div className="form-card-header">
-            <h2 className="section-title">Regex Evaluators</h2>
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={() =>
-                updateDraft({
-                  evaluators: [...draft.evaluators, {
-                    name: "",
-                    pattern: "",
-                    flags: "",
-                    expectMatch: true,
-                  }],
-                })}
-            >
-              <PlusIcon size={13} />
-              Add Evaluator
-            </button>
+            <h2 className="section-title">Evaluators</h2>
+            <div className="form-card-actions">
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => addEvaluator(NEW_REGEX_EVALUATOR_DRAFT)}
+              >
+                <PlusIcon size={13} />
+                Add Regex Evaluator
+              </button>
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => addEvaluator(NEW_TELEMETRY_EVALUATOR_DRAFT)}
+              >
+                <PlusIcon size={13} />
+                Add Telemetry Evaluator
+              </button>
+            </div>
           </div>
           <ol className="evaluator-editor-list">
             {draft.evaluators.map((evaluator, evaluatorIndex) => (
@@ -236,7 +244,7 @@ function TestCaseForm(
                 evaluator={evaluator}
                 evaluatorNumber={evaluatorIndex + 1}
                 canRemove={draft.evaluators.length > 1}
-                onChange={(changes) => updateEvaluator(evaluatorIndex, changes)}
+                onChange={(replacement) => updateEvaluator(evaluatorIndex, replacement)}
                 onRemove={() =>
                   updateDraft({
                     evaluators: draft.evaluators.filter((_, index) => index !== evaluatorIndex),
@@ -292,16 +300,58 @@ function TestCaseForm(
   );
 }
 
+interface EvaluatorFieldsProps {
+  evaluator: EvaluatorDraft;
+  evaluatorNumber: number;
+  canRemove: boolean;
+  onChange: (replacement: EvaluatorDraft) => void;
+  onRemove: () => void;
+}
+
 function EvaluatorFields(
-  { evaluator, evaluatorNumber, canRemove, onChange, onRemove }: {
+  { evaluator, evaluatorNumber, canRemove, onChange, onRemove }: EvaluatorFieldsProps,
+) {
+  const removeButton = (
+    <button
+      type="button"
+      className="icon-button button-danger"
+      aria-label={`Remove Evaluator ${evaluatorNumber}`}
+      title="Remove Evaluator"
+      disabled={!canRemove}
+      onClick={onRemove}
+    >
+      <TrashIcon size={14} />
+    </button>
+  );
+  return evaluator.type === "regex"
+    ? (
+      <RegexEvaluatorFields
+        evaluator={evaluator}
+        evaluatorNumber={evaluatorNumber}
+        removeButton={removeButton}
+        onChange={onChange}
+      />
+    )
+    : (
+      <TelemetryEvaluatorFields
+        evaluator={evaluator}
+        evaluatorNumber={evaluatorNumber}
+        removeButton={removeButton}
+        onChange={onChange}
+      />
+    );
+}
+
+function RegexEvaluatorFields(
+  { evaluator, evaluatorNumber, removeButton, onChange }: {
     evaluator: RegexEvaluatorDraft;
     evaluatorNumber: number;
-    canRemove: boolean;
-    onChange: (changes: Partial<RegexEvaluatorDraft>) => void;
-    onRemove: () => void;
+    removeButton: ReactNode;
+    onChange: (replacement: RegexEvaluatorDraft) => void;
   },
 ) {
   const idPrefix = `evaluator-${evaluatorNumber}`;
+  const update = (changes: Partial<RegexEvaluatorDraft>) => onChange({ ...evaluator, ...changes });
   return (
     <li className="evaluator-editor">
       <div className="form-field-row">
@@ -314,7 +364,7 @@ function EvaluatorFields(
             className="text-input"
             autoComplete="off"
             value={evaluator.name}
-            onChange={(changeEvent) => onChange({ name: changeEvent.target.value })}
+            onChange={(changeEvent) => update({ name: changeEvent.target.value })}
           />
         </div>
         <div className="form-field">
@@ -328,7 +378,7 @@ function EvaluatorFields(
             spellCheck={false}
             placeholder="i, m, s, u"
             value={evaluator.flags}
-            onChange={(changeEvent) => onChange({ flags: changeEvent.target.value })}
+            onChange={(changeEvent) => update({ flags: changeEvent.target.value })}
           />
         </div>
       </div>
@@ -342,7 +392,7 @@ function EvaluatorFields(
           autoComplete="off"
           spellCheck={false}
           value={evaluator.pattern}
-          onChange={(changeEvent) => onChange({ pattern: changeEvent.target.value })}
+          onChange={(changeEvent) => update({ pattern: changeEvent.target.value })}
         />
       </div>
       <div className="evaluator-editor-footer">
@@ -350,20 +400,120 @@ function EvaluatorFields(
           <input
             type="checkbox"
             checked={!evaluator.expectMatch}
-            onChange={(changeEvent) => onChange({ expectMatch: !changeEvent.target.checked })}
+            onChange={(changeEvent) => update({ expectMatch: !changeEvent.target.checked })}
           />
           Pass when the Output does not match
         </label>
-        <button
-          type="button"
-          className="icon-button button-danger"
-          aria-label={`Remove Evaluator ${evaluatorNumber}`}
-          title="Remove Evaluator"
-          disabled={!canRemove}
-          onClick={onRemove}
-        >
-          <TrashIcon size={14} />
-        </button>
+        {removeButton}
+      </div>
+    </li>
+  );
+}
+
+function TelemetryEvaluatorFields(
+  { evaluator, evaluatorNumber, removeButton, onChange }: {
+    evaluator: TelemetryEvaluatorDraft;
+    evaluatorNumber: number;
+    removeButton: ReactNode;
+    onChange: (replacement: TelemetryEvaluatorDraft) => void;
+  },
+) {
+  const idPrefix = `evaluator-${evaluatorNumber}`;
+  const update = (changes: Partial<TelemetryEvaluatorDraft>) =>
+    onChange({ ...evaluator, ...changes });
+  return (
+    <li className="evaluator-editor">
+      <div className="form-field-row">
+        <div className="form-field">
+          <label className="field-label" htmlFor={`${idPrefix}-name`}>
+            Evaluator {evaluatorNumber} name
+          </label>
+          <input
+            id={`${idPrefix}-name`}
+            className="text-input"
+            autoComplete="off"
+            value={evaluator.name}
+            onChange={(changeEvent) => update({ name: changeEvent.target.value })}
+          />
+        </div>
+        <div className="form-field">
+          <label className="field-label" htmlFor={`${idPrefix}-status`}>
+            Evaluator {evaluatorNumber} span status
+          </label>
+          <select
+            id={`${idPrefix}-status`}
+            className="select-input"
+            value={evaluator.status}
+            onChange={(changeEvent) =>
+              update({ status: changeEvent.target.value as TelemetryEvaluatorDraft["status"] })}
+          >
+            <option value="">Any</option>
+            <option value="ok">OK</option>
+            <option value="error">Error</option>
+            <option value="unset">Unset</option>
+          </select>
+        </div>
+      </div>
+      <div className="form-field">
+        <label className="field-label" htmlFor={`${idPrefix}-span-name`}>
+          Evaluator {evaluatorNumber} span name
+        </label>
+        <input
+          id={`${idPrefix}-span-name`}
+          className="text-input text-input-mono"
+          autoComplete="off"
+          spellCheck={false}
+          value={evaluator.spanName}
+          onChange={(changeEvent) => update({ spanName: changeEvent.target.value })}
+        />
+      </div>
+      <div className="form-field">
+        <label className="field-label" htmlFor={`${idPrefix}-attributes`}>
+          Evaluator {evaluatorNumber} attributes
+        </label>
+        <textarea
+          id={`${idPrefix}-attributes`}
+          className="text-area text-input-mono"
+          rows={3}
+          spellCheck={false}
+          placeholder='{"gen_ai.tool.name": "lookup_refund"}'
+          value={evaluator.attributes}
+          onChange={(changeEvent) => update({ attributes: changeEvent.target.value })}
+        />
+        <p className="field-hint">
+          Optional JSON. A span matches when it meets every condition given here.
+        </p>
+      </div>
+      <div className="form-field-row">
+        <div className="form-field">
+          <label className="field-label" htmlFor={`${idPrefix}-minimum`}>
+            Evaluator {evaluatorNumber} minimum count
+          </label>
+          <input
+            id={`${idPrefix}-minimum`}
+            className="text-input"
+            inputMode="numeric"
+            value={evaluator.minimumCount}
+            onChange={(changeEvent) => update({ minimumCount: changeEvent.target.value })}
+          />
+        </div>
+        <div className="form-field">
+          <label className="field-label" htmlFor={`${idPrefix}-maximum`}>
+            Evaluator {evaluatorNumber} maximum count
+          </label>
+          <input
+            id={`${idPrefix}-maximum`}
+            className="text-input"
+            inputMode="numeric"
+            placeholder="No limit"
+            value={evaluator.maximumCount}
+            onChange={(changeEvent) => update({ maximumCount: changeEvent.target.value })}
+          />
+        </div>
+      </div>
+      <div className="evaluator-editor-footer">
+        <span className="status-text">How many spans must match. 0 and 0 forbid such a span.</span>
+        {removeButton}
       </div>
     </li>
   );

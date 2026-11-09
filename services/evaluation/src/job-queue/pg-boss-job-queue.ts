@@ -26,9 +26,12 @@ export async function openPgBossJobQueue(
     expireInSeconds: JOB_EXPIRY_SECONDS,
   });
   return {
-    async enqueue(jobs) {
+    async enqueue(jobs, options) {
       if (jobs.length === 0) return;
-      await boss.insert(QUEUE_NAME, jobs.map((job) => ({ data: job })));
+      const startAfter = options?.delayMilliseconds === undefined
+        ? undefined
+        : new Date(Date.now() + options.delayMilliseconds);
+      await boss.insert(QUEUE_NAME, jobs.map((job) => ({ data: job, startAfter })));
     },
     async startWorking(handler) {
       await boss.work<EvaluateAttemptJob>(

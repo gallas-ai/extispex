@@ -58,6 +58,7 @@ export function SpanDetails({ span, traceStartUnixNanoseconds }: SpanDetailsProp
         {genAiSummary.outputTokens !== null && (
           <Property label="Output tokens" value={genAiSummary.outputTokens.toLocaleString()} />
         )}
+        {span.arrivedAfterEvaluation && <Property label="Evaluation" value="Arrived after it" />}
         <Property label="Span ID" value={span.spanId} isIdentifier />
         <Property label="Parent span ID" value={span.parentSpanId ?? "—"} isIdentifier />
       </dl>

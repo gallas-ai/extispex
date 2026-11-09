@@ -1,7 +1,9 @@
 import type { ListTracesQuery, Span, TraceSummary } from "@extispex/contracts";
+import type { InferEntity } from "@mikro-orm/core";
 import type { EntityManager } from "@mikro-orm/sql";
 import type { CorrelatedSpan } from "../ingestion/correlation-policy.ts";
 import {
+  CorrelationEvaluationRecord,
   formatUnixNanosecondsForStorage,
   parseStoredUnixNanoseconds,
   SpanRecord,
@@ -14,9 +16,28 @@ export interface SpanRepository {
   listTraces(projectId: string, query: ListTracesQuery): Promise<TraceSummary[]>;
   /** Returns the trace's spans ordered by start time, or an empty list for an unknown trace. */
   findTraceSpans(projectId: string, traceId: string): Promise<Span[]>;
+  /** The Correlation ID's traces and when the platform stored their telemetry. */
+  readCorrelationTelemetry(projectId: string, correlationId: string): Promise<CorrelationTelemetry>;
+  /** When the platform first stored telemetry of the Session, or null if it has none. */
+  readSessionFirstReceivedAt(projectId: string, sessionId: string): Promise<Date | null>;
+  /** The Correlation ID's spans by start time, at most `limit`. */
+  listCorrelationSpans(projectId: string, correlationId: string, limit: number): Promise<Span[]>;
+  /** Remembers the first evaluation of a Correlation ID; a later one changes nothing. */
+  markCorrelationEvaluated(
+    projectId: string,
+    correlationId: string,
+    evaluatedAt: Date,
+  ): Promise<void>;
+}
+
+export interface CorrelationTelemetry {
+  firstReceivedAt: Date | null;
+  traces: { traceId: string; rootSpanStoredAt: Date | null }[];
 }
 
 const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
+
+type StoredSpan = InferEntity<typeof SpanRecord>;
 
 interface TraceAggregateRow {
   trace_id: string;
@@ -114,25 +135,107 @@ export function createSpanRepository(database: TelemetryDatabase): SpanRepositor
         { projectId, traceId },
         { orderBy: { startTimeUnixNano: "asc" } },
       );
-      return spanRecords.map((spanRecord) => ({
-        traceId: spanRecord.traceId,
-        spanId: spanRecord.spanId,
-        parentSpanId: spanRecord.parentSpanId ?? null,
-        name: spanRecord.name,
-        kind: spanRecord.kind as Span["kind"],
-        startTimeUnixNano: parseStoredUnixNanoseconds(spanRecord.startTimeUnixNano),
-        endTimeUnixNano: parseStoredUnixNanoseconds(spanRecord.endTimeUnixNano),
-        durationMilliseconds: Number(spanRecord.durationMilliseconds),
-        statusCode: spanRecord.statusCode as Span["statusCode"],
-        statusMessage: spanRecord.statusMessage ?? null,
-        serviceName: spanRecord.serviceName ?? null,
-        correlationId: spanRecord.correlationId,
-        sessionId: spanRecord.sessionId ?? null,
-        attributes: spanRecord.attributes,
-        resourceAttributes: spanRecord.resourceAttributes,
-      }));
+      return await toSpans(entityManager, projectId, spanRecords);
+    },
+
+    async readCorrelationTelemetry(projectId, correlationId) {
+      const entityManager = database.orm.em.fork();
+      const firstSpan = await entityManager.findOne(
+        SpanRecord,
+        { projectId, correlationId },
+        { orderBy: { receivedAt: "asc" }, fields: ["receivedAt"] },
+      );
+      if (firstSpan === null) return { firstReceivedAt: null, traces: [] };
+      const traceRows = await entityManager.execute<{ trace_id: string }[]>(
+        "select distinct trace_id from spans where project_id = ? and correlation_id = ?",
+        [projectId, correlationId],
+      );
+      const rootSpans = await entityManager.find(
+        SpanRecord,
+        { projectId, correlationId, parentSpanId: null },
+        { fields: ["receivedAt"] },
+      );
+      const latestRootStoredAt = new Map<string, Date>();
+      for (const rootSpan of rootSpans) {
+        const knownTime = latestRootStoredAt.get(rootSpan.traceId);
+        if (knownTime === undefined || rootSpan.receivedAt > knownTime) {
+          latestRootStoredAt.set(rootSpan.traceId, rootSpan.receivedAt);
+        }
+      }
+      return {
+        firstReceivedAt: firstSpan.receivedAt,
+        traces: traceRows.map(({ trace_id: traceId }) => ({
+          traceId,
+          rootSpanStoredAt: latestRootStoredAt.get(traceId) ?? null,
+        })),
+      };
+    },
+
+    async readSessionFirstReceivedAt(projectId, sessionId) {
+      const firstSpan = await database.orm.em.fork().findOne(
+        SpanRecord,
+        { projectId, sessionId },
+        { orderBy: { receivedAt: "asc" }, fields: ["receivedAt"] },
+      );
+      return firstSpan?.receivedAt ?? null;
+    },
+
+    async listCorrelationSpans(projectId, correlationId, limit) {
+      const entityManager = database.orm.em.fork();
+      const spanRecords = await entityManager.find(
+        SpanRecord,
+        { projectId, correlationId },
+        { orderBy: { startTimeUnixNano: "asc" }, limit },
+      );
+      return await toSpans(entityManager, projectId, spanRecords);
+    },
+
+    async markCorrelationEvaluated(projectId, correlationId, evaluatedAt) {
+      await database.orm.em.fork().createQueryBuilder(CorrelationEvaluationRecord)
+        .insert({ projectId, correlationId, evaluatedAt })
+        .onConflict(["projectId", "correlationId"])
+        .ignore()
+        .execute();
     },
   };
+}
+
+/** Whether each span arrived after evaluation is decided here, at read time. */
+async function toSpans(
+  entityManager: EntityManager,
+  projectId: string,
+  spanRecords: StoredSpan[],
+): Promise<Span[]> {
+  const correlationIds = [...new Set(spanRecords.map((spanRecord) => spanRecord.correlationId))];
+  const evaluationRecords = correlationIds.length === 0 ? [] : await entityManager.find(
+    CorrelationEvaluationRecord,
+    { projectId, correlationId: { $in: correlationIds } },
+  );
+  const evaluatedAtByCorrelationId = new Map(
+    evaluationRecords.map((record) => [record.correlationId, record.evaluatedAt]),
+  );
+  return spanRecords.map((spanRecord) => {
+    const evaluatedAt = evaluatedAtByCorrelationId.get(spanRecord.correlationId);
+    return {
+      traceId: spanRecord.traceId,
+      spanId: spanRecord.spanId,
+      parentSpanId: spanRecord.parentSpanId ?? null,
+      name: spanRecord.name,
+      kind: spanRecord.kind as Span["kind"],
+      startTimeUnixNano: parseStoredUnixNanoseconds(spanRecord.startTimeUnixNano),
+      endTimeUnixNano: parseStoredUnixNanoseconds(spanRecord.endTimeUnixNano),
+      durationMilliseconds: Number(spanRecord.durationMilliseconds),
+      statusCode: spanRecord.statusCode as Span["statusCode"],
+      statusMessage: spanRecord.statusMessage ?? null,
+      serviceName: spanRecord.serviceName ?? null,
+      correlationId: spanRecord.correlationId,
+      sessionId: spanRecord.sessionId ?? null,
+      attributes: spanRecord.attributes,
+      resourceAttributes: spanRecord.resourceAttributes,
+      receivedAt: spanRecord.receivedAt.toISOString(),
+      arrivedAfterEvaluation: evaluatedAt !== undefined && spanRecord.receivedAt > evaluatedAt,
+    };
+  });
 }
 
 function buildTraceFilter(query: ListTracesQuery): { condition: string; parameters: string[] } {

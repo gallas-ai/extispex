@@ -1,12 +1,18 @@
-import type { IterationAttempt, IterationResult, TestCaseResult } from "@extispex/contracts";
+import type {
+  EvaluatorResult,
+  IterationAttempt,
+  IterationResult,
+  TestCaseResult,
+} from "@extispex/contracts";
 import { useCallback, useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import type { ApiCredentials } from "../api/api-request.ts";
 import {
   getEvaluationRun,
   listIterationResults,
   listTestCaseResults,
 } from "../api/evaluation-api.ts";
+import { serializeTracesUrlState } from "../navigation/traces-url-state.ts";
 import { Breadcrumbs } from "../prompts/prompt-parts.tsx";
 import { AlertIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
@@ -246,7 +252,8 @@ function AttemptDetails(
       {showNumber && <p className="status-text">Attempt {attempt.attempt}</p>}
       {attempt.correlationId !== null && (
         <p className="status-text">
-          Correlation ID <code className="cell-breaks-anywhere">{attempt.correlationId}</code>
+          Correlation ID <code className="cell-breaks-anywhere">{attempt.correlationId}</code>{" "}
+          <Link to={tracesPath(attempt.correlationId)}>View traces</Link>
         </p>
       )}
       {attempt.output !== null && <pre className="attempt-output">{attempt.output}</pre>}
@@ -258,9 +265,46 @@ function AttemptDetails(
               <VerdictBadge status={result.outcome} />
               <span className="evaluator-result-name">{result.name}</span>
               <span className="text-muted evaluator-result-reason">{result.reason}</span>
+              <MatchedSpans result={result} correlationId={attempt.correlationId} />
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+function tracesPath(correlationId: string, traceId?: string, spanId?: string): string {
+  const query = serializeTracesUrlState({
+    correlationId,
+    sessionId: "",
+    traceId: traceId ?? null,
+    spanId: spanId ?? null,
+  });
+  return `/traces${query}`;
+}
+
+/** The spans a Telemetry Evaluator counted, from the result's own copy of them. */
+function MatchedSpans(
+  { result, correlationId }: { result: EvaluatorResult; correlationId: string | null },
+) {
+  const { matchedSpans = [], matchedSpanCount = 0 } = result;
+  if (matchedSpans.length === 0) return null;
+  return (
+    <div className="matched-spans">
+      <ul className="matched-span-list">
+        {matchedSpans.map((span) => (
+          <li key={`${span.traceId}:${span.spanId}`} className="matched-span">
+            <Link to={tracesPath(correlationId ?? "", span.traceId, span.spanId)}>{span.name}</Link>
+            {span.serviceName !== null && <span className="text-muted">{span.serviceName}</span>}
+            <span className="text-muted">{span.durationMilliseconds.toFixed(1)} ms</span>
+          </li>
+        ))}
+      </ul>
+      {matchedSpanCount > matchedSpans.length && (
+        <p className="status-text">
+          Showing {matchedSpans.length} of {matchedSpanCount} matching spans.
+        </p>
       )}
     </div>
   );

@@ -98,10 +98,17 @@ services:
       dockerfile: deploy/docker/evaluation-worker.Dockerfile
     environment:
       EVALUATION_DATABASE_URL: postgresql://extispex:extispex@postgres:5432/evaluation
+      TELEMETRY_URL: http://telemetry:4318
+      IDENTITY_URL: http://identity:8082
+      IDENTITY_CLIENT_SECRET: ${EVALUATION_CLIENT_SECRET:-development-evaluation-client-secret-000}
     depends_on:
       postgres:
         condition: service_healthy
       evaluation:
+        condition: service_started
+      telemetry:
+        condition: service_started
+      identity:
         condition: service_started
 
   gateway:

@@ -1,14 +1,32 @@
 import { assertEquals } from "@std/assert";
 import type { TestCase } from "@extispex/contracts";
-import { checkDraft, createDraftFromTestCase, NEW_TEST_CASE_DRAFT } from "./test-case-draft.ts";
+import {
+  checkDraft,
+  createDraftFromTestCase,
+  NEW_TELEMETRY_EVALUATOR_DRAFT,
+  NEW_TEST_CASE_DRAFT,
+  type TestCaseDraft,
+} from "./test-case-draft.ts";
 
 const VALID_DRAFT = {
   ...NEW_TEST_CASE_DRAFT,
   input: '{"message": "Hello"}',
-  evaluators: [{ name: "greets", pattern: "Hi", flags: "i", expectMatch: true }],
+  evaluators: [{
+    type: "regex" as const,
+    name: "greets",
+    pattern: "Hi",
+    flags: "i",
+    expectMatch: true,
+  }],
 };
 
-function readDefinition(draft: typeof VALID_DRAFT) {
+const TELEMETRY_DRAFT = {
+  ...NEW_TELEMETRY_EVALUATOR_DRAFT,
+  name: "called-lookup",
+  spanName: "execute_tool",
+};
+
+function readDefinition(draft: TestCaseDraft) {
   const draftCheck = checkDraft(draft);
   if (!draftCheck.isValid) throw new Error(draftCheck.problem);
   return draftCheck.definition;
@@ -54,4 +72,73 @@ Deno.test("keeps a string that looks like JSON a string when edited again", () =
   );
   assertEquals(draft.passThresholdPercent, "66");
   assertEquals(readDefinition(draft).input, "123");
+});
+
+Deno.test("reads a Telemetry Evaluator's conditions and count", () => {
+  const { evaluators } = readDefinition({
+    ...VALID_DRAFT,
+    evaluators: [{
+      ...TELEMETRY_DRAFT,
+      status: "ok",
+      attributes: '{"gen_ai.tool.name": "lookup", "retries": 2}',
+      minimumCount: "2",
+      maximumCount: "3",
+    }],
+  });
+  assertEquals(evaluators[0], {
+    type: "telemetry",
+    name: "called-lookup",
+    match: {
+      name: "execute_tool",
+      status: "ok",
+      attributes: { "gen_ai.tool.name": "lookup", retries: 2 },
+    },
+    count: { min: 2, max: 3 },
+  });
+});
+
+Deno.test("explains an incomplete Telemetry Evaluator", () => {
+  for (
+    const invalidEvaluator of [
+      { ...TELEMETRY_DRAFT, spanName: "" },
+      { ...TELEMETRY_DRAFT, attributes: "not json" },
+      { ...TELEMETRY_DRAFT, attributes: '["a list"]' },
+      { ...TELEMETRY_DRAFT, attributes: '{"nested": {"value": 1}}' },
+      { ...TELEMETRY_DRAFT, minimumCount: "many" },
+      { ...TELEMETRY_DRAFT, minimumCount: "0" },
+      { ...TELEMETRY_DRAFT, minimumCount: "3", maximumCount: "2" },
+    ]
+  ) {
+    assertEquals(checkDraft({ ...VALID_DRAFT, evaluators: [invalidEvaluator] }).isValid, false);
+  }
+  const forbidsSpan = { ...TELEMETRY_DRAFT, minimumCount: "0", maximumCount: "0" };
+  assertEquals(checkDraft({ ...VALID_DRAFT, evaluators: [forbidsSpan] }).isValid, true);
+});
+
+Deno.test("shows a stored Telemetry Evaluator in the editor", () => {
+  const draft = createDraftFromTestCase(
+    {
+      name: "tool",
+      datasetName: "dataset",
+      scope: "trace",
+      input: "Hi",
+      expectedOutput: null,
+      evaluators: [{
+        type: "telemetry",
+        name: "no-delete",
+        match: { name: "delete_order", attributes: { retries: 2 } },
+        count: { min: 0, max: 0 },
+      }],
+      iterations: 1,
+      passThreshold: 1,
+      createdAt: "",
+      updatedAt: "",
+    } satisfies TestCase,
+  );
+  assertEquals(readDefinition(draft).evaluators, [{
+    type: "telemetry",
+    name: "no-delete",
+    match: { name: "delete_order", attributes: { retries: 2 } },
+    count: { min: 0, max: 0 },
+  }]);
 });

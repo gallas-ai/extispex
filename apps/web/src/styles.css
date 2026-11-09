@@ -2682,6 +2682,12 @@ textarea {
   gap: 8px;
 }
 
+.form-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .form-field {
   display: grid;
   min-width: 0;
@@ -3670,6 +3676,30 @@ textarea {
 }
 
 .evaluator-result-reason {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.matched-spans {
+  display: grid;
+  flex-basis: 100%;
+  gap: 4px;
+  min-width: 0;
+}
+
+.matched-span-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 0 12px;
+  list-style: none;
+  border-left: 2px solid var(--color-border);
+}
+
+.matched-span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   min-width: 0;
   overflow-wrap: anywhere;
 }

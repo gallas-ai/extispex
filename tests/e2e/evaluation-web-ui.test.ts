@@ -10,6 +10,7 @@ import {
   openUi,
 } from "./browser.ts";
 import { startDeployment } from "./deployment.ts";
+import { createToolCallSpans, createTraceId, sendSpans } from "./otlp-json.ts";
 import { callGateway } from "./sign-in.ts";
 
 const SWEPT_WIDTHS = Array.from({ length: 22 }, (_, widthIndex) => 360 + widthIndex * 80);
@@ -25,6 +26,9 @@ Deno.test({
     const datasetName = `ui-support-${crypto.randomUUID().slice(0, 8)}`;
     const datasetPath = `/datasets/${datasetName}`;
     let runPath = "";
+    const telemetryDatasetName = `ui-telemetry-${crypto.randomUUID().slice(0, 8)}`;
+    const telemetryDatasetPath = `/datasets/${telemetryDatasetName}`;
+    let telemetryRunPath = "";
     try {
       browser = await launchBrowser();
       const openBrowser = browser;
@@ -125,6 +129,78 @@ Deno.test({
         await uiSession.close();
       });
 
+      await testContext.step("creates a Telemetry Evaluator", async () => {
+        await callGateway(deployment, "POST", "/v1/datasets", 201, {
+          bearerToken: deployment.apiKey,
+          body: { name: telemetryDatasetName },
+        });
+        const uiSession = await openEvaluationUi(`${telemetryDatasetPath}/new-test-case`);
+        const { page } = uiSession;
+        await page.getByLabel("Name", { exact: true }).fill("tool-call");
+        await page.getByLabel("Input").fill("Refund?");
+        await page.getByLabel("Evaluator 1 name").fill("answers");
+        await page.getByLabel("Evaluator 1 regular expression").fill(".+");
+        await page.getByRole("button", { name: "Add Telemetry Evaluator" }).click();
+        await page.getByLabel("Evaluator 2 name").fill("called-lookup");
+        await page.getByLabel("Evaluator 2 span name").fill("execute_tool");
+        await page.getByLabel("Evaluator 2 attributes").fill("not json");
+        await page.getByRole("button", { name: "Create Test Case" }).click();
+        assertStringIncludes(await page.locator(".form-problem").innerText(), "JSON object");
+        await page.getByLabel("Evaluator 2 attributes").fill(
+          '{"gen_ai.tool.name": "lookup_refund"}',
+        );
+        await page.getByRole("button", { name: "Create Test Case" }).click();
+        await page.getByRole("link", { name: "tool-call" }).waitFor();
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
+      await testContext.step("shows the spans a Telemetry Evaluator matched", async () => {
+        const bearerToken = deployment.apiKey;
+        const work = await callGateway<EvaluationRunWork>(
+          deployment,
+          "POST",
+          "/v1/evaluation-runs",
+          201,
+          { bearerToken, body: { datasetName: telemetryDatasetName, executionMode: "client" } },
+        );
+        telemetryRunPath = `/evaluation-runs/${work.runId}`;
+        const correlationId = `ui-telemetry-${work.items[0].iterationId}`;
+        await sendSpans(
+          deployment,
+          createTraceId(),
+          { correlationId },
+          createToolCallSpans("lookup_refund"),
+        );
+        await callGateway(deployment, "POST", `/v1/evaluation-runs/${work.runId}/reports`, 200, {
+          bearerToken,
+          body: {
+            reports: [{
+              iterationId: work.items[0].iterationId,
+              attempt: 1,
+              output: "Done",
+              correlationId,
+            }],
+          },
+        });
+        const uiSession = await openEvaluationUi(telemetryRunPath, SWEPT_WIDTHS[0]);
+        const { page } = uiSession;
+        await page.locator(".run-verdict .verdict-passed").waitFor({ timeout: 30_000 });
+        await page.getByRole("button", { name: "Show Iterations" }).click();
+        const matchedSpanLink = page.locator(".matched-span a");
+        await matchedSpanLink.waitFor();
+        assertEquals(await matchedSpanLink.innerText(), "execute_tool");
+        for (const width of SWEPT_WIDTHS) {
+          await page.setViewportSize({ width, height: 900 });
+          await assertNoHorizontalOverflow(page, `with matched spans at ${width}px`);
+        }
+        await matchedSpanLink.click();
+        await page.locator(".span-details h3").filter({ hasText: "execute_tool" }).waitFor();
+        assertEquals(new URL(page.url()).searchParams.get("correlationId"), correlationId);
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
       for (
         const [pageName, resolvePath] of [
           ["Dataset list", () => "/datasets"],
@@ -132,6 +208,11 @@ Deno.test({
           ["Test Case editor", () => `${datasetPath}/test-cases/refund`],
           ["run list", () => "/evaluation-runs"],
           ["run", () => runPath],
+          [
+            "Test Case editor with a Telemetry Evaluator",
+            () => `${telemetryDatasetPath}/test-cases/tool-call`,
+          ],
+          ["run with a Telemetry Evaluator", () => telemetryRunPath],
         ] as const
       ) {
         await testContext.step(`never scrolls the ${pageName} page sideways`, async () => {

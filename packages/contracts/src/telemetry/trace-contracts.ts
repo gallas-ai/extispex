@@ -30,6 +30,10 @@ export const spanSchema = z.object({
   sessionId: z.string().nullable(),
   attributes: z.record(z.string(), z.unknown()),
   resourceAttributes: z.record(z.string(), z.unknown()),
+  /** When the platform stored the span, by its own clock. */
+  receivedAt: z.string(),
+  /** Whether the span arrived after its Correlation ID was evaluated, so no verdict saw it. */
+  arrivedAfterEvaluation: z.boolean(),
 });
 
 export const traceSummarySchema = z.object({

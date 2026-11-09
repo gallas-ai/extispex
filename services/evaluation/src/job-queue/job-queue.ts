@@ -4,6 +4,10 @@ export interface EvaluateAttemptJob {
   attemptNumber: number;
 }
 
+export interface EnqueueOptions {
+  delayMilliseconds?: number;
+}
+
 export type EvaluateAttemptHandler = (job: EvaluateAttemptJob) => Promise<void>;
 
 /**
@@ -11,7 +15,8 @@ export type EvaluateAttemptHandler = (job: EvaluateAttemptJob) => Promise<void>;
  * Delivery is at least once and a handler that rejects is retried, so handlers must be idempotent.
  */
 export interface JobQueue {
-  enqueue(jobs: EvaluateAttemptJob[]): Promise<void>;
+  /** With `delayMilliseconds`, the jobs are not delivered before that much time has passed. */
+  enqueue(jobs: EvaluateAttemptJob[], options?: EnqueueOptions): Promise<void>;
   startWorking(handler: EvaluateAttemptHandler): Promise<void>;
   /** Stops taking jobs and waits for the running ones. */
   stop(): Promise<void>;

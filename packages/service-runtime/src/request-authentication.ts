@@ -1,4 +1,9 @@
-import { createErrorResponse, isRoleAtLeast, type Role } from "@extispex/contracts";
+import {
+  createErrorResponse,
+  isRoleAtLeast,
+  type Role,
+  SERVICE_SUBJECT_PREFIX,
+} from "@extispex/contracts";
 import type { ServiceClient } from "@extispex/service-client";
 import type { MiddlewareHandler } from "hono";
 import {
@@ -29,6 +34,13 @@ export interface RequestAuthenticator {
   authenticateRequest(
     authorizationHeader: string | null | undefined,
   ): Promise<ProjectAccess | null>;
+  /**
+   * The same for another service's token scoped to a Project: resolves to null for anything else,
+   * including an API key or a user's access token.
+   */
+  authenticateServiceRequest(
+    authorizationHeader: string | null | undefined,
+  ): Promise<ProjectAccess | null>;
 }
 
 /** A Project API key reads and changes the Project's data, but never manages access. */
@@ -56,6 +68,18 @@ export function createRequestAuthenticator(
       }
       const projectId = await dependencies.projectResolver.resolveProjectId(bearerToken);
       return projectId === null ? null : { projectId, role: API_KEY_ROLE };
+    },
+    async authenticateServiceRequest(authorizationHeader) {
+      const bearerToken = extractBearerToken(authorizationHeader);
+      if (bearerToken === null || !ACCESS_TOKEN_PATTERN.test(bearerToken)) return null;
+      const verifiedToken = await dependencies.accessTokenVerifier.verifyAccessToken(bearerToken);
+      if (
+        verifiedToken === null || !verifiedToken.subject.startsWith(SERVICE_SUBJECT_PREFIX) ||
+        verifiedToken.projectId === null || verifiedToken.role === null
+      ) {
+        return null;
+      }
+      return { projectId: verifiedToken.projectId, role: verifiedToken.role };
     },
   };
 }
@@ -124,6 +148,32 @@ export function requireProjectAccess(
           `This takes the Role ${requiredRole} in the Project; the caller has ${projectAccess.role}.`,
         ),
         403,
+      );
+    }
+    context.set("projectAccess", projectAccess);
+    await next();
+  };
+}
+
+/**
+ * Hono middleware for a service's internal endpoints that act on a Project: only another service's
+ * token for that Project gets through, and it sets `projectAccess`. The Role is not checked,
+ * because service tokens always carry `viewer` and each endpoint states what a service may do.
+ */
+export function requireServiceProjectAccess(
+  requestAuthenticator: RequestAuthenticator,
+): MiddlewareHandler<ProjectAccessEnvironment> {
+  return async (context, next) => {
+    const projectAccess = await requestAuthenticator.authenticateServiceRequest(
+      context.req.header("authorization"),
+    );
+    if (projectAccess === null) {
+      return context.json(
+        createErrorResponse(
+          "unauthenticated",
+          "A service token for a Project is required in the Authorization header.",
+        ),
+        401,
       );
     }
     context.set("projectAccess", projectAccess);

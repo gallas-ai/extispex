@@ -82,9 +82,9 @@ export function createSqliteJobQueue(options: SqliteJobQueueOptions): JobQueue {
   };
 
   return {
-    async enqueue(jobs) {
+    async enqueue(jobs, options) {
       if (jobs.length === 0) return;
-      const availableAt = new Date();
+      const availableAt = new Date(Date.now() + (options?.delayMilliseconds ?? 0));
       await database.orm.em.fork().insertMany(
         QueuedJobRecord,
         jobs.map((job) => ({

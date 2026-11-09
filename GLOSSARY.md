@@ -30,8 +30,8 @@ Grader, checker, assertion
 
 **Regex Evaluator**: An Evaluator that matches the result as a string against a regular expression.
 
-**Telemetry Evaluator**: An Evaluator that inspects the spans the application produced, such as
-whether a tool was called or which model version was used. _Avoid_: Span test
+**Telemetry Evaluator**: An Evaluator that counts the spans the application produced that meet its
+conditions, such as whether a tool was called or which model version was used. _Avoid_: Span test
 
 **Evaluation Run**: One execution of a Dataset, ending with a result for each Test Case and an LLM
 Summary. _Avoid_: Eval job, experiment

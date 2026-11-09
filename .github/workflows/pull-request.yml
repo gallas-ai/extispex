@@ -114,6 +114,9 @@ jobs:
             -e BOOTSTRAP_PROJECT_API_KEY=extispex_e2eProjectApiKey00000000000000000000000 \
             -e TELEMETRY_GRPC_TLS_CERTIFICATE_FILE=/certs/cert.pem \
             -e TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE=/certs/key.pem \
+            -e EVALUATION_TELEMETRY_POLL_INTERVAL_MILLISECONDS=200 \
+            -e EVALUATION_ROOT_SPAN_SETTLE_MILLISECONDS=500 \
+            -e EVALUATION_ROOT_SPAN_TIMEOUT_MILLISECONDS=3000 \
             ghcr.io/gallas-ai/extispex:ci
           for attempt in $(seq 1 30); do
             curl -sf http://127.0.0.1:8080/health && exit 0

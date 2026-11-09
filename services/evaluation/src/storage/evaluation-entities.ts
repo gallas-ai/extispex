@@ -119,6 +119,7 @@ export const IterationAttemptRecord = defineEntity({
     reportedAt: p.datetime(),
     evaluatedAt: p.datetime().nullable(),
   },
+  indexes: [{ properties: ["correlationId"] }, { properties: ["sessionId"] }],
 });
 
 /** The local image's job queue; PostgreSQL deployments use pg-boss instead. */
