@@ -1386,6 +1386,7 @@
       },
       "packages/service-storage": {
         "dependencies": [
+          "jsr:@std/assert@1",
           "npm:@mikro-orm/core@7.2.7",
           "npm:@mikro-orm/migrations@7.2.7",
           "npm:@mikro-orm/postgresql@7.2.7",
