@@ -1,11 +1,18 @@
-import type { TestCase } from "@extispex/contracts";
-import { useCallback, useState } from "react";
+import type { Target, TestCase } from "@extispex/contracts";
+import { type FormEvent, useCallback, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { ApiCredentials } from "../api/api-request.ts";
-import { deleteDataset, deleteTestCase, getDataset, listTestCases } from "../api/evaluation-api.ts";
+import {
+  createEvaluationRun,
+  deleteDataset,
+  deleteTestCase,
+  getDataset,
+  listTargets,
+  listTestCases,
+} from "../api/evaluation-api.ts";
 import { Breadcrumbs } from "../prompts/prompt-parts.tsx";
 import { useCanEditProject } from "../sign-in/access-context.ts";
-import { AlertIcon, DatasetIcon, PlusIcon, TrashIcon } from "../ui/icons.tsx";
+import { AlertIcon, DatasetIcon, PlusIcon, RunIcon, TrashIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
 import { newTestCasePath, testCaseEditorPath } from "./dataset-paths.ts";
@@ -21,11 +28,12 @@ export function DatasetPage({ credentials, onSignInRequired }: DatasetPageProps)
   const datasetName = useParams().datasetName as string;
   const [problem, setProblem] = useState<string | null>(null);
   const loadDataset = useCallback(async () => {
-    const [dataset, { testCases }] = await Promise.all([
+    const [dataset, { testCases }, { targets }] = await Promise.all([
       getDataset(credentials, datasetName),
       listTestCases(credentials, datasetName),
+      listTargets(credentials),
     ]);
-    return { dataset, testCases };
+    return { dataset, testCases, targets };
   }, [credentials, datasetName]);
   const [datasetState, reloadDataset] = useApiResource(loadDataset);
 
@@ -82,6 +90,14 @@ export function DatasetPage({ credentials, onSignInRequired }: DatasetPageProps)
           {problem}
         </p>
       )}
+      {canEdit && datasetState.status === "loaded" &&
+        datasetState.resource.testCases.length > 0 && (
+        <ServerRunForm
+          credentials={credentials}
+          datasetName={datasetName}
+          targets={datasetState.resource.targets}
+        />
+      )}
       <section className="panel" aria-label="Test Case list">
         {datasetState.status === "loading" && <div className="panel-loading" aria-busy="true" />}
         {datasetState.status === "failed" && (
@@ -99,7 +115,10 @@ export function DatasetPage({ credentials, onSignInRequired }: DatasetPageProps)
               <DatasetIcon size={22} />
             </span>
             <h2>No Test Cases yet</h2>
-            <p>A Test Case holds an input and the Evaluators that judge the Output.</p>
+            <p>
+              A Test Case holds an input, or a Session's steps, and the Evaluators that judge the
+              Output.
+            </p>
           </div>
         )}
         {datasetState.status === "loaded" && datasetState.resource.testCases.length > 0 && (
@@ -112,6 +131,75 @@ export function DatasetPage({ credentials, onSignInRequired }: DatasetPageProps)
         )}
       </section>
     </div>
+  );
+}
+
+/** Starts Server-Driven Execution: the worker calls the chosen Target for every Iteration. */
+function ServerRunForm(
+  { credentials, datasetName, targets }: {
+    credentials: ApiCredentials;
+    datasetName: string;
+    targets: Target[];
+  },
+) {
+  const navigate = useNavigate();
+  const [targetName, setTargetName] = useState(targets[0]?.name ?? "");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+
+  const submit = async (submitEvent: FormEvent) => {
+    submitEvent.preventDefault();
+    setProblem(null);
+    setIsStarting(true);
+    try {
+      const work = await createEvaluationRun(credentials, {
+        datasetName,
+        executionMode: "server",
+        targetName,
+      });
+      navigate(`/evaluation-runs/${encodeURIComponent(work.runId)}`);
+    } catch (error) {
+      setProblem((error as Error).message);
+      setIsStarting(false);
+    }
+  };
+
+  return (
+    <section className="panel panel-form" aria-label="Run against a Target">
+      {targets.length === 0
+        ? (
+          <p className="status-text">
+            To run this Dataset from here,{" "}
+            <Link to="/targets">create a Target</Link>. A script can run it with Client-Driven
+            Execution instead.
+          </p>
+        )
+        : (
+          <form className="inline-form" onSubmit={submit}>
+            <label htmlFor="run-target" className="visually-hidden">Target</label>
+            <select
+              id="run-target"
+              className="select-input"
+              value={targetName}
+              onChange={(changeEvent) => setTargetName(changeEvent.target.value)}
+            >
+              {targets.map((target) => (
+                <option key={target.name} value={target.name}>{target.name}</option>
+              ))}
+            </select>
+            <button type="submit" className="button button-primary" disabled={isStarting}>
+              <RunIcon size={14} />
+              Run against Target
+            </button>
+          </form>
+        )}
+      {problem !== null && (
+        <p className="form-problem" role="alert">
+          <AlertIcon size={14} />
+          {problem}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -129,6 +217,7 @@ function TestCaseTable(
         <thead>
           <tr>
             <th scope="col">Test Case</th>
+            <th scope="col">Scope</th>
             <th scope="col" className="column-numeric">Evaluators</th>
             <th scope="col" className="column-numeric">Iterations</th>
             <th scope="col" className="column-numeric">Pass Threshold</th>
@@ -140,6 +229,11 @@ function TestCaseTable(
             <tr key={testCase.name}>
               <td className="cell-breaks-anywhere">
                 <Link to={testCaseEditorPath(datasetName, testCase.name)}>{testCase.name}</Link>
+              </td>
+              <td className="text-muted">
+                {testCase.scope === "session"
+                  ? `Session, ${testCase.steps?.length ?? 0} steps`
+                  : "Trace"}
               </td>
               <td className="column-numeric">{testCase.evaluators.length}</td>
               <td className="column-numeric">{testCase.iterations}</td>

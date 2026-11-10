@@ -22,6 +22,7 @@ export interface SpanRepository {
   readSessionFirstReceivedAt(projectId: string, sessionId: string): Promise<Date | null>;
   /** The Correlation ID's spans by start time, at most `limit`. */
   listCorrelationSpans(projectId: string, correlationId: string, limit: number): Promise<Span[]>;
+  listSessionSpans(projectId: string, sessionId: string, limit: number): Promise<Span[]>;
   /** Remembers the first evaluation of a Correlation ID; a later one changes nothing. */
   markCorrelationEvaluated(
     projectId: string,
@@ -185,6 +186,16 @@ export function createSpanRepository(database: TelemetryDatabase): SpanRepositor
       const spanRecords = await entityManager.find(
         SpanRecord,
         { projectId, correlationId },
+        { orderBy: { startTimeUnixNano: "asc" }, limit },
+      );
+      return await toSpans(entityManager, projectId, spanRecords);
+    },
+
+    async listSessionSpans(projectId, sessionId, limit) {
+      const entityManager = database.orm.em.fork();
+      const spanRecords = await entityManager.find(
+        SpanRecord,
+        { projectId, sessionId },
         { orderBy: { startTimeUnixNano: "asc" }, limit },
       );
       return await toSpans(entityManager, projectId, spanRecords);

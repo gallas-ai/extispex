@@ -27,3 +27,20 @@ Open **Runs** in the UI to see the results.
 
 Both need `API_KEY`, and read `GATEWAY_URL` (default `http://127.0.0.1:8080`) and `DATASET_NAME`
 (default `support-bot-example`).
+
+## Server-Driven Execution
+
+[The sample Target](typescript/sample-target.ts) is a support bot that the platform calls for each
+step. It answers `POST /evaluate` with `{output, correlationId, sessionId}` and sends spans with a
+tool call: `lookup_order` for "Where is my order?" and `cancel_order` for "Can I cancel it?".
+
+```sh
+cd examples/typescript && API_KEY=<your Project API key> deno task sample-target
+```
+
+Then create a Target under **Targets** with the URL `http://127.0.0.1:8090/evaluate`, add a Session
+Test Case with those two messages as steps and a Telemetry Evaluator for each tool, and choose **Run
+against Target** on the Dataset. The sample reads `OTLP_HTTP_URL` (default `http://127.0.0.1:4318`),
+`PORT` (default `8090`) and `TARGET_TOKEN`, which callers must send as
+`Authorization: Bearer <token>` when it is set. The local image may call it; separate services need
+it in `EVALUATION_TARGET_ALLOWED_DESTINATIONS`.

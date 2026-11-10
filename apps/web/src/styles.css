@@ -3072,7 +3072,7 @@ textarea {
 
 /* On narrow screens the top bar keeps only icons; the names stay available to screen readers. */
 /* Below this width the section names no longer fit beside the Project switcher. */
-@media (max-width: 1080px) {
+@media (max-width: 1180px) {
   .top-bar-start {
     gap: 12px;
   }
@@ -4128,8 +4128,9 @@ textarea {
     gap: 0;
   }
 
+  /* Eight sections must fit beside the Project switcher at 360px. */
   .navigation-link {
-    padding: 0 5px;
+    padding: 0 3px;
   }
 }
 
@@ -4162,4 +4163,58 @@ textarea {
   .log-filter-select .select-input {
     width: 100%;
   }
+}
+
+/* Targets, Session Test Cases and Transcripts */
+
+.target-form {
+  display: grid;
+  gap: 12px;
+}
+
+.step-editor-list {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.step-editor-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.step-editor-row .text-area {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.transcript {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--color-border);
+  list-style: none;
+}
+
+.transcript-step {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.transcript-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.transcript-label {
+  color: var(--color-text-muted);
+  font-weight: 600;
 }

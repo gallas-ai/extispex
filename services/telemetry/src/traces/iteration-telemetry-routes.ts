@@ -1,5 +1,6 @@
 import {
   listCorrelationSpansRoute,
+  listSessionSpansRoute,
   markCorrelationEvaluatedRoute,
   MAXIMUM_EVALUATED_SPANS,
   readCorrelationTelemetryRoute,
@@ -61,6 +62,21 @@ export function registerIterationTelemetryRoutes(
     const spans = await spanRepository.listCorrelationSpans(
       context.get("projectAccess").projectId,
       context.req.valid("param").correlationId,
+      MAXIMUM_EVALUATED_SPANS + 1,
+    );
+    return context.json({
+      readAt: readAt.toISOString(),
+      spans: spans.slice(0, MAXIMUM_EVALUATED_SPANS),
+      isTruncated: spans.length > MAXIMUM_EVALUATED_SPANS,
+    }, 200);
+  });
+
+  app.openapi(listSessionSpansRoute, async (context) => {
+    // Taken before reading, so that a span the read may have missed always counts as late.
+    const readAt = readCurrentTime();
+    const spans = await spanRepository.listSessionSpans(
+      context.get("projectAccess").projectId,
+      context.req.valid("param").sessionId,
       MAXIMUM_EVALUATED_SPANS + 1,
     );
     return context.json({

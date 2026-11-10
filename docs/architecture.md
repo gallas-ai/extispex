@@ -180,6 +180,84 @@ optionally a `sessionId`.
 - **Client-Driven Execution:** the user's script fetches Test Cases through the API, runs the
   application and reports the same three fields.
 
+### Server-Driven Execution
+
+Built in roadmap step 6, together with Session Test Cases.
+
+A Target is a URL with an optional credential, one HTTP header such as `Authorization`, which is
+stored encrypted (see [Secrets](#secrets)) and never returned. Every step of an Iteration is one
+call with a fixed contract:
+
+```http
+POST https://agent.company.example/evaluate
+Authorization: Bearer …
+{ "input": { "message": "Can I cancel it?" }, "sessionId": "chat-42" }
+
+200 { "output": "Yes, within 24 hours.", "correlationId": "c-2", "sessionId": "chat-42" }
+```
+
+- **Starting:** `POST /v1/evaluation-runs` with `executionMode: "server"` and a `targetName`. The
+  run keeps the Target's ID and name; a change to the Target applies from the next call, and a
+  deleted Target ends the remaining attempts as Error.
+- **Calls:** the worker gets one job per attempt. Any answer other than 2xx with an `output` and a
+  `correlationId`, a redirect, a timeout (`EVALUATION_TARGET_TIMEOUT_MILLISECONDS`, 60 seconds per
+  call) or an answer above 4 MB is an Error, and the usual retries apply. A worker handles four jobs
+  at once, calls and evaluations together.
+- **One call per attempt:** a worker claims an attempt with one conditional update and renews the
+  claim every 30 seconds while it calls the Target. A second delivery of the same job finds the
+  claim and does nothing. A claim that is not renewed for two minutes means the worker died; the
+  maintenance task queues the attempt again, and the Target is then called again.
+- **Allowed destinations:** `EVALUATION_TARGET_ALLOWED_DESTINATIONS` lists host names, `host:port`,
+  `*.wildcard` names and CIDR ranges, for example
+  `agent.company.example:443,*.internal.company.example,10.20.0.0/16`. Separate services allow
+  nothing by default; the local image allows `*`. A listed name may resolve to a private address,
+  because internal Targets are the usual case, but not to the machine itself, a link-local address
+  such as a cloud metadata service, or multicast, unless a CIDR range allows it. Every address a
+  name resolves to must be allowed. The worker resolves the name once and connects to exactly the
+  checked addresses, so a DNS record that changes in between cannot redirect the call. Redirects are
+  not followed. An HTTPS Target's certificate is checked against its host name; a private
+  certificate authority is added with `NODE_EXTRA_CA_CERTS`.
+
+### Session Test Cases
+
+A Session Test Case has `steps` instead of an `input`. Each step is sent in order within one
+Session: the first call has no `sessionId`, and later calls carry the one the Target returned. The
+Target must return the same `sessionId` for every step.
+
+```json
+{
+  "name": "cancel-order",
+  "scope": "session",
+  "steps": [
+    { "input": { "message": "Where is my order?" } },
+    { "input": { "message": "Can I cancel it?" } }
+  ],
+  "evaluators": [
+    { "type": "regex", "name": "first-answer", "pattern": "ships today", "step": 1 },
+    {
+      "type": "telemetry",
+      "name": "cancelled",
+      "match": { "name": "execute_tool", "attributes": { "gen_ai.tool.name": "cancel_order" } }
+    }
+  ]
+}
+```
+
+- **Evaluators:** a Regex Evaluator matches the last step's Output, or the step it names. A
+  Telemetry Evaluator counts the spans of every trace with the Session's `session.id`, read from
+  `GET /internal/v1/sessions/{sessionId}/spans`.
+- **Completion:** every step's Correlation ID must have a complete trace, by the same root-span rule
+  as one trace, timed from the end of the last step. Every step's Correlation ID is marked
+  evaluated.
+- **Mixed telemetry:** the Session and every step's Correlation ID are checked, including the
+  Correlation IDs of other attempts' earlier steps, which `iteration_attempt_steps` keeps.
+- **Client-Driven Execution:** a work item carries `scope` and `steps`, and the script reports all
+  steps at once, so that repeating an identical report still changes nothing. A report with the
+  wrong number of steps or different `sessionId`s is refused as `invalid_report`. An error report
+  may carry the steps that worked before the failure.
+- **Transcript:** each attempt in the results has a `transcript` with every step's input, Output and
+  IDs; the attempt's own `output`, `correlationId` and `sessionId` are the last step's.
+
 ### One Session Test Case Iteration
 
 ```mermaid
@@ -472,9 +550,10 @@ sequenceDiagram
   its database on every request, so a change applies there at once. A token without a Project
   manages access only and reaches no Project's data.
 - **Signing keys:** Identity creates a P-256 key pair on its first token and keeps it in its
-  database, so every replica signs with the same key. Services read the public keys from
-  `GET /internal/v1/jwks.json`, keep them in memory, and read them again for a token with an unknown
-  key ID, at most every 30 seconds. Rotation is not built; the key ID allows adding it.
+  database, so every replica signs with the same key. The private key is encrypted with the master
+  key since step 6, so reading the database is not enough to sign tokens. Services read the public
+  keys from `GET /internal/v1/jwks.json`, keep them in memory, and read them again for a token with
+  an unknown key ID, at most every 30 seconds. Rotation is not built; the key ID allows adding it.
 - **Sign-in:** the cookie holds 256 random bits, and Identity stores only their SHA-256 hash. A
   sign-in ends after 12 hours without a new access token, or when the user signs out or is
   deactivated. The cookie is `Secure` when the browser used HTTPS, which the Gateway passes in
@@ -616,14 +695,17 @@ which Project a key belongs to.
 
 ### Secrets
 
-LLM provider keys and Target credentials are encrypted in the Evaluation database with AES-256-GCM.
-The master key comes from a Kubernetes Secret or environment variable. The local image generates it
-into `/data` on first start.
+Target credentials, LLM provider keys (step 7) and Identity's private signing keys are encrypted
+with AES-256-GCM, each purpose with its own key derived from one master key. The master key comes
+from `MASTER_KEY`, a Kubernetes Secret in production, which Identity, the Evaluation API and the
+worker need. The local image generates it into `/data/master-key` on first start. See
+[ADR 0013](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md).
 
 ### Known risks to design for
 
 - **Requests to internal addresses:** Targets are user-supplied URLs, so the worker could be pointed
-  at internal services. It needs an allowlist of permitted destinations.
+  at internal services. Since step 6 it calls only the destinations an operator allows, see
+  [Server-Driven Execution](#server-driven-execution).
 - **Slow regular expressions:** user-supplied patterns can run for a long time. They need to run in
   a Web Worker that can be terminated on timeout.
 
@@ -779,6 +861,19 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The Server-Driven Execution and Session Test Cases step added these checks on 2026-11-10.
+
+| Tested                                                | Result                                                                                                                                         |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| A multi-step Session against the sample Target        | Both steps run within one Session and Regex and Telemetry Evaluators pass on the whole Session's spans, in all-in-one and in separate services |
+| Server-Driven runs on SQLite and PostgreSQL           | Calls, retries after Errors, a deleted Target, a finished run and a job delivered twice (one call) work on both                                |
+| A worker that dies during a call                      | After two minutes without a renewed claim, maintenance queues the attempt again and another worker calls the Target                            |
+| Session Test Cases from a script                      | All steps in one report, repeated reports, refused shapes, steps kept before an error and a Correlation ID reused in an earlier step           |
+| Allowed destinations                                  | Names, ports, wildcards, IPv4 and IPv6 ranges, protected addresses and a name that resolves to the machine on its second lookup                |
+| Calls to a Target                                     | No redirect is followed; an HTTPS Target's certificate is checked against its host name with a private CA from `NODE_EXTRA_CA_CERTS`           |
+| Target credentials and Identity's signing key at rest | Stored only in sealed form; a plain-text signing key from an earlier version is encrypted at start, and a wrong master key stops Identity      |
+| Targets, Session editor and Transcript in Chromium    | Creating a Target, a Session Test Case and a run against the Target work, and nothing scrolls sideways from 360px to 2,040px                   |
+
 The SCIM and file import step added these checks on 2026-11-10.
 
 | Tested                                        | Result                                                                                                                                         |
@@ -910,6 +1005,14 @@ The Prompt service step added these checks on 2026-11-07.
   Project: they have no index, so they read every record that the other filters leave
 - The exclusive lock of creating a partition under load
 - Sending logs from Python: only the TypeScript helper has a log record processor
+- Targets that answer slowly under load: a worker handles four jobs at once, calls and evaluations
+  together, so many slow Targets delay evaluations
+- Rotating the master key, which is not built
+- The allowlist with real DNS records and IPv6 Targets beyond the unit tests, and Targets behind an
+  HTTP proxy, which the worker does not use
+- Server-Driven Execution in the all-in-one image and Docker Compose, where the worker must reach
+  the Target from inside a container; the e2e tests run it only in the all-in-one process and
+  separate services
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
 - The web UI's colours, spacing and typography, and browsers other than Chromium
@@ -937,4 +1040,5 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0010: Telemetry Evaluator conditions as JSON](adr/0010-telemetry-evaluator-conditions-as-json.md)
 - [ADR 0011: OIDC users identified by issuer and subject](adr/0011-oidc-users-identified-by-issuer-and-subject.md)
 - [ADR 0012: Daily log partitions on the record's own time](adr/0012-daily-log-partitions-on-the-record-time.md)
+- [ADR 0013: Secrets sealed with keys derived from one master key](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md)
 - [ADR 0014: A user from the directory is linked to their first OIDC sign-in by email, once](adr/0014-directory-users-linked-to-oidc-by-email-once.md)

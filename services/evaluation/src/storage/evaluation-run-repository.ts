@@ -10,18 +10,22 @@ import {
   type ListTestCaseResultsResponse,
   MAXIMUM_ITERATION_ATTEMPTS,
   type RejectedReport,
+  type ReportedStep,
   type TestCaseDefinition,
   type TestCaseResult,
+  type TranscriptStep,
   type Verdict,
 } from "@extispex/contracts";
 import { type InferEntity, raw } from "@mikro-orm/core";
 import type { EntityManager } from "@mikro-orm/sql";
 import { decideRunVerdict, decideTestCaseOutcome } from "../evaluation-runs/run-verdicts.ts";
-import type { EvaluateAttemptJob } from "../job-queue/job-queue.ts";
+import type { ExecutionResult } from "../iterations/target-execution.ts";
+import type { AttemptJob, EvaluateAttemptJob, ExecuteAttemptJob } from "../job-queue/job-queue.ts";
 import type { EvaluationDatabase } from "./evaluation-database.ts";
 import {
   EvaluationRunRecord,
   IterationAttemptRecord,
+  IterationAttemptStepRecord,
   IterationRecord,
   RunTestCaseRecord,
   TestCaseRecord,
@@ -30,13 +34,18 @@ import {
 type RunRow = InferEntity<typeof EvaluationRunRecord>;
 type IterationRow = InferEntity<typeof IterationRecord>;
 type AttemptRow = InferEntity<typeof IterationAttemptRecord>;
+type StepRow = InferEntity<typeof IterationAttemptStepRecord>;
+type RunTestCaseRow = InferEntity<typeof RunTestCaseRecord>;
 
 /** Stays well below the bound-parameter limits of both databases. */
 const STATEMENT_CHUNK_SIZE = 500;
-const UNFINISHED_STATUSES: IterationStatus[] = ["awaiting_report", "evaluating"];
+const UNFINISHED_STATUSES: IterationStatus[] = ["awaiting_report", "executing", "evaluating"];
+/** A worker that stopped renewing its claim on an attempt has died; another may take over. */
+const EXECUTION_CLAIM_MILLISECONDS = 120_000;
 
 export const NOT_REPORTED_ERROR = "The Iteration was not reported before the run ended.";
 export const NOT_EVALUATED_ERROR = "The Iteration was not evaluated before the run ended.";
+export const NOT_EXECUTED_ERROR = "The Iteration was not finished before the run ended.";
 
 export interface NewEvaluationRun {
   projectId: string;
@@ -44,9 +53,18 @@ export interface NewEvaluationRun {
   datasetName: string;
   executionMode: ExecutionMode;
   batchSize: number;
+  /** Set in Server-Driven Execution. */
+  target: { id: string; name: string } | null;
 }
 
-export type StartRunResult = { status: "started"; runId: string } | { status: "no_test_cases" };
+export type StartRunResult =
+  | {
+    status: "started";
+    runId: string;
+    /** Server-Driven Execution's first attempts, to be queued after the run was stored. */
+    jobs: ExecuteAttemptJob[];
+  }
+  | { status: "no_test_cases" };
 
 export interface ReportResult {
   rejected: RejectedReport[];
@@ -61,9 +79,14 @@ export interface ResultPage {
 
 export interface AttemptToEvaluate {
   projectId: string;
+  /** In a Session Test Case, the last step's Output. */
   output: string;
-  /** Always set: a report with an Output must carry one. */
+  /** In a Session Test Case, every step's Output in order; otherwise empty. */
+  stepOutputs: string[];
+  /** Always set: a report with an Output must carry one. In a Session, the last step's. */
   correlationId: string;
+  /** Every Correlation ID of the attempt: one for each step of a Session Test Case. */
+  correlationIds: string[];
   sessionId: string | null;
   definition: TestCaseDefinition;
   /** When the platform made this attempt available: the run's start, or the previous attempt's end. */
@@ -78,6 +101,13 @@ export interface TelemetryIdConflict {
   testCaseName: string;
   iterationNumber: number;
   attemptNumber: number;
+}
+
+/** What the worker needs to call the Target for one attempt. */
+export interface AttemptToExecute {
+  /** Null only if the run was started without a Target, which the API does not allow. */
+  targetId: string | null;
+  definition: TestCaseDefinition;
 }
 
 export interface EvaluationRunRepository {
@@ -121,16 +151,32 @@ export interface EvaluationRunRepository {
     evaluatedAt: Date,
     /** Why the attempt ended as Error, when no Evaluator could say so. */
     errorMessage?: string,
-  ): Promise<void>;
-  /** Finds another attempt of the run that used the attempt's Correlation ID or `session.id`. */
+  ): Promise<ExecuteAttemptJob[]>;
+  /**
+   * Takes the attempt for this worker. Null when it is no longer waiting to be executed, or when
+   * another worker is calling the Target, so that a repeated job does not call it twice.
+   */
+  claimAttemptExecution(job: ExecuteAttemptJob, claimedAt: Date): Promise<AttemptToExecute | null>;
+  /** The worker is still calling the Target, so its claim holds and its job is not stalled. */
+  renewAttemptExecution(job: ExecuteAttemptJob, renewedAt: Date): Promise<void>;
+  /**
+   * Stores what the Target returned. Does nothing when the attempt is no longer being executed.
+   * The result is the job to queue next: its evaluation, or another attempt after an Error.
+   */
+  recordExecution(
+    job: ExecuteAttemptJob,
+    result: ExecutionResult,
+    recordedAt: Date,
+  ): Promise<AttemptJob[]>;
+  /** Finds another attempt of the run that used one of the attempt's IDs. */
   findTelemetryIdConflict(
     job: EvaluateAttemptJob,
-    telemetryIds: { correlationId: string; sessionId: string | null },
+    telemetryIds: { correlationIds: string[]; sessionId: string | null },
   ): Promise<TelemetryIdConflict | null>;
   /** The attempt is still waiting for telemetry, so its job does not count as stalled. */
   keepEvaluationWaiting(job: EvaluateAttemptJob, requestedAt: Date): Promise<void>;
   /** Attempts whose job was queued before the cutoff; their request time is set to now. */
-  claimStalledEvaluations(cutoff: Date, claimedAt: Date): Promise<EvaluateAttemptJob[]>;
+  claimStalledEvaluations(cutoff: Date, claimedAt: Date): Promise<AttemptJob[]>;
   /** Ends runs without activity since the cutoff; resolves to how many ended. */
   endInactiveRuns(cutoff: Date, endedAt: Date): Promise<number>;
 }
@@ -166,24 +212,77 @@ function canRetry(run: RunRow, attemptNumber: number): boolean {
   return run.finishRequestedAt == null && attemptNumber < MAXIMUM_ITERATION_ATTEMPTS;
 }
 
-/** An attempt ended as Error: the script gets another attempt, or the Iteration ends as `error`. */
+/**
+ * An attempt ended as Error: the Iteration gets another attempt or ends as `error`. In Server-Driven
+ * Execution the worker makes the next attempt, so the result is its job.
+ */
 async function applyAttemptError(
   entityManager: EntityManager,
   run: RunRow,
   iterationId: string,
   attemptNumber: number,
+  decidedAt: Date,
+): Promise<ExecuteAttemptJob[]> {
+  if (!canRetry(run, attemptNumber)) {
+    await entityManager.nativeUpdate(IterationRecord, { id: iterationId }, {
+      status: "error",
+      evaluationRequestedAt: null,
+      executionHeartbeatAt: null,
+    });
+    return [];
+  }
+  const nextAttemptNumber = attemptNumber + 1;
+  const isServerDriven = run.executionMode === "server";
+  await entityManager.nativeUpdate(IterationRecord, { id: iterationId }, {
+    status: isServerDriven ? "executing" : "awaiting_report",
+    currentAttempt: nextAttemptNumber,
+    evaluationRequestedAt: isServerDriven ? decidedAt : null,
+    executionHeartbeatAt: null,
+  });
+  return isServerDriven ? [{ kind: "execute", iterationId, attemptNumber: nextAttemptNumber }] : [];
+}
+
+/** Stores a Session Test Case's steps. The attempt's own row holds the last step's values. */
+async function insertAttemptSteps(
+  entityManager: EntityManager,
+  iterationId: string,
+  attemptNumber: number,
+  steps: ReportedStep[],
 ): Promise<void> {
-  await entityManager.nativeUpdate(
-    IterationRecord,
-    { id: iterationId },
-    canRetry(run, attemptNumber)
-      ? {
-        status: "awaiting_report",
-        currentAttempt: attemptNumber + 1,
-        evaluationRequestedAt: null,
-      }
-      : { status: "error", evaluationRequestedAt: null },
+  if (steps.length === 0) return;
+  await entityManager.insertMany(
+    IterationAttemptStepRecord,
+    steps.map((step, stepIndex) => ({
+      iterationId,
+      attemptNumber,
+      stepNumber: stepIndex + 1,
+      output: step.output,
+      correlationId: step.correlationId,
+      sessionId: step.sessionId,
+    })),
   );
+}
+
+/** Why a report cannot belong to this Test Case; null when it can. */
+function findReportShapeProblem(
+  report: IterationReport,
+  definition: TestCaseDefinition,
+): string | null {
+  const reportedSteps = "steps" in report ? report.steps : undefined;
+  if (definition.scope === "trace") {
+    return reportedSteps === undefined ? null : "This Test Case is not a Session Test Case.";
+  }
+  const stepCount = definition.steps?.length ?? 0;
+  if (reportedSteps !== undefined) {
+    if (new Set(reportedSteps.map((step) => step.sessionId)).size > 1) {
+      return "Every step of a Session must carry the same sessionId.";
+    }
+    if (reportedSteps.length > stepCount) return `This Test Case has ${stepCount} steps.`;
+  }
+  if ("error" in report) return null;
+  return reportedSteps?.length === stepCount
+    ? null
+    : `A report on this Session Test Case needs all of its ${stepCount} steps.`;
 }
 
 /** Sets the verdicts once no Iteration is open. A finished run is never changed again. */
@@ -238,9 +337,11 @@ async function endOpenIterations(
     { runId, status: { $in: statuses } },
     { refresh: true },
   );
-  const awaitingRows = iterationRows.filter((row) => row.status === "awaiting_report");
+  const notStartedRows = iterationRows.filter((row) =>
+    row.status === "awaiting_report" || row.status === "executing"
+  );
   const evaluatingRows = iterationRows.filter((row) => row.status === "evaluating");
-  for (const rowChunk of chunk(awaitingRows)) {
+  for (const rowChunk of chunk(notStartedRows)) {
     await entityManager.insertMany(
       IterationAttemptRecord,
       rowChunk.map((iterationRow) => ({
@@ -248,7 +349,7 @@ async function endOpenIterations(
         attemptNumber: iterationRow.currentAttempt,
         outcome: "error" as const,
         output: null,
-        error: NOT_REPORTED_ERROR,
+        error: iterationRow.status === "executing" ? NOT_EXECUTED_ERROR : NOT_REPORTED_ERROR,
         correlationId: null,
         sessionId: null,
         evaluatorResults: [],
@@ -267,16 +368,45 @@ async function endOpenIterations(
     await entityManager.nativeUpdate(
       IterationRecord,
       { id: { $in: rowChunk.map((iterationRow) => iterationRow.id) } },
-      { status: "error", evaluationRequestedAt: null },
+      { status: "error", evaluationRequestedAt: null, executionHeartbeatAt: null },
     );
   }
 }
 
-function hasSameContent(attemptRow: AttemptRow, report: IterationReport): boolean {
-  return (attemptRow.output ?? null) === ("output" in report ? report.output : null) &&
-    (attemptRow.error ?? null) === ("error" in report ? report.error : null) &&
-    (attemptRow.correlationId ?? undefined) === report.correlationId &&
-    (attemptRow.sessionId ?? undefined) === report.sessionId;
+/** The steps and the single fields that an attempt keeps for a report. */
+function describeReport(report: IterationReport) {
+  const steps = "steps" in report ? report.steps ?? [] : [];
+  const lastStep = steps.at(-1);
+  const hasOwnIds = "correlationId" in report;
+  return {
+    steps,
+    output: "output" in report
+      ? report.output
+      : "error" in report
+      ? null
+      : lastStep?.output ?? null,
+    error: "error" in report ? report.error : null,
+    correlationId: (hasOwnIds ? report.correlationId : undefined) ?? lastStep?.correlationId ??
+      null,
+    sessionId: (hasOwnIds ? report.sessionId : undefined) ?? lastStep?.sessionId ?? null,
+  };
+}
+
+function hasSameContent(
+  attemptRow: AttemptRow,
+  storedSteps: StepRow[],
+  report: IterationReport,
+): boolean {
+  const described = describeReport(report);
+  const isSameStep = (stored: StepRow, reported: ReportedStep) =>
+    stored.output === reported.output && stored.correlationId === reported.correlationId &&
+    stored.sessionId === reported.sessionId;
+  return (attemptRow.output ?? null) === described.output &&
+    (attemptRow.error ?? null) === described.error &&
+    (attemptRow.correlationId ?? null) === described.correlationId &&
+    (attemptRow.sessionId ?? null) === described.sessionId &&
+    storedSteps.length === described.steps.length &&
+    storedSteps.every((stored, stepIndex) => isSameStep(stored, described.steps[stepIndex]));
 }
 
 export function createEvaluationRunRepository(
@@ -300,6 +430,7 @@ export function createEvaluationRunRepository(
           definition: testCaseRow.definition,
           outcome: null,
         }));
+        const isServerDriven = newRun.executionMode === "server";
         let sequence = 0;
         const iterations = runTestCases.flatMap((runTestCase) =>
           Array.from({ length: runTestCase.definition.iterations }, (_, iterationIndex) => ({
@@ -308,9 +439,10 @@ export function createEvaluationRunRepository(
             runTestCaseId: runTestCase.id,
             sequence: sequence++,
             iterationNumber: iterationIndex + 1,
-            status: "awaiting_report" as const,
+            status: isServerDriven ? "executing" as const : "awaiting_report" as const,
             currentAttempt: 1,
-            evaluationRequestedAt: null,
+            evaluationRequestedAt: isServerDriven ? startedAt : null,
+            executionHeartbeatAt: null,
           }))
         );
         await entityManager.insert(EvaluationRunRecord, {
@@ -318,6 +450,8 @@ export function createEvaluationRunRepository(
           projectId: newRun.projectId,
           datasetName: newRun.datasetName,
           executionMode: newRun.executionMode,
+          targetId: newRun.target?.id ?? null,
+          targetName: newRun.target?.name ?? null,
           status: "running",
           verdict: null,
           batchSize: newRun.batchSize,
@@ -334,7 +468,17 @@ export function createEvaluationRunRepository(
         for (const rowChunk of chunk(iterations)) {
           await entityManager.insertMany(IterationRecord, rowChunk);
         }
-        return { status: "started" as const, runId };
+        return {
+          status: "started" as const,
+          runId,
+          jobs: isServerDriven
+            ? iterations.map((iteration) => ({
+              kind: "execute" as const,
+              iterationId: iteration.id,
+              attemptNumber: 1,
+            }))
+            : [],
+        };
       });
     },
 
@@ -413,13 +557,21 @@ export function createEvaluationRunRepository(
         { orderBy: { iterationNumber: "asc" }, limit: limit + 1 },
       );
       const pageRows = iterationRows.slice(0, limit);
+      const pageIterationIds = pageRows.map((row) => row.id);
       const attemptRows = pageRows.length === 0 ? [] : await entityManager.find(
         IterationAttemptRecord,
-        { iterationId: { $in: pageRows.map((row) => row.id) } },
+        { iterationId: { $in: pageIterationIds } },
         { orderBy: { attemptNumber: "asc" } },
       );
+      const stepRows = pageRows.length === 0 ? [] : await entityManager.find(
+        IterationAttemptStepRecord,
+        { iterationId: { $in: pageIterationIds } },
+        { orderBy: { stepNumber: "asc" } },
+      );
       return {
-        iterations: pageRows.map((iterationRow) => toIterationResult(iterationRow, attemptRows)),
+        iterations: pageRows.map((iterationRow) =>
+          toIterationResult(iterationRow, attemptRows, stepRows, testCaseRow.definition)
+        ),
         nextCursor: iterationRows.length > limit
           ? pageRows[pageRows.length - 1].iterationNumber
           : null,
@@ -452,13 +604,15 @@ export function createEvaluationRunRepository(
             attempt: iterationRow.currentAttempt,
             testCaseName: testCaseRow.name,
             iterationNumber: iterationRow.iterationNumber,
-            input: testCaseRow.definition.input,
+            scope: testCaseRow.definition.scope,
+            input: testCaseRow.definition.input ?? null,
+            steps: testCaseRow.definition.steps ?? null,
             expectedOutput: testCaseRow.definition.expectedOutput,
           };
         }),
         evaluationsInProgress: await entityManager.count(IterationRecord, {
           runId,
-          status: "evaluating",
+          status: { $in: ["executing", "evaluating"] },
         }),
       };
     },
@@ -478,6 +632,13 @@ export function createEvaluationRunRepository(
         const attemptRows = await entityManager.find(IterationAttemptRecord, {
           iterationId: { $in: iterationRows.map((iterationRow) => iterationRow.id) },
         }, { refresh: true });
+        const stepRows = await entityManager.find(IterationAttemptStepRecord, {
+          iterationId: { $in: iterationRows.map((iterationRow) => iterationRow.id) },
+        }, { refresh: true, orderBy: { stepNumber: "asc" } });
+        const testCaseRows = await entityManager.find(RunTestCaseRecord, {
+          id: { $in: [...new Set(iterationRows.map((row) => row.runTestCaseId))] },
+        });
+        const testCasesById = new Map(testCaseRows.map((row) => [row.id, row]));
         const iterationsById = new Map(iterationRows.map((row) => [row.id, row]));
         const attemptKey = (iterationId: string, attemptNumber: number) =>
           `${iterationId}:${attemptNumber}`;
@@ -500,10 +661,23 @@ export function createEvaluationRunRepository(
             reject("unknown_iteration", "This run has no such Iteration.");
             continue;
           }
+          if (runRow.executionMode === "server") {
+            reject("server_driven_run", "The worker runs this Evaluation Run's Iterations itself.");
+            continue;
+          }
+          const definition = testCasesById.get(iterationRow.runTestCaseId)!.definition;
+          const shapeProblem = findReportShapeProblem(report, definition);
+          if (shapeProblem !== null) {
+            reject("invalid_report", shapeProblem);
+            continue;
+          }
           const key = attemptKey(report.iterationId, report.attempt);
           const knownAttempt = knownAttempts.get(key);
           if (knownAttempt !== undefined) {
-            if (!hasSameContent(knownAttempt, report)) {
+            const storedSteps = stepRows.filter((row) =>
+              row.iterationId === report.iterationId && row.attemptNumber === report.attempt
+            );
+            if (!hasSameContent(knownAttempt, storedSteps, report)) {
               // After the run's end, the stored attempt may be the Error that ended it.
               if (hasRunEnded) reject("run_ended", "The run no longer accepts reports.");
               else reject("conflicting_report", "This attempt was already reported differently.");
@@ -521,22 +695,35 @@ export function createEvaluationRunRepository(
             reject("stale_attempt", `The current attempt is ${iterationRow.currentAttempt}.`);
             continue;
           }
+          const described = describeReport(report);
           const attemptRow = {
             iterationId: report.iterationId,
             attemptNumber: report.attempt,
             outcome: "error" in report ? "error" as const : null,
-            output: "output" in report ? report.output : null,
-            error: "error" in report ? report.error : null,
-            correlationId: report.correlationId ?? null,
-            sessionId: report.sessionId ?? null,
+            output: described.output,
+            error: described.error,
+            correlationId: described.correlationId,
+            sessionId: described.sessionId,
             evaluatorResults: [],
             reportedAt,
             evaluatedAt: null,
           };
           await entityManager.insert(IterationAttemptRecord, attemptRow);
+          await insertAttemptSteps(
+            entityManager,
+            report.iterationId,
+            report.attempt,
+            described.steps,
+          );
           knownAttempts.set(key, attemptRow as unknown as AttemptRow);
           if ("error" in report) {
-            await applyAttemptError(entityManager, runRow, report.iterationId, report.attempt);
+            await applyAttemptError(
+              entityManager,
+              runRow,
+              report.iterationId,
+              report.attempt,
+              reportedAt,
+            );
           } else {
             await entityManager.nativeUpdate(IterationRecord, { id: report.iterationId }, {
               status: "evaluating",
@@ -558,7 +745,12 @@ export function createEvaluationRunRepository(
         await entityManager.nativeUpdate(EvaluationRunRecord, { id: runId }, {
           finishRequestedAt: runRow.finishRequestedAt ?? requestedAt,
         });
-        await endOpenIterations(entityManager, runId, ["awaiting_report"], requestedAt);
+        await endOpenIterations(
+          entityManager,
+          runId,
+          ["awaiting_report", "executing"],
+          requestedAt,
+        );
         await finalizeRunIfComplete(entityManager, runRow, requestedAt);
         return true;
       });
@@ -588,10 +780,19 @@ export function createEvaluationRunRepository(
           iterationId: job.iterationId,
           attemptNumber: job.attemptNumber - 1,
         });
+      const stepRows = await entityManager.find(IterationAttemptStepRecord, {
+        iterationId: job.iterationId,
+        attemptNumber: job.attemptNumber,
+      }, { orderBy: { stepNumber: "asc" } });
+      const correlationId = attemptRow.correlationId ?? "";
       return {
         projectId: runRow.projectId,
         output: attemptRow.output ?? "",
-        correlationId: attemptRow.correlationId ?? "",
+        stepOutputs: stepRows.map((row) => row.output),
+        correlationId,
+        correlationIds: stepRows.length === 0
+          ? [correlationId]
+          : [...new Set(stepRows.map((row) => row.correlationId))],
         sessionId: attemptRow.sessionId ?? null,
         definition: testCaseRow.definition,
         startedAt: previousAttempt === null
@@ -601,23 +802,31 @@ export function createEvaluationRunRepository(
       };
     },
 
-    async findTelemetryIdConflict(job, { correlationId, sessionId }) {
+    async findTelemetryIdConflict(job, { correlationIds, sessionId }) {
+      const correlationPlaceholders = correlationIds.map(() => "?").join(", ");
       const idCondition = sessionId === null
-        ? "attempt.correlation_id = ?"
-        : "(attempt.correlation_id = ? or attempt.session_id = ?)";
+        ? `used.correlation_id in (${correlationPlaceholders})`
+        : `(used.correlation_id in (${correlationPlaceholders}) or used.session_id = ?)`;
+      // An attempt's own row holds only the last step's IDs, so the steps are searched as well.
       const rows = await database.orm.em.fork().execute<TelemetryIdConflictRow[]>(
-        `select attempt.correlation_id, attempt.attempt_number, iteration.iteration_number,
+        `select used.correlation_id, used.attempt_number, iteration.iteration_number,
             test_case.name as test_case_name
-          from iteration_attempts attempt
-          join iterations iteration on iteration.id = attempt.iteration_id
+          from (
+            select iteration_id, attempt_number, correlation_id, session_id
+              from iteration_attempts
+            union all
+            select iteration_id, attempt_number, correlation_id, session_id
+              from iteration_attempt_steps
+          ) used
+          join iterations iteration on iteration.id = used.iteration_id
           join run_test_cases test_case on test_case.id = iteration.run_test_case_id
           where iteration.run_id = (select run_id from iterations where id = ?)
             and ${idCondition}
-            and not (attempt.iteration_id = ? and attempt.attempt_number = ?)
+            and not (used.iteration_id = ? and used.attempt_number = ?)
           limit 1`,
         [
           job.iterationId,
-          correlationId,
+          ...correlationIds,
           ...(sessionId === null ? [] : [sessionId]),
           job.iterationId,
           job.attemptNumber,
@@ -625,7 +834,9 @@ export function createEvaluationRunRepository(
       );
       if (rows.length === 0) return null;
       return {
-        idName: rows[0].correlation_id === correlationId ? "Correlation ID" : "session.id",
+        idName: correlationIds.includes(rows[0].correlation_id ?? "")
+          ? "Correlation ID"
+          : "session.id",
         testCaseName: rows[0].test_case_name,
         iterationNumber: Number(rows[0].iteration_number),
         attemptNumber: Number(rows[0].attempt_number),
@@ -641,11 +852,11 @@ export function createEvaluationRunRepository(
     },
 
     async recordEvaluation(job, outcome, evaluatorResults, evaluatedAt, errorMessage) {
-      await database.orm.em.fork().transactional(async (entityManager) => {
+      return await database.orm.em.fork().transactional(async (entityManager) => {
         const unlockedRow = await entityManager.findOne(IterationRecord, { id: job.iterationId });
-        if (unlockedRow === null) return;
+        if (unlockedRow === null) return [];
         const runRow = await lockRun(entityManager, { id: unlockedRow.runId });
-        if (runRow === null) return;
+        if (runRow === null) return [];
         // Read again under the lock: another delivery of this job may have got here first.
         const iterationRow = await entityManager.findOneOrFail(
           IterationRecord,
@@ -655,7 +866,7 @@ export function createEvaluationRunRepository(
         if (
           iterationRow.status !== "evaluating" || iterationRow.currentAttempt !== job.attemptNumber
         ) {
-          return;
+          return [];
         }
         await entityManager.nativeUpdate(IterationAttemptRecord, {
           iterationId: job.iterationId,
@@ -666,8 +877,15 @@ export function createEvaluationRunRepository(
           evaluatedAt,
           ...(errorMessage === undefined ? {} : { error: errorMessage }),
         });
+        let nextJobs: ExecuteAttemptJob[] = [];
         if (outcome === "error") {
-          await applyAttemptError(entityManager, runRow, job.iterationId, job.attemptNumber);
+          nextJobs = await applyAttemptError(
+            entityManager,
+            runRow,
+            job.iterationId,
+            job.attemptNumber,
+            evaluatedAt,
+          );
         } else {
           await entityManager.nativeUpdate(IterationRecord, { id: job.iterationId }, {
             status: outcome,
@@ -675,21 +893,119 @@ export function createEvaluationRunRepository(
           });
         }
         await finalizeRunIfComplete(entityManager, runRow, evaluatedAt);
+        return nextJobs;
+      });
+    },
+
+    async claimAttemptExecution(job, claimedAt) {
+      const entityManager = database.orm.em.fork();
+      const claimExpiresBefore = new Date(claimedAt.getTime() - EXECUTION_CLAIM_MILLISECONDS);
+      // One statement, so that of two deliveries at once only one changes the row.
+      const claimedCount = await entityManager.nativeUpdate(IterationRecord, {
+        id: job.iterationId,
+        status: "executing",
+        currentAttempt: job.attemptNumber,
+        $or: [
+          { executionHeartbeatAt: null },
+          { executionHeartbeatAt: { $lt: claimExpiresBefore } },
+        ],
+      }, { executionHeartbeatAt: claimedAt, evaluationRequestedAt: claimedAt });
+      if (claimedCount === 0) return null;
+      const iterationRow = await entityManager.findOneOrFail(IterationRecord, {
+        id: job.iterationId,
+      });
+      const testCaseRow = await entityManager.findOneOrFail(RunTestCaseRecord, {
+        id: iterationRow.runTestCaseId,
+      });
+      const runRow = await entityManager.findOneOrFail(EvaluationRunRecord, {
+        id: iterationRow.runId,
+      });
+      return { targetId: runRow.targetId ?? null, definition: testCaseRow.definition };
+    },
+
+    async renewAttemptExecution(job, renewedAt) {
+      await database.orm.em.fork().nativeUpdate(IterationRecord, {
+        id: job.iterationId,
+        status: "executing",
+        currentAttempt: job.attemptNumber,
+      }, { executionHeartbeatAt: renewedAt, evaluationRequestedAt: renewedAt });
+    },
+
+    async recordExecution(job, result, recordedAt) {
+      return await database.orm.em.fork().transactional(async (entityManager) => {
+        const unlockedRow = await entityManager.findOne(IterationRecord, { id: job.iterationId });
+        if (unlockedRow === null) return [];
+        const runRow = await lockRun(entityManager, { id: unlockedRow.runId });
+        if (runRow === null) return [];
+        const iterationRow = await entityManager.findOneOrFail(
+          IterationRecord,
+          { id: job.iterationId },
+          { refresh: true },
+        );
+        if (
+          iterationRow.status !== "executing" || iterationRow.currentAttempt !== job.attemptNumber
+        ) {
+          return [];
+        }
+        await entityManager.nativeUpdate(EvaluationRunRecord, { id: runRow.id }, {
+          lastActivityAt: recordedAt,
+        });
+        const steps = result.status === "output" ? [] : result.steps;
+        const lastStep = steps.at(-1);
+        await entityManager.insert(IterationAttemptRecord, {
+          iterationId: job.iterationId,
+          attemptNumber: job.attemptNumber,
+          outcome: result.status === "error" ? "error" as const : null,
+          output: result.status === "output"
+            ? result.output
+            : result.status === "session_output"
+            ? lastStep?.output ?? null
+            : null,
+          error: result.status === "error" ? result.error : null,
+          correlationId: result.status === "output"
+            ? result.correlationId
+            : lastStep?.correlationId ?? null,
+          sessionId: result.status === "output" ? result.sessionId : lastStep?.sessionId ?? null,
+          evaluatorResults: [],
+          reportedAt: recordedAt,
+          evaluatedAt: null,
+        });
+        await insertAttemptSteps(entityManager, job.iterationId, job.attemptNumber, steps);
+        let nextJobs: AttemptJob[];
+        if (result.status === "error") {
+          nextJobs = await applyAttemptError(
+            entityManager,
+            runRow,
+            job.iterationId,
+            job.attemptNumber,
+            recordedAt,
+          );
+        } else {
+          await entityManager.nativeUpdate(IterationRecord, { id: job.iterationId }, {
+            status: "evaluating",
+            evaluationRequestedAt: recordedAt,
+            executionHeartbeatAt: null,
+          });
+          nextJobs = [{ iterationId: job.iterationId, attemptNumber: job.attemptNumber }];
+        }
+        await finalizeRunIfComplete(entityManager, runRow, recordedAt);
+        return nextJobs;
       });
     },
 
     async claimStalledEvaluations(cutoff, claimedAt) {
       const entityManager = database.orm.em.fork();
       const iterationRows = await entityManager.find(IterationRecord, {
-        status: "evaluating",
+        status: { $in: ["evaluating", "executing"] },
         evaluationRequestedAt: { $lt: cutoff },
       }, { limit: STATEMENT_CHUNK_SIZE });
       if (iterationRows.length === 0) return [];
       await entityManager.nativeUpdate(IterationRecord, {
         id: { $in: iterationRows.map((iterationRow) => iterationRow.id) },
-        status: "evaluating",
+        status: { $in: ["evaluating", "executing"] },
       }, { evaluationRequestedAt: claimedAt });
-      return iterationRows.map((iterationRow) => ({
+      return iterationRows.map((iterationRow): AttemptJob => ({
+        ...(iterationRow.status === "executing" ? { kind: "execute" } : {}),
         iterationId: iterationRow.id,
         attemptNumber: iterationRow.currentAttempt,
       }));
@@ -724,6 +1040,7 @@ function toRunSummary(runRow: RunRow, completedIterations: number): EvaluationRu
     id: runRow.id,
     datasetName: runRow.datasetName,
     executionMode: runRow.executionMode as ExecutionMode,
+    targetName: runRow.targetName ?? null,
     status: runRow.status as EvaluationRunSummary["status"],
     verdict: runRow.verdict ?? null,
     totalIterations: runRow.totalIterations,
@@ -734,14 +1051,16 @@ function toRunSummary(runRow: RunRow, completedIterations: number): EvaluationRu
 }
 
 function toTestCaseResult(
-  testCaseRow: InferEntity<typeof RunTestCaseRecord>,
+  testCaseRow: RunTestCaseRow,
   iterationRows: Pick<IterationRow, "status">[],
 ): TestCaseResult {
-  const { input, expectedOutput, evaluators, passThreshold } = testCaseRow.definition;
+  const { scope, input, steps, expectedOutput, evaluators, passThreshold } = testCaseRow.definition;
   return {
     name: testCaseRow.name,
     outcome: testCaseRow.outcome ?? null,
-    input,
+    scope,
+    input: input ?? null,
+    steps: steps ?? null,
     expectedOutput,
     evaluators,
     passThreshold,
@@ -750,7 +1069,30 @@ function toTestCaseResult(
   };
 }
 
-function toIterationResult(iterationRow: IterationRow, attemptRows: AttemptRow[]): IterationResult {
+function toTranscript(
+  iterationId: string,
+  attemptNumber: number,
+  stepRows: StepRow[],
+  definition: TestCaseDefinition,
+): TranscriptStep[] | null {
+  if (definition.scope !== "session") return null;
+  return stepRows
+    .filter((row) => row.iterationId === iterationId && row.attemptNumber === attemptNumber)
+    .map((row) => ({
+      stepNumber: row.stepNumber,
+      input: definition.steps?.[row.stepNumber - 1]?.input ?? null,
+      output: row.output,
+      correlationId: row.correlationId,
+      sessionId: row.sessionId,
+    }));
+}
+
+function toIterationResult(
+  iterationRow: IterationRow,
+  attemptRows: AttemptRow[],
+  stepRows: StepRow[],
+  definition: TestCaseDefinition,
+): IterationResult {
   return {
     iterationId: iterationRow.id,
     iterationNumber: iterationRow.iterationNumber,
@@ -764,6 +1106,7 @@ function toIterationResult(iterationRow: IterationRow, attemptRows: AttemptRow[]
         error: attemptRow.error ?? null,
         correlationId: attemptRow.correlationId ?? null,
         sessionId: attemptRow.sessionId ?? null,
+        transcript: toTranscript(iterationRow.id, attemptRow.attemptNumber, stepRows, definition),
         evaluatorResults: attemptRow.evaluatorResults,
         reportedAt: attemptRow.reportedAt.toISOString(),
         evaluatedAt: attemptRow.evaluatedAt?.toISOString() ?? null,

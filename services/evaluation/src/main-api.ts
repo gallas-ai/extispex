@@ -1,6 +1,7 @@
 import { createHttpServiceClient } from "@extispex/service-client";
 import {
   createIdentityRequestAuthenticator,
+  createSecretCipher,
   createStructuredLogger,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
@@ -10,6 +11,7 @@ import {
   createEvaluationApiService,
   openEvaluationDatabase,
   openJobQueue,
+  TARGET_CREDENTIAL_CIPHER_PURPOSE,
 } from "./create-service.ts";
 
 const logger = createStructuredLogger("evaluation-api");
@@ -20,6 +22,10 @@ const jobQueue = await openJobQueue(databaseUrl, database, logger);
 const evaluationApi = createEvaluationApiService({
   database,
   jobQueue,
+  targetCredentialCipher: await createSecretCipher(
+    readRequiredEnvironmentVariable("MASTER_KEY"),
+    TARGET_CREDENTIAL_CIPHER_PURPOSE,
+  ),
   requestAuthenticator: createIdentityRequestAuthenticator({
     identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
     clientId: "evaluation",

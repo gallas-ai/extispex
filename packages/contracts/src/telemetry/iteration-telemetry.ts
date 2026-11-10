@@ -31,7 +31,7 @@ export const sessionTelemetrySchema = z.object({
 export const correlationSpansSchema = z.object({
   readAt: z.string(),
   spans: z.array(spanSchema),
-  /** True when the Correlation ID has more spans than {@link MAXIMUM_EVALUATED_SPANS}. */
+  /** True when the Correlation ID or Session has more spans than {@link MAXIMUM_EVALUATED_SPANS}. */
   isTruncated: z.boolean(),
 });
 
@@ -89,6 +89,22 @@ export const listCorrelationSpansRoute = createRoute({
   tags: ["Internal"],
   security: [{ accessToken: [] }],
   request: { params: correlationIdPathSchema },
+  responses: {
+    200: {
+      description: "The spans, ordered by start time.",
+      content: { "application/json": { schema: correlationSpansSchema } },
+    },
+    ...internalResponses,
+  },
+});
+
+export const listSessionSpansRoute = createRoute({
+  method: "get",
+  path: "/internal/v1/sessions/{sessionId}/spans",
+  summary: "Read the spans of all traces of a Session, for judging them.",
+  tags: ["Internal"],
+  security: [{ accessToken: [] }],
+  request: { params: sessionIdPathSchema },
   responses: {
     200: {
       description: "The spans, ordered by start time.",

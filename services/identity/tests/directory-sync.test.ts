@@ -13,8 +13,9 @@ import type {
   ListUsersResponse,
   User,
 } from "@extispex/contracts";
-import { createStructuredLogger } from "@extispex/service-runtime";
+import { createStructuredLogger, generateMasterKey } from "@extispex/service-runtime";
 import { listTestDatabases } from "@extispex/service-storage/testing";
+import { createSigningKeyCipher } from "../src/access-tokens/signing-keys.ts";
 import {
   createFirstAdministratorIfNone,
   createIdentityService,
@@ -25,6 +26,7 @@ import {
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "first-admin-password";
 const PASSWORD_HASH_ITERATIONS = 1_000;
+const TEST_SIGNING_KEY_CIPHER = await createSigningKeyCipher(generateMasterKey());
 
 const DIRECTORY_TABLES = [
   "company_group_members",
@@ -91,6 +93,7 @@ function defineDirectoryTest(
         let clockMilliseconds = Date.parse("2026-11-10T10:00:00Z");
         const identityService = createIdentityService({
           database,
+          signingKeyCipher: TEST_SIGNING_KEY_CIPHER,
           areLocalAccountsEnabled: true,
           serviceClientSecrets: new Map(),
           logger: createStructuredLogger("identity-test"),

@@ -214,6 +214,14 @@ export const RunIcon = (props: IconProps) => (
   </StrokeIcon>
 );
 
+export const TargetIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <circle cx="12" cy="12" r="6" />
+    <circle cx="12" cy="12" r="2" />
+  </StrokeIcon>
+);
+
 export const PlusIcon = (props: IconProps) => (
   <StrokeIcon {...props}>
     <path d="M5 12h14M12 5v14" />

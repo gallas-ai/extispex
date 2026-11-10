@@ -1,304 +1,37 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type {
-  CorrelationTelemetryResponse,
   Dataset,
-  EvaluationRunSummary,
   EvaluationRunWork,
   Evaluator,
-  IterationReport,
   ListDatasetsResponse,
   ListEvaluationRunsResponse,
   ListIterationResultsResponse,
   ListTestCaseResultsResponse,
   ListTestCasesResponse,
-  ReportIterationsResponse,
   Span,
   TestCase,
 } from "@extispex/contracts";
 import {
-  createRequestAuthenticator,
-  createStructuredLogger,
-  type ProjectResolver,
-} from "@extispex/service-runtime";
-import { createTestAccessTokens } from "@extispex/service-runtime/testing";
-import { listTestDatabases } from "@extispex/service-storage/testing";
-import {
-  createEvaluationApiService,
-  createEvaluationWorker,
-  type EvaluateAttemptJob,
-  type EvaluationApiService,
-  type EvaluationWorker,
-  type JobQueue,
-  openEvaluationDatabase,
-} from "../src/create-service.ts";
-import {
   NOT_EVALUATED_ERROR,
   NOT_REPORTED_ERROR,
 } from "../src/storage/evaluation-run-repository.ts";
-
-const API_KEY = "test-api-key";
-const OTHER_PROJECT_API_KEY = "other-project-api-key";
-const INACTIVE_RUN_TIMEOUT_MILLISECONDS = 3_600_000;
-
-const testProjectResolver: ProjectResolver = {
-  resolveProjectId: (apiKey) =>
-    Promise.resolve(
-      ({ [API_KEY]: "project-one", [OTHER_PROJECT_API_KEY]: "project-two" })[apiKey] ?? null,
-    ),
-};
-const testAccessTokens = await createTestAccessTokens();
-const testRequestAuthenticator = createRequestAuthenticator({
-  projectResolver: testProjectResolver,
-  accessTokenVerifier: testAccessTokens.accessTokenVerifier,
-});
-
-const MENTIONS_DAYS_EVALUATOR = {
-  type: "regex",
-  name: "mentions-days",
-  pattern: "30\\s*days",
-  flags: "i",
-};
-
-/** Stands in for Telemetry's internal API; a test says what it has received. */
-interface FakeTelemetry {
-  correlations: Map<string, Omit<CorrelationTelemetryResponse, "readAt">>;
-  firstReceivedAtBySession: Map<string, string>;
-  spans: Map<string, Span[]>;
-  evaluatedAt: Map<string, string>;
-  isUnavailable: boolean;
-  requestCount: number;
-}
-
-const FAKE_SERVICE_TOKENS = {
-  readServiceToken: (projectId: string | null) => Promise.resolve(`token-for-${projectId}`),
-  forgetServiceToken: () => {},
-};
-
-function createFakeTelemetryService(fake: FakeTelemetry, readClock: () => Date) {
-  return async (request: Request): Promise<Response> => {
-    assertEquals(request.headers.get("authorization"), "Bearer token-for-project-one");
-    fake.requestCount++;
-    if (fake.isUnavailable) return new Response(null, { status: 503 });
-    const readAt = readClock().toISOString();
-    const path = new URL(request.url).pathname.split("/").map(decodeURIComponent);
-    const [resource, id, action] = path.slice(3);
-    if (resource === "sessions") {
-      const firstReceivedAt = fake.firstReceivedAtBySession.get(id) ?? null;
-      return Response.json({ readAt, firstReceivedAt });
-    }
-    if (action === "spans") {
-      return Response.json({ readAt, spans: fake.spans.get(id) ?? [], isTruncated: false });
-    }
-    if (action === "evaluated") {
-      fake.evaluatedAt.set(id, (await request.json()).evaluatedAt);
-      return new Response(null, { status: 204 });
-    }
-    const correlation = fake.correlations.get(id) ?? { firstReceivedAt: null, traces: [] };
-    return Response.json({ readAt, ...correlation });
-  };
-}
-
-interface TestHarness {
-  api: EvaluationApiService;
-  worker: EvaluationWorker;
-  queuedJobs: EvaluateAttemptJob[];
-  telemetry: FakeTelemetry;
-  readClock(): Date;
-  advanceClock(milliseconds: number): void;
-  /** Judges everything queued so far, as the worker would. */
-  drainJobs(): Promise<void>;
-}
-
-type EvaluationTestBody = (harness: TestHarness) => Promise<void>;
-
-function defineEvaluationTest(testName: string, testBody: EvaluationTestBody): void {
-  for (const testDatabase of listTestDatabases("evaluation")) {
-    Deno.test(`${testName} (${testDatabase.label})`, async () => {
-      const database = await openEvaluationDatabase(testDatabase.url);
-      try {
-        const entityManager = database.orm.em.fork();
-        await entityManager.execute("delete from evaluation_runs");
-        await entityManager.execute("delete from datasets");
-        let clockMilliseconds = Date.parse("2026-11-08T10:00:00Z");
-        const readCurrentTime = () => new Date(clockMilliseconds += 1_000);
-        const queuedJobs: EvaluateAttemptJob[] = [];
-        const jobQueue: JobQueue = {
-          enqueue: (jobs) => {
-            queuedJobs.push(...jobs);
-            return Promise.resolve();
-          },
-          startWorking: () => Promise.resolve(),
-          stop: () => Promise.resolve(),
-        };
-        const logger = createStructuredLogger("evaluation-test");
-        const telemetry: FakeTelemetry = {
-          correlations: new Map(),
-          firstReceivedAtBySession: new Map(),
-          spans: new Map(),
-          evaluatedAt: new Map(),
-          isUnavailable: false,
-          requestCount: 0,
-        };
-        const readClock = () => new Date(clockMilliseconds);
-        const worker = createEvaluationWorker({
-          database,
-          jobQueue,
-          telemetryService: createFakeTelemetryService(telemetry, readClock),
-          serviceTokens: FAKE_SERVICE_TOKENS,
-          logger,
-          regexTimeoutMilliseconds: 300,
-          inactiveRunTimeoutMilliseconds: INACTIVE_RUN_TIMEOUT_MILLISECONDS,
-          readCurrentTime,
-        });
-        await testBody({
-          api: createEvaluationApiService({
-            database,
-            jobQueue,
-            requestAuthenticator: testRequestAuthenticator,
-            logger,
-            readCurrentTime,
-          }),
-          worker,
-          queuedJobs,
-          telemetry,
-          readClock,
-          advanceClock: (milliseconds) => {
-            clockMilliseconds += milliseconds;
-          },
-          drainJobs: async () => {
-            for (const job of queuedJobs.splice(0)) await worker.evaluateAttempt(job);
-          },
-        });
-      } finally {
-        await database.close();
-      }
-    });
-  }
-}
-
-async function sendRequest(
-  { api }: TestHarness,
-  method: string,
-  path: string,
-  options: { body?: unknown; bearerToken?: string } = {},
-): Promise<Response> {
-  const headers = new Headers({ authorization: `Bearer ${options.bearerToken ?? API_KEY}` });
-  if (options.body !== undefined) headers.set("content-type", "application/json");
-  return await api.handleRequest(
-    new Request(`http://evaluation.test${path}`, {
-      method,
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    }),
-  );
-}
-
-async function expectJson<ResponseBody>(
-  responsePromise: Promise<Response>,
-  expectedStatus: number,
-): Promise<ResponseBody> {
-  const response = await responsePromise;
-  const responseText = await response.text();
-  assertEquals(response.status, expectedStatus, responseText);
-  return (responseText === "" ? null : JSON.parse(responseText)) as ResponseBody;
-}
-
-async function createDatasetWithTestCases(
-  harness: TestHarness,
-  testCases: Record<string, unknown>[],
-): Promise<void> {
-  await expectJson(
-    sendRequest(harness, "POST", "/v1/datasets", { body: { name: "support-bot" } }),
-    201,
-  );
-  for (const testCase of testCases) {
-    await expectJson(
-      sendRequest(harness, "POST", "/v1/datasets/support-bot/test-cases", { body: testCase }),
-      201,
-    );
-  }
-}
-
-function refundTestCase(overrides: Record<string, unknown> = {}) {
-  return {
-    name: "refund",
-    input: { message: "What is your refund policy?" },
-    evaluators: [MENTIONS_DAYS_EVALUATOR],
-    ...overrides,
-  };
-}
-
-function startRun(harness: TestHarness, batchSize?: number) {
-  return expectJson<EvaluationRunWork>(
-    sendRequest(harness, "POST", "/v1/evaluation-runs", {
-      body: { datasetName: "support-bot", executionMode: "client", batchSize },
-    }),
-    201,
-  );
-}
-
-function report(harness: TestHarness, runId: string, reports: IterationReport[]) {
-  return expectJson<ReportIterationsResponse>(
-    sendRequest(harness, "POST", `/v1/evaluation-runs/${runId}/reports`, { body: { reports } }),
-    200,
-  );
-}
-
-/** A run with every result, read page by page like a client does. */
-async function readRun(harness: TestHarness, runId: string) {
-  const runPath = `/v1/evaluation-runs/${runId}`;
-  const summary = await expectJson<EvaluationRunSummary>(
-    sendRequest(harness, "GET", runPath),
-    200,
-  );
-  const testCases = [];
-  let cursor: number | null = null;
-  do {
-    const query: string = cursor === null ? "?limit=2" : `?limit=2&cursor=${cursor}`;
-    const page: ListTestCaseResultsResponse = await expectJson(
-      sendRequest(harness, "GET", `${runPath}/test-cases${query}`),
-      200,
-    );
-    for (const testCase of page.testCases) {
-      const iterations = [];
-      let iterationCursor: number | null = null;
-      do {
-        const iterationQuery: string = iterationCursor === null
-          ? "?limit=3"
-          : `?limit=3&cursor=${iterationCursor}`;
-        const iterationPage: ListIterationResultsResponse = await expectJson(
-          sendRequest(
-            harness,
-            "GET",
-            `${runPath}/test-cases/${testCase.name}/iterations${iterationQuery}`,
-          ),
-          200,
-        );
-        iterations.push(...iterationPage.iterations);
-        iterationCursor = iterationPage.nextCursor;
-      } while (iterationCursor !== null);
-      testCases.push({ ...testCase, iterations });
-    }
-    cursor = page.nextCursor;
-  } while (cursor !== null);
-  return { ...summary, testCases };
-}
-
-function outputReport(
-  item: { iterationId: string; attempt: number },
-  output: string,
-): IterationReport {
-  return {
-    iterationId: item.iterationId,
-    attempt: item.attempt,
-    output,
-    correlationId: `correlation-${item.iterationId}-${item.attempt}`,
-  };
-}
-
-function errorReport(item: { iterationId: string; attempt: number }): IterationReport {
-  return { iterationId: item.iterationId, attempt: item.attempt, error: "HTTP 500 from the app" };
-}
+import {
+  createDatasetWithTestCases,
+  defineEvaluationTest,
+  errorReport,
+  expectJson,
+  INACTIVE_RUN_TIMEOUT_MILLISECONDS,
+  MENTIONS_DAYS_EVALUATOR,
+  OTHER_PROJECT_API_KEY,
+  outputReport,
+  readRun,
+  refundTestCase,
+  report,
+  sendRequest,
+  startRun,
+  testAccessTokens,
+  TestHarness,
+} from "./evaluation-test-harness.ts";
 
 defineEvaluationTest("manages Datasets and Test Cases", async (harness) => {
   await createDatasetWithTestCases(harness, [refundTestCase()]);
@@ -611,7 +344,7 @@ defineEvaluationTest("a finished run never changes", async (harness) => {
   const finishedRun = await readRun(harness, work.runId);
   assertEquals(finishedRun.verdict, "passed");
 
-  await harness.worker.evaluateAttempt(job);
+  await harness.worker.handleJob(job);
   const repeated = await report(harness, work.runId, [passingReport]);
   assertEquals(repeated.rejected, [], "Resending a lost batch must still succeed.");
   await expectJson(sendRequest(harness, "POST", `/v1/evaluation-runs/${work.runId}/finish`), 200);
@@ -623,7 +356,7 @@ defineEvaluationTest("concurrent evaluations finish the run exactly once", async
   const work = await startRun(harness);
   await report(harness, work.runId, work.items.map((item) => outputReport(item, "30 days")));
   const jobs = harness.queuedJobs.splice(0);
-  await Promise.all([...jobs, ...jobs].map((job) => harness.worker.evaluateAttempt(job)));
+  await Promise.all([...jobs, ...jobs].map((job) => harness.worker.handleJob(job)));
   const run = await readRun(harness, work.runId);
   assertEquals([run.status, run.verdict, run.completedIterations], ["finished", "passed", 8]);
   assertEquals(

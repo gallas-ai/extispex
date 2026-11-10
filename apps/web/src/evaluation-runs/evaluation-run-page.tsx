@@ -3,6 +3,7 @@ import type {
   IterationAttempt,
   IterationResult,
   TestCaseResult,
+  TranscriptStep,
 } from "@extispex/contracts";
 import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router";
@@ -73,8 +74,10 @@ export function EvaluationRunPage({ credentials, onSignInRequired }: EvaluationR
         <div className="page-heading">
           <h1 className="prompt-title">{run.datasetName}</h1>
           <p className="page-subtitle">
-            Started {new Date(run.createdAt).toLocaleString()} · {run.completedIterations} of{" "}
-            {run.totalIterations} Iterations done
+            Started {new Date(run.createdAt).toLocaleString()} ·{" "}
+            {run.targetName === null ? "run by a script" : `calls the Target ${run.targetName}`}
+            {" · "}
+            {run.completedIterations} of {run.totalIterations} Iterations done
           </p>
         </div>
         <div className="page-actions run-verdict">
@@ -172,6 +175,7 @@ function TestCaseResultPanel(
       <header className="test-case-result-header">
         <h2 className="panel-title">{testCase.name}</h2>
         <span className="status-text">
+          {testCase.scope === "session" ? `Session of ${testCase.steps?.length ?? 0} steps · ` : ""}
           {testCase.passedIterations} of {testCase.totalIterations} passed · needs{" "}
           {Math.round(testCase.passThreshold * 100)}%
         </span>
@@ -256,7 +260,9 @@ function AttemptDetails(
           <Link to={tracesPath(attempt.correlationId)}>View traces</Link>
         </p>
       )}
-      {attempt.output !== null && <pre className="attempt-output">{attempt.output}</pre>}
+      {attempt.transcript !== null
+        ? <Transcript steps={attempt.transcript} />
+        : attempt.output !== null && <pre className="attempt-output">{attempt.output}</pre>}
       {attempt.error !== null && <p className="attempt-error" role="note">{attempt.error}</p>}
       {attempt.evaluatorResults.length > 0 && (
         <ul className="evaluator-results">
@@ -271,6 +277,32 @@ function AttemptDetails(
         </ul>
       )}
     </div>
+  );
+}
+
+function formatStepInput(input: unknown): string {
+  return typeof input === "string" ? input : JSON.stringify(input);
+}
+
+/** What was sent at each step of a Session, and what the application answered. */
+function Transcript({ steps }: { steps: TranscriptStep[] }) {
+  if (steps.length === 0) return <p className="status-text">No step was answered.</p>;
+  return (
+    <ol className="transcript" aria-label="Transcript">
+      {steps.map((step) => (
+        <li key={step.stepNumber} className="transcript-step">
+          <p className="transcript-input">
+            <span className="transcript-label">Step {step.stepNumber}</span>
+            <span className="cell-breaks-anywhere">{formatStepInput(step.input)}</span>
+          </p>
+          <pre className="attempt-output">{step.output}</pre>
+          <p className="status-text">
+            Correlation ID <code className="cell-breaks-anywhere">{step.correlationId}</code>{" "}
+            <Link to={tracesPath(step.correlationId)}>View traces</Link>
+          </p>
+        </li>
+      ))}
+    </ol>
   );
 }
 

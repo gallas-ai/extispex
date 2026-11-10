@@ -2,6 +2,7 @@ import {
   type CorrelationSpansResponse,
   type CorrelationTelemetryResponse,
   listCorrelationSpansRoute,
+  listSessionSpansRoute,
   markCorrelationEvaluatedRoute,
   readCorrelationTelemetryRoute,
   readSessionTelemetryRoute,
@@ -25,6 +26,7 @@ export interface TelemetryClient {
   readCorrelation(projectId: string, correlationId: string): Promise<CorrelationTelemetryResponse>;
   readSession(projectId: string, sessionId: string): Promise<SessionTelemetryResponse>;
   listSpans(projectId: string, correlationId: string): Promise<CorrelationSpansResponse>;
+  listSessionSpans(projectId: string, sessionId: string): Promise<CorrelationSpansResponse>;
   markEvaluated(projectId: string, correlationId: string, evaluatedAt: string): Promise<void>;
 }
 
@@ -71,6 +73,8 @@ export function createTelemetryClient(
       readJson(projectId, fillPath(readSessionTelemetryRoute.path, "sessionId", sessionId)),
     listSpans: (projectId, correlationId) =>
       readJson(projectId, fillPath(listCorrelationSpansRoute.path, "correlationId", correlationId)),
+    listSessionSpans: (projectId, sessionId) =>
+      readJson(projectId, fillPath(listSessionSpansRoute.path, "sessionId", sessionId)),
     async markEvaluated(projectId, correlationId, evaluatedAt) {
       const response = await send(
         projectId,

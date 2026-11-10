@@ -3,7 +3,11 @@ import type {
   SpanStatusCode,
   TestCase,
   TestCaseDefinitionInput,
+  TestCaseScope,
 } from "@extispex/contracts";
+
+/** As many steps as the API accepts, kept here so that the UI bundle does not load the schemas. */
+export const MAXIMUM_SESSION_STEPS = 20;
 
 export interface RegexEvaluatorDraft {
   type: "regex";
@@ -11,6 +15,8 @@ export interface RegexEvaluatorDraft {
   pattern: string;
   flags: string;
   expectMatch: boolean;
+  /** In a Session Test Case, the step whose Output to match; empty for the last step. */
+  step: string;
 }
 
 export interface TelemetryEvaluatorDraft {
@@ -31,7 +37,11 @@ export type EvaluatorDraft = RegexEvaluatorDraft | TelemetryEvaluatorDraft;
 /** A Test Case as the editor holds it: every field as the text in its input. */
 export interface TestCaseDraft {
   name: string;
+  scope: TestCaseScope;
+  /** A trace-scoped Test Case's input. */
   input: string;
+  /** A Session Test Case's inputs, one for each step. */
+  steps: string[];
   expectedOutput: string;
   iterations: string;
   passThresholdPercent: string;
@@ -44,6 +54,7 @@ export const NEW_REGEX_EVALUATOR_DRAFT: RegexEvaluatorDraft = {
   pattern: "",
   flags: "",
   expectMatch: true,
+  step: "",
 };
 
 export const NEW_TELEMETRY_EVALUATOR_DRAFT: TelemetryEvaluatorDraft = {
@@ -58,7 +69,9 @@ export const NEW_TELEMETRY_EVALUATOR_DRAFT: TelemetryEvaluatorDraft = {
 
 export const NEW_TEST_CASE_DRAFT: TestCaseDraft = {
   name: "",
+  scope: "trace",
   input: "",
+  steps: ["", ""],
   expectedOutput: "",
   iterations: "1",
   passThresholdPercent: "100",
@@ -87,8 +100,15 @@ function formatInput(input: unknown): string {
 
 function createEvaluatorDraft(evaluator: Evaluator): EvaluatorDraft {
   if (evaluator.type === "regex") {
-    const { name, pattern, flags, expectMatch } = evaluator;
-    return { type: "regex", name, pattern, flags, expectMatch };
+    const { name, pattern, flags, expectMatch, step } = evaluator;
+    return {
+      type: "regex",
+      name,
+      pattern,
+      flags,
+      expectMatch,
+      step: step === undefined ? "" : String(step),
+    };
   }
   return {
     type: "telemetry",
@@ -106,7 +126,9 @@ function createEvaluatorDraft(evaluator: Evaluator): EvaluatorDraft {
 export function createDraftFromTestCase(testCase: TestCase): TestCaseDraft {
   return {
     name: testCase.name,
-    input: formatInput(testCase.input),
+    scope: testCase.scope,
+    input: testCase.scope === "trace" ? formatInput(testCase.input) : "",
+    steps: testCase.steps?.map((step) => formatInput(step.input)) ?? ["", ""],
     expectedOutput: testCase.expectedOutput ?? "",
     iterations: String(testCase.iterations),
     passThresholdPercent: String(Math.round(testCase.passThreshold * 10_000) / 100),
@@ -167,7 +189,7 @@ function findEvaluatorProblem(draft: EvaluatorDraft): string | null {
   return draft.pattern === "" ? "Give every Evaluator a regular expression." : null;
 }
 
-function toEvaluatorDefinition(draft: EvaluatorDraft) {
+function toEvaluatorDefinition(draft: EvaluatorDraft, scope: TestCaseScope) {
   if (draft.type === "regex") {
     return {
       type: "regex" as const,
@@ -175,6 +197,7 @@ function toEvaluatorDefinition(draft: EvaluatorDraft) {
       pattern: draft.pattern,
       flags: draft.flags,
       expectMatch: draft.expectMatch,
+      ...(scope === "session" && draft.step !== "" ? { step: Number(draft.step) } : {}),
     };
   }
   return {
@@ -192,8 +215,26 @@ function toEvaluatorDefinition(draft: EvaluatorDraft) {
   };
 }
 
+/** JSON stays JSON; anything else is sent as a string. */
+function readInput(text: string): unknown {
+  return isJsonText(text) ? JSON.parse(text) : text;
+}
+
 export function checkDraft(draft: TestCaseDraft): DraftCheck {
-  if (draft.input.trim() === "") return { isValid: false, problem: "Give the Test Case an input." };
+  if (draft.scope === "trace" && draft.input.trim() === "") {
+    return { isValid: false, problem: "Give the Test Case an input." };
+  }
+  if (draft.scope === "session") {
+    if (draft.steps.length === 0 || draft.steps.length > MAXIMUM_SESSION_STEPS) {
+      return {
+        isValid: false,
+        problem: `A Session Test Case has 1 to ${MAXIMUM_SESSION_STEPS} steps.`,
+      };
+    }
+    if (draft.steps.some((step) => step.trim() === "")) {
+      return { isValid: false, problem: "Give every step an input." };
+    }
+  }
   const iterations = Number(draft.iterations);
   if (!Number.isInteger(iterations) || iterations < 1 || iterations > 100) {
     return { isValid: false, problem: "Iterations must be a whole number from 1 to 100." };
@@ -212,11 +253,16 @@ export function checkDraft(draft: TestCaseDraft): DraftCheck {
   return {
     isValid: true,
     definition: {
-      input: isJsonText(draft.input) ? JSON.parse(draft.input) : draft.input,
+      scope: draft.scope,
+      ...(draft.scope === "trace"
+        ? { input: readInput(draft.input) }
+        : { steps: draft.steps.map((step) => ({ input: readInput(step) })) }),
       expectedOutput: draft.expectedOutput === "" ? null : draft.expectedOutput,
       iterations,
       passThreshold: passThresholdPercent / 100,
-      evaluators: draft.evaluators.map(toEvaluatorDefinition),
+      evaluators: draft.evaluators.map((evaluator) =>
+        toEvaluatorDefinition(evaluator, draft.scope)
+      ),
     },
   };
 }

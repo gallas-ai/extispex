@@ -1,6 +1,7 @@
 import {
   createErrorResponse,
   createEvaluationRunRoute,
+  DEFAULT_BATCH_SIZE,
   finishEvaluationRunRoute,
   getEvaluationRunRoute,
   getEvaluationRunWorkRoute,
@@ -11,13 +12,15 @@ import {
 } from "@extispex/contracts";
 import type { ProjectAccessEnvironment, StructuredLogger } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { EvaluateAttemptJob, JobQueue } from "../job-queue/job-queue.ts";
+import type { AttemptJob, JobQueue } from "../job-queue/job-queue.ts";
 import type { DatasetRepository } from "../storage/dataset-repository.ts";
 import type { EvaluationRunRepository } from "../storage/evaluation-run-repository.ts";
+import type { TargetRepository } from "../storage/target-repository.ts";
 
 export interface EvaluationRunRouteDependencies {
   datasetRepository: DatasetRepository;
   evaluationRunRepository: EvaluationRunRepository;
+  targetRepository: TargetRepository;
   jobQueue: JobQueue;
   logger: StructuredLogger;
   readCurrentTime: () => Date;
@@ -31,11 +34,17 @@ export function registerEvaluationRunRoutes(
   app: OpenAPIHono<ProjectAccessEnvironment>,
   dependencies: EvaluationRunRouteDependencies,
 ): void {
-  const { datasetRepository, evaluationRunRepository, jobQueue, logger, readCurrentTime } =
-    dependencies;
+  const {
+    datasetRepository,
+    evaluationRunRepository,
+    targetRepository,
+    jobQueue,
+    logger,
+    readCurrentTime,
+  } = dependencies;
 
   /** A failure here is not the script's problem: the worker queues stalled attempts again. */
-  const enqueueAfterCommit = async (jobs: EvaluateAttemptJob[]) => {
+  const enqueueAfterCommit = async (jobs: AttemptJob[]) => {
     try {
       await jobQueue.enqueue(jobs);
     } catch (error) {
@@ -44,7 +53,8 @@ export function registerEvaluationRunRoutes(
   };
 
   app.openapi(createEvaluationRunRoute, async (context) => {
-    const { datasetName, executionMode, batchSize } = context.req.valid("json");
+    const request = context.req.valid("json");
+    const { datasetName, executionMode } = request;
     const { projectId } = context.get("projectAccess");
     const dataset = await datasetRepository.findDataset(projectId, datasetName);
     if (dataset === null) {
@@ -53,12 +63,22 @@ export function registerEvaluationRunRoutes(
         404,
       );
     }
+    const target = request.executionMode === "server"
+      ? await targetRepository.findTarget(projectId, request.targetName)
+      : null;
+    if (request.executionMode === "server" && target === null) {
+      return context.json(
+        createErrorResponse("not_found", `Target ${request.targetName} was not found.`),
+        404,
+      );
+    }
     const start = await evaluationRunRepository.startRun({
       projectId,
       datasetId: dataset.id,
       datasetName,
       executionMode,
-      batchSize,
+      batchSize: request.executionMode === "client" ? request.batchSize : DEFAULT_BATCH_SIZE,
+      target,
     }, readCurrentTime());
     if (start.status === "no_test_cases") {
       return context.json(
@@ -66,6 +86,7 @@ export function registerEvaluationRunRoutes(
         409,
       );
     }
+    await enqueueAfterCommit(start.jobs);
     return context.json((await evaluationRunRepository.readWork(projectId, start.runId))!, 201);
   });
 

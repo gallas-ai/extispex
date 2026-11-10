@@ -12,6 +12,7 @@ import {
   checkDraft,
   createDraftFromTestCase,
   type EvaluatorDraft,
+  MAXIMUM_SESSION_STEPS,
   NEW_REGEX_EVALUATOR_DRAFT,
   NEW_TELEMETRY_EVALUATOR_DRAFT,
   NEW_TEST_CASE_DRAFT,
@@ -190,19 +191,54 @@ function TestCaseForm(
             </div>
           )}
           <div className="form-field">
-            <label className="field-label" htmlFor="test-case-input">Input</label>
-            <textarea
-              id="test-case-input"
-              className="text-area text-input-mono"
-              rows={5}
-              spellCheck={false}
-              value={draft.input}
-              onChange={(changeEvent) => updateDraft({ input: changeEvent.target.value })}
-            />
+            <span className="field-label" id="test-case-scope-label">Scope</span>
+            <div
+              className="segmented-control segmented-control-text"
+              role="radiogroup"
+              aria-labelledby="test-case-scope-label"
+            >
+              {(["trace", "session"] as const).map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  role="radio"
+                  aria-checked={draft.scope === scope}
+                  className="segmented-control-option"
+                  onClick={() => updateDraft({ scope })}
+                >
+                  {scope === "trace" ? "One trace" : "A whole Session"}
+                </button>
+              ))}
+            </div>
             <p className="field-hint">
-              JSON or plain text. Your script receives it and calls the application.
+              {draft.scope === "trace"
+                ? "One input and one Output."
+                : "Steps sent in order within one Session; Telemetry Evaluators judge every trace of it."}
             </p>
           </div>
+          {draft.scope === "trace"
+            ? (
+              <div className="form-field">
+                <label className="field-label" htmlFor="test-case-input">Input</label>
+                <textarea
+                  id="test-case-input"
+                  className="text-area text-input-mono"
+                  rows={5}
+                  spellCheck={false}
+                  value={draft.input}
+                  onChange={(changeEvent) => updateDraft({ input: changeEvent.target.value })}
+                />
+                <p className="field-hint">
+                  JSON or plain text, sent to the Target or to your script as given.
+                </p>
+              </div>
+            )
+            : (
+              <StepFields
+                steps={draft.steps}
+                onChange={(steps) => updateDraft({ steps })}
+              />
+            )}
           <div className="form-field">
             <label className="field-label" htmlFor="test-case-expected">Expected output</label>
             <textarea
@@ -242,6 +278,7 @@ function TestCaseForm(
               <EvaluatorFields
                 key={evaluatorIndex}
                 evaluator={evaluator}
+                stepCount={draft.scope === "session" ? draft.steps.length : 0}
                 evaluatorNumber={evaluatorIndex + 1}
                 canRemove={draft.evaluators.length > 1}
                 onChange={(replacement) => updateEvaluator(evaluatorIndex, replacement)}
@@ -300,8 +337,69 @@ function TestCaseForm(
   );
 }
 
+/** A Session Test Case's steps, each one input. */
+function StepFields(
+  { steps, onChange }: { steps: string[]; onChange: (steps: string[]) => void },
+) {
+  return (
+    <div className="form-field">
+      <span className="field-label">Steps</span>
+      <ol className="step-editor-list">
+        {steps.map((step, stepIndex) => (
+          <li key={stepIndex} className="step-editor">
+            <label className="field-label" htmlFor={`test-case-step-${stepIndex + 1}`}>
+              Step {stepIndex + 1} input
+            </label>
+            <div className="step-editor-row">
+              <textarea
+                id={`test-case-step-${stepIndex + 1}`}
+                className="text-area text-input-mono"
+                rows={2}
+                spellCheck={false}
+                value={step}
+                onChange={(changeEvent) =>
+                  onChange(
+                    steps.map((existing, index) =>
+                      index === stepIndex ? changeEvent.target.value : existing
+                    ),
+                  )}
+              />
+              <button
+                type="button"
+                className="icon-button button-danger"
+                aria-label={`Remove step ${stepIndex + 1}`}
+                title="Remove step"
+                disabled={steps.length === 1}
+                onClick={() => onChange(steps.filter((_, index) => index !== stepIndex))}
+              >
+                <TrashIcon size={14} />
+              </button>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div>
+        <button
+          type="button"
+          className="button button-secondary button-small"
+          disabled={steps.length >= MAXIMUM_SESSION_STEPS}
+          onClick={() => onChange([...steps, ""])}
+        >
+          <PlusIcon size={13} />
+          Add step
+        </button>
+      </div>
+      <p className="field-hint">
+        Each input is JSON or plain text. The Target returns the Session's ID with its first answer.
+      </p>
+    </div>
+  );
+}
+
 interface EvaluatorFieldsProps {
   evaluator: EvaluatorDraft;
+  /** The steps a Regex Evaluator can choose from; 0 outside a Session Test Case. */
+  stepCount: number;
   evaluatorNumber: number;
   canRemove: boolean;
   onChange: (replacement: EvaluatorDraft) => void;
@@ -309,7 +407,7 @@ interface EvaluatorFieldsProps {
 }
 
 function EvaluatorFields(
-  { evaluator, evaluatorNumber, canRemove, onChange, onRemove }: EvaluatorFieldsProps,
+  { evaluator, stepCount, evaluatorNumber, canRemove, onChange, onRemove }: EvaluatorFieldsProps,
 ) {
   const removeButton = (
     <button
@@ -327,6 +425,7 @@ function EvaluatorFields(
     ? (
       <RegexEvaluatorFields
         evaluator={evaluator}
+        stepCount={stepCount}
         evaluatorNumber={evaluatorNumber}
         removeButton={removeButton}
         onChange={onChange}
@@ -343,8 +442,9 @@ function EvaluatorFields(
 }
 
 function RegexEvaluatorFields(
-  { evaluator, evaluatorNumber, removeButton, onChange }: {
+  { evaluator, stepCount, evaluatorNumber, removeButton, onChange }: {
     evaluator: RegexEvaluatorDraft;
+    stepCount: number;
     evaluatorNumber: number;
     removeButton: ReactNode;
     onChange: (replacement: RegexEvaluatorDraft) => void;
@@ -395,6 +495,27 @@ function RegexEvaluatorFields(
           onChange={(changeEvent) => update({ pattern: changeEvent.target.value })}
         />
       </div>
+      {stepCount > 0 && (
+        <div className="form-field">
+          <label className="field-label" htmlFor={`${idPrefix}-step`}>
+            Evaluator {evaluatorNumber} step
+          </label>
+          <select
+            id={`${idPrefix}-step`}
+            className="select-input"
+            value={Number(evaluator.step) > stepCount ? "" : evaluator.step}
+            onChange={(changeEvent) => update({ step: changeEvent.target.value })}
+          >
+            <option value="">The last step</option>
+            {Array.from(
+              { length: stepCount },
+              (_, stepIndex) => (
+                <option key={stepIndex} value={String(stepIndex + 1)}>Step {stepIndex + 1}</option>
+              ),
+            )}
+          </select>
+        </div>
+      )}
       <div className="evaluator-editor-footer">
         <label className="checkbox-label">
           <input

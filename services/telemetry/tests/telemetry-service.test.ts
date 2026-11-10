@@ -371,6 +371,7 @@ defineTelemetryTest("publishes an OpenAPI 3.1 document", async (telemetryService
     "/internal/v1/correlations/{correlationId}/evaluated",
     "/internal/v1/correlations/{correlationId}/spans",
     "/internal/v1/sessions/{sessionId}",
+    "/internal/v1/sessions/{sessionId}/spans",
     "/v1/logs",
     "/v1/rejected-telemetry",
     "/v1/traces",
@@ -439,6 +440,19 @@ defineTelemetryTest("says when a Correlation ID's telemetry was stored", async (
     "/internal/v1/sessions/chat-7",
   );
   assertEquals(sessionState.firstReceivedAt, state.firstReceivedAt);
+  const sessionSpans = await readInternal<CorrelationSpansResponse>(
+    service,
+    "/internal/v1/sessions/chat-7/spans",
+  );
+  assertEquals(sessionSpans.isTruncated, false);
+  assert(sessionSpans.spans.length > 0);
+  assert(sessionSpans.spans.every((span) => span.sessionId === "chat-7"));
+  const otherProjectSpans = await readInternal<CorrelationSpansResponse>(
+    service,
+    "/internal/v1/sessions/chat-7/spans",
+    "project-two",
+  );
+  assertEquals(otherProjectSpans.spans, []);
   const otherProjectState = await readInternal<CorrelationTelemetryResponse>(
     service,
     "/internal/v1/correlations/order-42",

@@ -241,7 +241,8 @@ export const SigningKeyRecord = defineEntity({
   tableName: "signing_keys",
   properties: {
     id: p.string().primary(),
-    privateKeyJwk: p.text(),
+    /** The private key as a JWK, encrypted with the master key. */
+    sealedPrivateKeyJwk: p.text().fieldName("private_key_jwk"),
     publicKeyJwk: p.text(),
     createdAt: p.datetime(),
   },

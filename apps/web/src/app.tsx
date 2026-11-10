@@ -23,6 +23,8 @@ import { createAccessTokenCredentials } from "./sign-in/access-token-credentials
 import { readStoredProjectId, storeProjectId } from "./sign-in/selected-project-storage.ts";
 import { AccountPage } from "./sign-in/account-page.tsx";
 import { SignInPage } from "./sign-in/sign-in-page.tsx";
+import { TargetPage } from "./targets/target-page.tsx";
+import { TargetsPage } from "./targets/targets-page.tsx";
 import { UserMenu } from "./sign-in/user-menu.tsx";
 import { ThemeSwitcher } from "./theme/theme-switcher.tsx";
 import { TracesPage } from "./traces/traces-page.tsx";
@@ -37,6 +39,7 @@ import {
   PromptIcon,
   RunIcon,
   ShieldIcon,
+  TargetIcon,
 } from "./ui/icons.tsx";
 
 export function App() {
@@ -195,6 +198,10 @@ function AppShell() {
                   <DatasetIcon size={15} />
                   <span className="navigation-link-text">Datasets</span>
                 </NavLink>
+                <NavLink className="navigation-link" to="/targets">
+                  <TargetIcon size={15} />
+                  <span className="navigation-link-text">Targets</span>
+                </NavLink>
                 <NavLink className="navigation-link" to="/evaluation-runs">
                   <RunIcon size={15} />
                   <span className="navigation-link-text">Runs</span>
@@ -273,6 +280,14 @@ function AppShell() {
                 <Route
                   path="/datasets/:datasetName/test-cases/:testCaseName"
                   element={<EditTestCasePage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/targets"
+                  element={<TargetsPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/targets/:targetName"
+                  element={<TargetPage key={selectedProject.id} {...pageProps} />}
                 />
                 <Route
                   path="/evaluation-runs"

@@ -12,9 +12,11 @@ import {
   createFirstAdministratorIfNone,
   createFirstProjectIfNone,
   createIdentityService,
+  createSigningKeyCipher,
   MINIMUM_CONFIGURED_KEY_LENGTH,
   openIdentityDatabase,
   parseServiceClients,
+  protectStoredSigningKeys,
   readOidcSettings,
 } from "./create-service.ts";
 
@@ -44,9 +46,13 @@ if (bootstrapAdminEmail !== undefined && !areLocalAccountsEnabled) {
   );
 }
 
+const signingKeyCipher = await createSigningKeyCipher(
+  readRequiredEnvironmentVariable("MASTER_KEY"),
+);
 const database = await openIdentityDatabase(
   readRequiredEnvironmentVariable("IDENTITY_DATABASE_URL"),
 );
+await protectStoredSigningKeys(database, signingKeyCipher);
 if (bootstrapProjectApiKey !== undefined) {
   const firstProject = await createFirstProjectIfNone(database, bootstrapProjectApiKey);
   if (firstProject !== null) {
@@ -71,6 +77,7 @@ if (bootstrapAdminEmail !== undefined && bootstrapAdminPassword !== undefined) {
 
 const identityService = createIdentityService({
   database,
+  signingKeyCipher,
   areLocalAccountsEnabled,
   serviceClientSecrets,
   oidcSettings: readOidcSettings(readOptionalEnvironmentVariable),

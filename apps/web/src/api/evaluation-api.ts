@@ -1,15 +1,21 @@
 import type {
   CreateDatasetRequest,
+  CreateEvaluationRunRequest,
+  CreateTargetRequest,
   CreateTestCaseRequest,
   Dataset,
   EvaluationRunSummary,
+  EvaluationRunWork,
   ListDatasetsResponse,
   ListEvaluationRunsResponse,
   ListIterationResultsResponse,
+  ListTargetsResponse,
   ListTestCaseResultsResponse,
   ListTestCasesResponse,
+  Target,
   TestCase,
   TestCaseDefinitionInput,
+  UpdateTargetRequest,
 } from "@extispex/contracts";
 import { type ApiCredentials, requestJson } from "./api-request.ts";
 
@@ -126,4 +132,42 @@ export function listIterationResults(
     credentials,
     `${evaluationRunPath(runId)}/${testCasePath}/iterations${pageQuery(cursor)}`,
   );
+}
+
+export function createEvaluationRun(
+  credentials: ApiCredentials,
+  request: CreateEvaluationRunRequest,
+): Promise<EvaluationRunWork> {
+  return requestJson(credentials, "/v1/evaluation-runs", { method: "POST", body: request });
+}
+
+function targetPath(targetName: string): string {
+  return `/v1/targets/${encodeURIComponent(targetName)}`;
+}
+
+export function listTargets(credentials: ApiCredentials): Promise<ListTargetsResponse> {
+  return requestJson(credentials, "/v1/targets");
+}
+
+export function getTarget(credentials: ApiCredentials, targetName: string): Promise<Target> {
+  return requestJson(credentials, targetPath(targetName));
+}
+
+export function createTarget(
+  credentials: ApiCredentials,
+  request: CreateTargetRequest,
+): Promise<Target> {
+  return requestJson(credentials, "/v1/targets", { method: "POST", body: request });
+}
+
+export function updateTarget(
+  credentials: ApiCredentials,
+  targetName: string,
+  request: UpdateTargetRequest,
+): Promise<Target> {
+  return requestJson(credentials, targetPath(targetName), { method: "PUT", body: request });
+}
+
+export function deleteTarget(credentials: ApiCredentials, targetName: string): Promise<null> {
+  return requestJson(credentials, targetPath(targetName), { method: "DELETE" });
 }

@@ -14,6 +14,9 @@ const REPORTED_ID_MAXIMUM_LENGTH = 256;
 export const MAXIMUM_BATCH_SIZE = 100;
 export const DEFAULT_BATCH_SIZE = 25;
 
+/** How many steps a Session Test Case may have. */
+export const MAXIMUM_SESSION_STEPS = 20;
+
 /** The first try of an Iteration and its two retries. */
 export const MAXIMUM_ITERATION_ATTEMPTS = 3;
 
@@ -28,12 +31,9 @@ export const datasetNameSchema = urlSafeNameSchema;
 /** A Test Case's name, unique within its Dataset. */
 export const testCaseNameSchema = urlSafeNameSchema;
 
-/** Any JSON value of a bounded size, passed to the user's script as given. */
+/** Any JSON value of a bounded size, passed to the Target or the user's script as given. */
 function boundedJsonSchema(fieldName: string) {
   return z.unknown().refine(
-    (jsonValue) => jsonValue !== undefined,
-    `${fieldName} is required.`,
-  ).refine(
     (jsonValue) => (JSON.stringify(jsonValue) ?? "").length <= MAXIMUM_TEXT_LENGTH,
     `${fieldName} must stay below ${MAXIMUM_TEXT_LENGTH} characters as JSON.`,
   );
@@ -50,7 +50,8 @@ function isValidRegularExpression(pattern: string, flags: string): boolean {
 
 /**
  * A Regex Evaluator. `expectMatch` says whether the Output should match. The flags `g` and `y` are
- * not accepted, because they only change where a repeated match starts.
+ * not accepted, because they only change where a repeated match starts. In a Session Test Case,
+ * `step` picks the Output to match, numbered from 1, and the last step's Output is the default.
  */
 export const regexEvaluatorSchema = z.strictObject({
   type: z.literal("regex"),
@@ -58,6 +59,7 @@ export const regexEvaluatorSchema = z.strictObject({
   pattern: z.string().min(1).max(10_000),
   flags: z.string().regex(/^[imsu]*$/, "Use only the flags i, m, s and u.").default(""),
   expectMatch: z.boolean().default(true),
+  step: z.number().int().min(1).max(MAXIMUM_SESSION_STEPS).optional(),
 }).refine(
   (evaluator) => isValidRegularExpression(evaluator.pattern, evaluator.flags),
   { message: "This is not a valid regular expression.", path: ["pattern"] },
@@ -105,10 +107,21 @@ export const evaluatorSchema = z.discriminatedUnion("type", [
   telemetryEvaluatorSchema,
 ]);
 
-/** A Test Case as a client writes it. Its scope is `trace`; Session scope arrives with its steps. */
-export const testCaseDefinitionSchema = z.strictObject({
-  scope: z.literal("trace").default("trace"),
-  input: boundedJsonSchema("input"),
+export const testCaseScopeSchema = z.enum(["trace", "session"]);
+
+/** One message of a Session Test Case. The steps run in order, within one Session. */
+export const testCaseStepSchema = z.strictObject({
+  input: boundedJsonSchema("input").refine(
+    (jsonValue) => jsonValue !== undefined,
+    "input is required.",
+  ),
+});
+
+const testCaseDefinitionFields = {
+  /** One trace with `input`, or one whole Session with `steps`. */
+  scope: testCaseScopeSchema.default("trace"),
+  input: boundedJsonSchema("input").optional(),
+  steps: z.array(testCaseStepSchema).min(1).max(MAXIMUM_SESSION_STEPS).optional(),
   expectedOutput: z.string().max(MAXIMUM_TEXT_LENGTH).nullable().default(null),
   evaluators: z.array(evaluatorSchema).min(1).max(20).refine(
     (evaluators) =>
@@ -117,13 +130,57 @@ export const testCaseDefinitionSchema = z.strictObject({
   ),
   iterations: z.number().int().min(1).max(100).default(1),
   passThreshold: z.number().gt(0).max(1).default(1),
-});
+};
 
-export const createTestCaseRequestSchema = testCaseDefinitionSchema.extend({
+interface ScopedDefinition {
+  scope: "trace" | "session";
+  input?: unknown;
+  steps?: unknown[];
+  evaluators: Evaluator[];
+}
+
+/** A trace-scoped Test Case has one `input`, and a Session Test Case has `steps` instead. */
+function checkScopeFields(definition: ScopedDefinition, context: z.RefinementCtx): void {
+  const addIssue = (path: string, message: string) =>
+    context.addIssue({ code: "custom", message, path: [path] });
+  if (definition.scope === "trace") {
+    if (definition.input === undefined) addIssue("input", "input is required.");
+    if (definition.steps !== undefined) {
+      addIssue("steps", 'Only a Test Case with the scope "session" has steps.');
+    }
+  } else {
+    if (definition.steps === undefined) addIssue("steps", "A Session Test Case needs steps.");
+    if (definition.input !== undefined) {
+      addIssue("input", "A Session Test Case takes its inputs from its steps.");
+    }
+  }
+  const stepCount = definition.steps?.length ?? 0;
+  definition.evaluators.forEach((evaluator, position) => {
+    if (evaluator.type !== "regex" || evaluator.step === undefined) return;
+    if (evaluator.step > stepCount) {
+      context.addIssue({
+        code: "custom",
+        message: definition.scope === "trace"
+          ? "Only an Evaluator of a Session Test Case can choose a step."
+          : `This Test Case has ${stepCount} steps.`,
+        path: ["evaluators", position, "step"],
+      });
+    }
+  });
+}
+
+/** A Test Case as a client writes it. */
+export const testCaseDefinitionSchema = z.strictObject(testCaseDefinitionFields).superRefine(
+  checkScopeFields,
+);
+
+export const createTestCaseRequestSchema = z.strictObject({
+  ...testCaseDefinitionFields,
   name: testCaseNameSchema,
-});
+}).superRefine(checkScopeFields);
 
-export const testCaseSchema = testCaseDefinitionSchema.extend({
+export const testCaseSchema = z.object({
+  ...testCaseDefinitionFields,
   name: testCaseNameSchema,
   datasetName: datasetNameSchema,
   createdAt: z.string(),
@@ -147,30 +204,103 @@ export const datasetSchema = z.object({
 
 export const listDatasetsResponseSchema = z.object({ datasets: z.array(datasetSchema) });
 
-export const executionModeSchema = z.enum(["client"]);
+const HTTP_HEADER_NAME_PATTERN = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
+/** The platform sets these itself for every call to a Target. */
+const RESERVED_TARGET_HEADERS = new Set([
+  "connection",
+  "content-length",
+  "content-type",
+  "host",
+  "transfer-encoding",
+]);
+
+/** A Target's name, unique within its Project. */
+export const targetNameSchema = urlSafeNameSchema;
+
+const targetUrlSchema = z.string().min(1).max(2_048).refine((url) => {
+  if (!URL.canParse(url)) return false;
+  const { protocol, username, password } = new URL(url);
+  return (protocol === "http:" || protocol === "https:") && username === "" && password === "";
+}, "Use an http or https URL without a user name or password.");
+
+/** One header that the platform sends to the Target. It is stored encrypted and never returned. */
+export const targetCredentialSchema = z.strictObject({
+  headerName: z.string().min(1).max(256).regex(
+    HTTP_HEADER_NAME_PATTERN,
+    "This is not a valid HTTP header name.",
+  ).refine(
+    (headerName) => !RESERVED_TARGET_HEADERS.has(headerName.toLowerCase()),
+    "The platform sets this header itself.",
+  ),
+  headerValue: z.string().min(1).max(8_192).regex(
+    /^[\t\x20-\x7e\x80-\xff]+$/,
+    "A header value cannot contain line breaks or other control characters.",
+  ),
+});
+
+export const createTargetRequestSchema = z.strictObject({
+  name: targetNameSchema,
+  url: targetUrlSchema,
+  description: z.string().max(2_000).optional(),
+  credential: targetCredentialSchema.optional(),
+});
+
+/** Leaving `credential` out keeps the stored one, and `null` removes it. */
+export const updateTargetRequestSchema = z.strictObject({
+  url: targetUrlSchema,
+  description: z.string().max(2_000).optional(),
+  credential: targetCredentialSchema.nullable().optional(),
+});
+
+export const targetSchema = z.object({
+  name: targetNameSchema,
+  url: z.string(),
+  description: z.string(),
+  /** The header that carries the credential, or null when there is none. */
+  credentialHeaderName: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const listTargetsResponseSchema = z.object({ targets: z.array(targetSchema) });
+
+export const executionModeSchema = z.enum(["client", "server"]);
 export const evaluationRunStatusSchema = z.enum(["running", "finished"]);
 export const verdictSchema = z.enum(["passed", "failed", "error"]);
 export const iterationStatusSchema = z.enum([
   "awaiting_report",
+  "executing",
   "evaluating",
   "passed",
   "failed",
   "error",
 ]);
 
-export const createEvaluationRunRequestSchema = z.strictObject({
-  datasetName: datasetNameSchema,
-  executionMode: executionModeSchema,
-  /** How many Iterations each response hands to the script. */
-  batchSize: z.number().int().min(1).max(MAXIMUM_BATCH_SIZE).default(DEFAULT_BATCH_SIZE),
-});
+/** The script runs the Iterations; or, with `server`, the worker calls the named Target. */
+export const createEvaluationRunRequestSchema = z.discriminatedUnion("executionMode", [
+  z.strictObject({
+    datasetName: datasetNameSchema,
+    executionMode: z.literal("client"),
+    /** How many Iterations each response hands to the script. */
+    batchSize: z.number().int().min(1).max(MAXIMUM_BATCH_SIZE).default(DEFAULT_BATCH_SIZE),
+  }),
+  z.strictObject({
+    datasetName: datasetNameSchema,
+    executionMode: z.literal("server"),
+    targetName: targetNameSchema,
+  }),
+]);
 
 export const iterationWorkItemSchema = z.object({
   iterationId: z.string(),
   attempt: z.number().int(),
   testCaseName: z.string(),
   iterationNumber: z.number().int(),
+  scope: testCaseScopeSchema,
+  /** Null in a Session Test Case, whose inputs are in `steps`. */
   input: z.unknown(),
+  /** The messages to send in order, within one Session; null in a trace-scoped Test Case. */
+  steps: z.array(z.object({ input: z.unknown() })).nullable(),
   expectedOutput: z.string().nullable(),
 });
 
@@ -200,15 +330,36 @@ const outputReportSchema = z.strictObject({
   sessionId: reportedIdSchema.optional(),
 });
 
-/** The application could not produce an Output. The IDs are optional: it may have failed early. */
+/** One step of a Session Test Case. Every step of an attempt carries the same `sessionId`. */
+export const reportedStepSchema = z.strictObject({
+  output: z.string().max(MAXIMUM_TEXT_LENGTH),
+  correlationId: reportedIdSchema,
+  sessionId: reportedIdSchema,
+});
+
+/** A Session Test Case's steps, one result for each, in order. */
+const sessionReportSchema = z.strictObject({
+  ...reportTargetFields,
+  steps: z.array(reportedStepSchema).min(1).max(MAXIMUM_SESSION_STEPS),
+});
+
+/**
+ * The application could not produce an Output. The IDs are optional: it may have failed early. In
+ * a Session Test Case, `steps` holds the steps that worked before the failure.
+ */
 const errorReportSchema = z.strictObject({
   ...reportTargetFields,
   error: z.string().min(1).max(MAXIMUM_TEXT_LENGTH),
   correlationId: reportedIdSchema.optional(),
   sessionId: reportedIdSchema.optional(),
+  steps: z.array(reportedStepSchema).max(MAXIMUM_SESSION_STEPS).optional(),
 });
 
-export const iterationReportSchema = z.union([outputReportSchema, errorReportSchema]);
+export const iterationReportSchema = z.union([
+  outputReportSchema,
+  sessionReportSchema,
+  errorReportSchema,
+]);
 
 export const reportIterationsRequestSchema = z.strictObject({
   reports: z.array(iterationReportSchema).min(1).max(MAXIMUM_BATCH_SIZE),
@@ -219,6 +370,8 @@ export const reportRejectionCodeSchema = z.enum([
   "stale_attempt",
   "conflicting_report",
   "run_ended",
+  "invalid_report",
+  "server_driven_run",
 ]);
 
 export const rejectedReportSchema = z.object({
@@ -257,13 +410,25 @@ export const evaluatorResultSchema = z.object({
   matchedSpans: z.array(matchedSpanSummarySchema).optional(),
 });
 
+/** One step of a Transcript: what was sent and what the application answered. */
+export const transcriptStepSchema = z.object({
+  stepNumber: z.number().int(),
+  input: z.unknown(),
+  output: z.string(),
+  correlationId: z.string(),
+  sessionId: z.string(),
+});
+
 export const iterationAttemptSchema = z.object({
   attempt: z.number().int(),
   outcome: verdictSchema.nullable(),
+  /** In a Session Test Case, the last step's Output. */
   output: z.string().nullable(),
   error: z.string().nullable(),
   correlationId: z.string().nullable(),
   sessionId: z.string().nullable(),
+  /** The steps that ran, in a Session Test Case; null in a trace-scoped one. */
+  transcript: z.array(transcriptStepSchema).nullable(),
   evaluatorResults: z.array(evaluatorResultSchema),
   reportedAt: z.string(),
   evaluatedAt: z.string().nullable(),
@@ -292,7 +457,10 @@ export const resultPageQuerySchema = z.object({
 export const testCaseResultSchema = z.object({
   name: z.string(),
   outcome: verdictSchema.nullable(),
+  scope: testCaseScopeSchema,
+  /** Null in a Session Test Case, whose inputs are in `steps`. */
   input: z.unknown(),
+  steps: z.array(z.object({ input: z.unknown() })).nullable(),
   expectedOutput: z.string().nullable(),
   evaluators: z.array(evaluatorSchema),
   passThreshold: z.number(),
@@ -314,6 +482,8 @@ export const evaluationRunSummarySchema = z.object({
   id: z.string(),
   datasetName: z.string(),
   executionMode: executionModeSchema,
+  /** The Target that Server-Driven Execution calls; null in Client-Driven Execution. */
+  targetName: z.string().nullable(),
   status: evaluationRunStatusSchema,
   verdict: verdictSchema.nullable(),
   totalIterations: z.number().int(),
@@ -363,3 +533,11 @@ export type EvaluationRunSummary = z.infer<typeof evaluationRunSummarySchema>;
 export type ListTestCaseResultsResponse = z.infer<typeof listTestCaseResultsResponseSchema>;
 export type ListIterationResultsResponse = z.infer<typeof listIterationResultsResponseSchema>;
 export type ListEvaluationRunsResponse = z.infer<typeof listEvaluationRunsResponseSchema>;
+export type TestCaseScope = z.infer<typeof testCaseScopeSchema>;
+export type ReportedStep = z.infer<typeof reportedStepSchema>;
+export type TranscriptStep = z.infer<typeof transcriptStepSchema>;
+export type TargetCredential = z.infer<typeof targetCredentialSchema>;
+export type CreateTargetRequest = z.infer<typeof createTargetRequestSchema>;
+export type UpdateTargetRequest = z.infer<typeof updateTargetRequestSchema>;
+export type Target = z.infer<typeof targetSchema>;
+export type ListTargetsResponse = z.infer<typeof listTargetsResponseSchema>;

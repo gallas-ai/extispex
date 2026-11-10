@@ -38,9 +38,9 @@ async function readGateResult(
   attempt: AttemptToEvaluate,
 ): Promise<TelemetryGateResult> {
   const { evaluationRunRepository, telemetryClient, timing, readCurrentTime } = dependencies;
-  const { projectId, correlationId, sessionId } = attempt;
+  const { projectId, correlationIds, sessionId } = attempt;
   const conflict = await evaluationRunRepository.findTelemetryIdConflict(job, {
-    correlationId,
+    correlationIds,
     sessionId,
   });
   if (conflict !== null) {
@@ -50,34 +50,49 @@ async function readGateResult(
         `Iteration ${conflict.iterationNumber}, attempt ${conflict.attemptNumber} of this run.`,
     };
   }
-  const correlation = await telemetryClient.readCorrelation(projectId, correlationId);
-  const earlierCorrelation = findEarlierTelemetry(
-    attempt,
-    "Correlation ID",
-    correlation.firstReceivedAt,
-  );
-  if (earlierCorrelation !== null) return { status: "error", reason: earlierCorrelation };
+  const correlations = [];
+  for (const correlationId of correlationIds) {
+    const correlation = await telemetryClient.readCorrelation(projectId, correlationId);
+    const earlierCorrelation = findEarlierTelemetry(
+      attempt,
+      "Correlation ID",
+      correlation.firstReceivedAt,
+    );
+    if (earlierCorrelation !== null) return { status: "error", reason: earlierCorrelation };
+    correlations.push(correlation);
+  }
   if (sessionId !== null) {
     const session = await telemetryClient.readSession(projectId, sessionId);
     const earlierSession = findEarlierTelemetry(attempt, "session.id", session.firstReceivedAt);
     if (earlierSession !== null) return { status: "error", reason: earlierSession };
   }
-  const completion = decideTraceCompletion(
-    correlation,
-    readCurrentTime().getTime() - attempt.reportedAt.getTime(),
-    timing,
+  // A Session needs no idle timer: its last step marks its end, so each step's traces are awaited.
+  const millisecondsSinceOutput = readCurrentTime().getTime() - attempt.reportedAt.getTime();
+  const completions = correlations.map((correlation) =>
+    decideTraceCompletion(correlation, millisecondsSinceOutput, timing)
   );
-  if (completion.status === "waiting") return completion;
-  if (completion.status === "timed_out") return { status: "error", reason: completion.reason };
-  const { spans, readAt, isTruncated } = await telemetryClient.listSpans(projectId, correlationId);
+  for (const completion of completions) {
+    if (completion.status === "timed_out") return { status: "error", reason: completion.reason };
+  }
+  if (completions.some((completion) => completion.status === "waiting")) {
+    return { status: "waiting" };
+  }
+  const isSessionScoped = attempt.definition.scope === "session";
+  const { spans, readAt, isTruncated } = isSessionScoped
+    ? await telemetryClient.listSessionSpans(projectId, sessionId as string)
+    : await telemetryClient.listSpans(projectId, correlationIds[0]);
   if (isTruncated) {
     return {
       status: "error",
-      reason: `This Correlation ID has more than ${spans.length} spans, too many to judge.`,
+      reason: `This ${
+        isSessionScoped ? "Session" : "Correlation ID"
+      } has more than ${spans.length} spans, too many to judge.`,
     };
   }
   // Marked first: if Telemetry cannot record it, the attempt waits and tries again.
-  await telemetryClient.markEvaluated(projectId, correlationId, readAt);
+  for (const correlationId of correlationIds) {
+    await telemetryClient.markEvaluated(projectId, correlationId, readAt);
+  }
   return { status: "ready", spans };
 }
 
