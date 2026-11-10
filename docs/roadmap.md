@@ -18,7 +18,7 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 7    | [LLM providers, Grading Evaluator and LLM Summary](#7-llm-providers-grading-evaluator-and-llm-summary) |        |
 | 8    | [Reports](#8-reports)                                                                                  |        |
 | 9    | [OIDC sign-in](#9-oidc-sign-in)                                                                        | Done   |
-| 10   | [SCIM and file import](#10-scim-and-file-import)                                                       |        |
+| 10   | [SCIM and file import](#10-scim-and-file-import)                                                       | Done   |
 | 11   | [Logs](#11-logs)                                                                                       | Done   |
 | 12   | [Metrics](#12-metrics)                                                                                 |        |
 | 13   | [Retention and Project deletion](#13-retention-and-project-deletion)                                   |        |
@@ -413,6 +413,8 @@ data disappears from every service.
 - Each service periodically asks Identity for deleted Projects and removes their data.
 - UI: retention setting, deletion progress per service.
 - The UI shows that a trace is no longer available when a result refers to expired telemetry.
+- Left over from step 10: deleting a deactivated user's personal data for good. SCIM `DELETE` only
+  deactivates, see [ADR 0014](adr/0014-directory-users-linked-to-oidc-by-email-once.md).
 - Left over from step 11: dropping expired `logs_<yyyymmdd>` partitions on PostgreSQL, see
   [ADR 0012](adr/0012-daily-log-partitions-on-the-record-time.md), deleting old log records on
   SQLite, and removing `rejection_counts` rows older than the 24 hours they are shown for.

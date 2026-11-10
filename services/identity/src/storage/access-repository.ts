@@ -10,9 +10,12 @@ import {
   type InferEntity,
   UniqueConstraintViolationException,
 } from "@mikro-orm/core";
+import { isLastActiveInstanceAdmin, reconcileGroupMemberships } from "./directory-memberships.ts";
 import type { IdentityDatabase } from "./identity-database.ts";
 import {
   CompanyGroupMappingRecord,
+  CompanyGroupMemberRecord,
+  CompanyGroupRecord,
   GroupMemberRecord,
   GroupRecord,
   ProjectRecord,
@@ -88,8 +91,15 @@ export interface AccessRepository {
   addGroupMember(groupId: string, userId: string, addedAt: Date): Promise<AddGroupMemberResult>;
   /** Null for an unknown Group; removing a user who is not a member changes nothing. */
   removeGroupMember(groupId: string, userId: string): Promise<Group | null>;
-  /** Replaces the Group's Company groups. Null for an unknown Group. */
-  setCompanyGroups(groupId: string, companyGroupNames: string[]): Promise<Group | null>;
+  /**
+   * Replaces the Group's Company groups, and moves people whom the directory lists in the ones
+   * added or removed in or out of the Group at once. Null for an unknown Group.
+   */
+  setCompanyGroups(
+    groupId: string,
+    companyGroupNames: string[],
+    now: Date,
+  ): Promise<Group | null>;
 
   /** By Group name. */
   listRoleAssignments(projectId: string): Promise<RoleAssignment[]>;
@@ -208,13 +218,11 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
           (changes.deactivatedAt === undefined
             ? userRow.deactivatedAt === null
             : changes.deactivatedAt === null);
-        if (isActiveAdminNow && !isActiveAdminAfter) {
-          const otherActiveAdminCount = await entityManager.count(UserRecord, {
-            id: { $ne: userId },
-            isInstanceAdmin: true,
-            deactivatedAt: null,
-          });
-          if (otherActiveAdminCount === 0) return { status: "last_instance_admin" } as const;
+        if (
+          isActiveAdminNow && !isActiveAdminAfter &&
+          await isLastActiveInstanceAdmin(entityManager, userRow)
+        ) {
+          return { status: "last_instance_admin" } as const;
         }
         const changedFields: Partial<UserRow> = {};
         if (changes.displayName !== undefined) changedFields.displayName = changes.displayName;
@@ -288,13 +296,21 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
       return await findGroupWith(entityManager, groupId);
     },
 
-    async setCompanyGroups(groupId, companyGroupNames) {
+    async setCompanyGroups(groupId, companyGroupNames, now) {
       return await database.orm.em.fork().transactional(async (entityManager) => {
         if (await entityManager.count(GroupRecord, { id: groupId }) === 0) return null;
+        const oldMappingRows = await entityManager.find(CompanyGroupMappingRecord, { groupId });
+        const oldNames = new Set(oldMappingRows.map((mappingRow) => mappingRow.companyGroupName));
+        const newNames = new Set(companyGroupNames);
         await entityManager.nativeDelete(CompanyGroupMappingRecord, { groupId });
-        for (const companyGroupName of new Set(companyGroupNames)) {
+        for (const companyGroupName of newNames) {
           await entityManager.insert(CompanyGroupMappingRecord, { companyGroupName, groupId });
         }
+        const changedNames = [
+          ...[...oldNames].filter((name) => !newNames.has(name)),
+          ...[...newNames].filter((name) => !oldNames.has(name)),
+        ];
+        await reconcileMembersOfCompanyGroups(entityManager, groupId, changedNames, now);
         return await findGroupWith(entityManager, groupId);
       });
     },
@@ -386,12 +402,42 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
   };
 }
 
+/** Applies a changed mapping to the people the directory lists in the Company groups. */
+async function reconcileMembersOfCompanyGroups(
+  entityManager: EntityManager,
+  groupId: string,
+  companyGroupNames: string[],
+  now: Date,
+): Promise<void> {
+  if (companyGroupNames.length === 0) return;
+  const companyGroupRows = await entityManager.find(CompanyGroupRecord, {
+    $or: [
+      { displayName: { $in: companyGroupNames } },
+      { externalId: { $in: companyGroupNames } },
+    ],
+  });
+  if (companyGroupRows.length === 0) return;
+  const memberRows = await entityManager.find(CompanyGroupMemberRecord, {
+    companyGroupId: { $in: companyGroupRows.map((companyGroupRow) => companyGroupRow.id) },
+  });
+  await reconcileGroupMemberships(
+    entityManager,
+    [...new Set(memberRows.map((memberRow) => memberRow.userId))],
+    [groupId],
+    now,
+  );
+}
+
 function createUserRow(newUser: NewUser, createdAt: Date): UserRow {
   return {
     id: generateTimeOrderedId(createdAt),
     ...newUser,
     oidcIssuer: null,
     oidcSubject: null,
+    directorySource: null,
+    directoryUserName: null,
+    directoryExternalId: null,
+    directoryRemovedAt: null,
     createdAt,
     deactivatedAt: null,
   };
@@ -404,6 +450,7 @@ export function toUser(userRow: UserRow): User {
     displayName: userRow.displayName,
     isInstanceAdmin: Boolean(userRow.isInstanceAdmin),
     isLocalAccount: userRow.passwordHash !== null,
+    directorySource: (userRow.directorySource ?? null) as User["directorySource"],
     createdAt: userRow.createdAt.toISOString(),
     deactivatedAt: userRow.deactivatedAt ? userRow.deactivatedAt.toISOString() : null,
   };

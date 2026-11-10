@@ -40,6 +40,17 @@
       "emailVerified": true,
       "credentials": [{ "type": "password", "value": "ada-e2e-password" }],
       "groups": ["/e2e-engineering", "/e2e-unmapped"]
+    },
+    {
+      "id": "0b7e4c1d-2f3a-4e5b-8c6d-7e8f9a0b1c02",
+      "username": "grace",
+      "email": "grace@e2e.extispex.test",
+      "firstName": "Grace",
+      "lastName": "Hopper",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "grace-e2e-password" }],
+      "groups": []
     }
   ]
 }

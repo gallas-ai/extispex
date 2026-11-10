@@ -1,7 +1,10 @@
 import type {
   AccessibleProject,
   CreatedApiKey,
+  CreatedDirectoryToken,
   CreateUserRequest,
+  DirectoryImportSummary,
+  DirectoryStatus,
   Group,
   ListApiKeysResponse,
   ListGroupsResponse,
@@ -170,5 +173,34 @@ export function removeGroupMember(
 ): Promise<Group> {
   return requestJson(credentials, `${groupPath(groupId)}/members/${encodeURIComponent(userId)}`, {
     method: "DELETE",
+  });
+}
+
+export function getDirectoryStatus(credentials: ApiCredentials): Promise<DirectoryStatus> {
+  return requestJson(credentials, "/v1/directory");
+}
+
+export function createDirectoryToken(
+  credentials: ApiCredentials,
+  name: string,
+): Promise<CreatedDirectoryToken> {
+  return requestJson(credentials, "/v1/directory/tokens", { method: "POST", body: { name } });
+}
+
+export function revokeDirectoryToken(credentials: ApiCredentials, tokenId: string): Promise<null> {
+  return requestJson(credentials, `/v1/directory/tokens/${encodeURIComponent(tokenId)}`, {
+    method: "DELETE",
+  });
+}
+
+/** Sends a CSV or JSON file as it is; the API reports problems by row. */
+export function importDirectoryFile(
+  credentials: ApiCredentials,
+  text: string,
+  contentType: "text/csv" | "application/json",
+): Promise<DirectoryImportSummary> {
+  return requestJson(credentials, "/v1/directory/imports", {
+    method: "POST",
+    textBody: { text, contentType },
   });
 }

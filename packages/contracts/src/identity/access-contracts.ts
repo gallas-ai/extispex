@@ -45,6 +45,8 @@ export const userSchema = z.object({
   isInstanceAdmin: z.boolean(),
   /** Whether the user signs in with a password stored by Identity. */
   isLocalAccount: z.boolean(),
+  /** How the company's directory reached this user: `scim`, `import`, or null for neither. */
+  directorySource: z.enum(["scim", "import"]).nullable(),
   createdAt: z.string(),
   /** When the user lost access, or null while they have it. */
   deactivatedAt: z.string().nullable(),
@@ -81,7 +83,7 @@ export const groupSchema = z.object({
   createdAt: z.string(),
   /** By email. */
   members: z.array(groupMemberSchema),
-  /** The Company groups whose members join this Group when they sign in, by name. */
+  /** The Company groups whose members join this Group, by name. */
   companyGroups: z.array(z.string()),
 });
 

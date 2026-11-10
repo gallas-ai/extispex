@@ -3,7 +3,12 @@ import type { ErrorResponse } from "@extispex/contracts";
 /** A failed request to the REST API, with the message the API gave. */
 export class ApiError extends Error {
   override name = "ApiError";
-  constructor(message: string, readonly statusCode: number) {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+    /** The whole error body, for responses that say more than a message. */
+    readonly responseBody: unknown = null,
+  ) {
     super(message);
   }
 }
@@ -26,7 +31,10 @@ export interface ApiCredentials {
 
 interface ApiRequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** Sent as JSON. */
   body?: unknown;
+  /** Sent as it is, such as the text of an uploaded file. */
+  textBody?: { text: string; contentType: string };
 }
 
 /**
@@ -49,14 +57,15 @@ export async function requestJson<ResponseBody>(
 function sendRequest(
   accessToken: string,
   path: string,
-  { method = "GET", body }: ApiRequestOptions,
+  { method = "GET", body, textBody }: ApiRequestOptions,
 ): Promise<Response> {
   const headers = new Headers({ authorization: `Bearer ${accessToken}` });
   if (body !== undefined) headers.set("content-type", "application/json");
+  if (textBody !== undefined) headers.set("content-type", textBody.contentType);
   return fetch(path, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: textBody?.text ?? (body === undefined ? undefined : JSON.stringify(body)),
   });
 }
 
@@ -67,6 +76,7 @@ export async function readJsonResponse<ResponseBody>(response: Response): Promis
     throw new ApiError(
       errorBody?.error.message ?? `The request failed with status ${response.status}.`,
       response.status,
+      errorBody,
     );
   }
   if (response.status === 204) return null as ResponseBody;

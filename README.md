@@ -14,8 +14,8 @@ their Groups, and applications send its API keys.
 > and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
 
 **Status:** early development. The trace and log pipelines, versioned prompts, Projects with API
-keys, users with Groups and Roles, and Datasets judged by Regex Evaluators work end to end. Metrics,
-the other Evaluators and directory sync (SCIM) are designed in
+keys, users with Groups and Roles synced from the company's directory, and Datasets judged by Regex
+Evaluators work end to end. Metrics and the other Evaluators are designed in
 [docs/architecture.md](docs/architecture.md) but not built yet.
 
 ## Try it locally
@@ -88,6 +88,22 @@ A user appears on their first sign-in. An Instance admin maps Company groups to 
 **Access**, and each sign-in then follows them. Give the first start `LOCAL_ACCOUNTS=enabled` with
 `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`, because nobody else can make that mapping
 yet; use an address that nobody has at the provider.
+
+To keep people and their Company groups in sync between sign-ins, point the directory's SCIM 2.0
+provisioning, such as Microsoft Entra ID's or Okta's, at `https://<your Instance>/scim/v2` with a
+directory token that an Instance admin creates under **Access**. A company without SCIM imports a
+CSV or JSON file there instead:
+
+```csv
+email,displayName,companyGroups,active
+grace@acme.example,Grace Hopper,team-engineering|all-staff,true
+alan@acme.example,Alan Turing,all-staff,false
+```
+
+The directory and files never give Roles: an Instance admin maps Company groups to Groups, and
+Projects give Groups their Roles. A user who is deactivated or removed from the directory loses
+access within five minutes, and their record stays. Someone the directory knows before their first
+OIDC sign-in becomes the same user when they sign in with the same email.
 
 Behind a reverse proxy, set `GATEWAY_TRUSTED_PROXY_COUNT` on the Gateway to the number of proxies,
 so that the limit on wrong passwords per address sees browsers and not the proxy.

@@ -1,6 +1,7 @@
 import type { User } from "@extispex/contracts";
 import { type EntityManager, UniqueConstraintViolationException } from "@mikro-orm/core";
 import { toUser } from "./access-repository.ts";
+import { findCompanyGroupsOfUser, listCompanyGroupNames } from "./directory-memberships.ts";
 import type { IdentityDatabase } from "./identity-database.ts";
 import {
   CompanyGroupMappingRecord,
@@ -40,11 +41,16 @@ export interface OidcRepository {
   consumeAttempt(stateHash: string): Promise<OidcSignInAttempt | null>;
   /**
    * Finds or creates the user by issuer and subject, updates their email and name, and makes
-   * their Group memberships from Company groups match `companyGroups`. Never matches a user by
-   * email: whoever controls an address at the identity provider would take over that account.
+   * their Group memberships from Company groups match `companyGroups` and what the directory says.
+   * The only match by email is the first sign-in of someone the directory or an import created,
+   * who has no issuer and subject yet; a local account is never matched, because whoever controls
+   * an address at the identity provider would take over that account.
    */
   signInUser(identity: OidcUserIdentity, now: Date): Promise<OidcUserSignIn>;
 }
+
+/** Two sign-ins of one person linked their user at once; the loser starts over. */
+class UserLinkedConcurrently extends Error {}
 
 export function createOidcRepository(database: IdentityDatabase): OidcRepository {
   const signInUserOnce = (identity: OidcUserIdentity, now: Date) =>
@@ -52,7 +58,7 @@ export function createOidcRepository(database: IdentityDatabase): OidcRepository
       const existingRow = await entityManager.findOne(UserRecord, {
         oidcIssuer: identity.issuer,
         oidcSubject: identity.subject,
-      });
+      }) ?? await linkProvisionedUser(entityManager, identity);
       if (existingRow?.deactivatedAt) return { status: "deactivated" };
       const isEmailUsedByAnother = await entityManager.count(UserRecord, {
         email: identity.email,
@@ -69,6 +75,10 @@ export function createOidcRepository(database: IdentityDatabase): OidcRepository
           passwordHash: null,
           oidcIssuer: identity.issuer,
           oidcSubject: identity.subject,
+          directorySource: null,
+          directoryUserName: null,
+          directoryExternalId: null,
+          directoryRemovedAt: null,
           isInstanceAdmin: false,
           createdAt: now,
           deactivatedAt: null,
@@ -107,8 +117,10 @@ export function createOidcRepository(database: IdentityDatabase): OidcRepository
       try {
         return await signInUserOnce(identity, now);
       } catch (error) {
-        if (!(error instanceof UniqueConstraintViolationException)) throw error;
-        // The same user's other tab, or another replica, created the row first.
+        const isConcurrentSignIn = error instanceof UniqueConstraintViolationException ||
+          error instanceof UserLinkedConcurrently;
+        if (!isConcurrentSignIn) throw error;
+        // The same user's other tab, or another replica, created or linked the row first.
         return await signInUserOnce(identity, now);
       }
     },
@@ -116,9 +128,33 @@ export function createOidcRepository(database: IdentityDatabase): OidcRepository
 }
 
 /**
+ * Links the first sign-in to the user the directory or an import created with this email. Only such
+ * a user qualifies: one with a password is a local account, and one with an issuer and subject is
+ * already someone else at the identity provider. Null when there is none.
+ */
+async function linkProvisionedUser(entityManager: EntityManager, identity: OidcUserIdentity) {
+  const provisionedRow = await entityManager.findOne(UserRecord, {
+    email: identity.email,
+    passwordHash: null,
+    oidcIssuer: null,
+    directorySource: { $ne: null },
+  });
+  if (provisionedRow === null || provisionedRow.deactivatedAt) return provisionedRow;
+  const linkedCount = await entityManager.nativeUpdate(
+    UserRecord,
+    { id: provisionedRow.id, oidcIssuer: null },
+    { oidcIssuer: identity.issuer, oidcSubject: identity.subject },
+  );
+  if (linkedCount === 0) throw new UserLinkedConcurrently();
+  return { ...provisionedRow, oidcIssuer: identity.issuer, oidcSubject: identity.subject };
+}
+
+/**
  * Adds the user to the Groups mapped to their Company groups and removes them from Groups they
- * joined that way but no longer qualify for. A membership added by hand is left alone, as in
- * Grafana's Team Sync, and is not turned into one from a Company group.
+ * joined that way but no longer qualify for. A Company group counts when the ID token or the
+ * directory lists the user in it, so that a token without groups does not undo what SCIM did. A
+ * membership added by hand is left alone, as in Grafana's Team Sync, and is not turned into one
+ * from a Company group.
  */
 async function synchronizeMemberships(
   entityManager: EntityManager,
@@ -126,9 +162,13 @@ async function synchronizeMemberships(
   companyGroups: string[],
   now: Date,
 ): Promise<void> {
-  const mappingRows = companyGroups.length === 0 ? [] : await entityManager.find(
+  const allCompanyGroupNames = [
+    ...companyGroups,
+    ...(await findCompanyGroupsOfUser(entityManager, userId)).flatMap(listCompanyGroupNames),
+  ];
+  const mappingRows = allCompanyGroupNames.length === 0 ? [] : await entityManager.find(
     CompanyGroupMappingRecord,
-    { companyGroupName: { $in: companyGroups } },
+    { companyGroupName: { $in: allCompanyGroupNames } },
   );
   const entitledGroupIds = new Set(mappingRows.map((mappingRow) => mappingRow.groupId));
   const membershipRows = await entityManager.find(GroupMemberRecord, { userId });

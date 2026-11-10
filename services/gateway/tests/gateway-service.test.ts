@@ -131,6 +131,37 @@ Deno.test("forwards Project management with the access token to the Identity ser
   assertEquals(receivedRequests[0].headers.get("authorization"), "Bearer access-token");
 });
 
+Deno.test("forwards a directory's SCIM requests to Identity", async () => {
+  const receivedRequests: Request[] = [];
+  const gatewayService = createGatewayService({
+    serviceClients: {
+      telemetry: unexpectedServiceCall(),
+      prompt: unexpectedServiceCall(),
+      identity: recordingServiceClient(receivedRequests),
+      evaluation: unexpectedServiceCall(),
+    },
+    webAssetsDirectory: null,
+    logger,
+  });
+
+  const response = await gatewayService.handleRequest(
+    new Request("http://gateway.test/scim/v2/Users/user-one", {
+      method: "PATCH",
+      headers: {
+        authorization: "Bearer directory-token",
+        "content-type": "application/scim+json",
+      },
+      body: JSON.stringify({ Operations: [{ op: "replace", path: "active", value: false }] }),
+    }),
+  );
+  await response.body?.cancel();
+
+  assertEquals(response.status, 200);
+  assertEquals(new URL(receivedRequests[0].url).pathname, "/scim/v2/Users/user-one");
+  assertEquals(receivedRequests[0].headers.get("authorization"), "Bearer directory-token");
+  assertEquals(receivedRequests[0].headers.get("content-type"), "application/scim+json");
+});
+
 Deno.test("passes the sign-in cookie between the browser and Identity", async () => {
   const receivedRequests: Request[] = [];
   const gatewayService = createGatewayService({
@@ -254,6 +285,9 @@ Deno.test("publishes one OpenAPI document for every service", async () => {
       "/v1/sign-in/access-tokens",
       "/v1/users/{userId}",
       "/v1/groups/{groupId}/members/{userId}",
+      "/v1/directory/imports",
+      "/scim/v2/Users",
+      "/scim/v2/Groups/{resourceId}",
     ]
   ) {
     assert(documentedPaths.includes(expectedPath), `${expectedPath} is not documented.`);
@@ -267,6 +301,7 @@ Deno.test("publishes one OpenAPI document for every service", async () => {
     "apiKey",
     "accessToken",
     "serviceClient",
+    "directoryToken",
   ]);
   assertEquals(openApiDocument.paths["/v1/projects"].post.security, [{ accessToken: [] }]);
   assertEquals(openApiDocument.paths["/v1/prompts"].get.security, [

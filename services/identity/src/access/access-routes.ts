@@ -191,7 +191,11 @@ export function registerAccessRoutes(
     }
     const { groupId } = context.req.valid("param");
     const { companyGroups } = context.req.valid("json");
-    const group = await accessRepository.setCompanyGroups(groupId, companyGroups);
+    const group = await accessRepository.setCompanyGroups(
+      groupId,
+      companyGroups,
+      dependencies.readCurrentTime(),
+    );
     if (group === null) return context.json(groupNotFoundError(groupId), 404);
     return context.json(group, 200);
   });

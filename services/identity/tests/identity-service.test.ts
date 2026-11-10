@@ -54,6 +54,10 @@ function defineIdentityTest(testName: string, testBody: IdentityTestBody): void 
 }
 
 const IDENTITY_TABLES = [
+  "company_group_members",
+  "company_groups",
+  "directory_tokens",
+  "directory_imports",
   "company_group_mappings",
   "oidc_sign_in_attempts",
   "sign_in_throttles",

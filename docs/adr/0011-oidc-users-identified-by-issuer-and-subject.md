@@ -44,6 +44,8 @@ take over their account, and now refuses it by default (`oauth_allow_insecure_em
 - Group membership changes reach Extispex at the next sign-in, so someone removed from a Company
   group keeps their access until their sign-in ends, up to 12 hours without use. SCIM in step 10 is
   what closes that gap.
+- Step 10 adds one exception for users that the directory created before they first sign in, see
+  [ADR 0014](0014-directory-users-linked-to-oidc-by-email-once.md).
 - A local account cannot be turned into an OIDC user. It needs a user with a different email.
 - An Instance without local accounts has nobody who can map Company groups. Set
   `LOCAL_ACCOUNTS=enabled` with `BOOTSTRAP_ADMIN_EMAIL` for the first start, make an OIDC user an
