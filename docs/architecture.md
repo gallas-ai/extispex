@@ -156,6 +156,41 @@ the table layout.
   signal and hour. `GET /v1/rejected-telemetry` returns the last 24 hours, and the Traces and Logs
   pages show it. A count that cannot be written is logged and does not fail the export.
 
+### Metrics
+
+Built in roadmap step 12. See
+[ADR 0015](adr/0015-metric-time-series-stored-once-and-cumulative-values-at-query-time.md) for the
+storage and the query.
+
+- **Accepted:** sums, gauges and explicit-bucket histograms, cumulative or delta. Exponential
+  histograms and summaries are rejected through `partial_success` and counted like rejected spans,
+  as are points with an unspecified temporality, no time, a value that is not finite, a name longer
+  than 255 characters or a time outside the same 30-day window as Log Records. A point flagged as
+  having no recorded value is skipped.
+- **Time Series:** a Time Series is stored once in `metric_series`, keyed by a SHA-256 of the
+  Metric's name, type, unit, temporality, monotonicity, scope, histogram bounds and both attribute
+  sets with sorted keys. Its points in `metric_points` refer to it, and a retried batch stores
+  nothing twice. On PostgreSQL the points have daily partitions, created as for logs.
+- **Cumulative values** are turned into increases when a query reads them, with `lag()` on both
+  databases: an increase is the difference to the point before, or the whole value after a reset,
+  which shows as a falling value or a new start time. A point looks back at most ten minutes, or one
+  step if that is longer, for the point before it. Without one, it counts only when its own start
+  time lies in that window; otherwise nothing says how much of its value falls into the query's time
+  range. Ingestion keeps no state per Time Series.
+- **Aggregations:** a monotonic sum and a delta sum are added up as increases: `sum` per step, `avg`
+  per point and `rate` per second. A gauge and a cumulative non-monotonic sum are levels: `sum` adds
+  each Time Series' average in the step and `avg` averages all points; `rate` does not apply. A
+  histogram supports `sum` and `avg` of its observations, `rate` of its count and `p95`.
+- **`p95`** is computed in TypeScript from the bucket counts, by linear interpolation inside the
+  bucket that holds the quantile, as Prometheus's `histogram_quantile` does, so both databases give
+  the same answer. Histograms of several Time Series are added bucket by bucket first; with
+  different bounds the counts merge at the union of the bounds and are only as precise as the
+  coarsest. A quantile in the overflow bucket is reported as the largest finite bound.
+- **Steps** are aligned to the clock and chosen from the time range, at least 60 seconds, the OTel
+  SDKs' default export interval. The last step's rate is divided by the part of it inside the range.
+- **Limits:** a query refuses a Metric with more than 20,000 Time Series, more than 2,000 after its
+  filters, more than 1,000 steps or more than 100,000 rows read, and says how to narrow it.
+
 ### Queries
 
 - **Traces:** waterfall and span details, inspired by MLflow.
@@ -163,7 +198,10 @@ the table layout.
   answers newest first with a `nextCursor`. `search` finds whole words in the body, all of them, and
   `attribute=key=value` may be repeated.
 - **Metrics:** metric, filters, `sum`, `avg`, `rate`, `p95` and grouping, inspired by Grafana's
-  query builder.
+  query builder. `GET /v1/metrics` lists the Metrics with the aggregations each supports,
+  `GET /v1/metrics/attributes` a Metric's attribute keys, and `GET /v1/metrics/query` answers one
+  value per step for each group. Filters and grouping read an attribute of the data point, or else
+  of the application that sent it, such as `service.name`.
 - **Retention:** configurable per Project, 30 days by default.
 
 Telemetry storage sits behind its own interface, so another store such as ClickHouse can be added if
@@ -861,6 +899,15 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The Metrics step added these checks on 2026-11-10.
+
+| Tested                                                     | Result                                                                                                                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OTel JS metric exporters over HTTP/protobuf, JSON and gRPC | A counter, a histogram and a gauge read back through the Gateway with the expected sums, `p95` and averages, cumulative and delta                                   |
+| Telemetry metrics on SQLite and PostgreSQL                 | Resets, the lookback, delta and level values, histograms, grouping, filters, rejections and retried batches give the same results                                   |
+| Eight replicas creating one day's metric partition         | All succeed, and a time range reads only the partitions it overlaps                                                                                                 |
+| Metrics page in headless Chromium                          | Choosing a metric, aggregation and grouping, filtering, eight lines at most with stable colours, the dark theme, and nothing scrolls sideways from 360px to 2,040px |
+
 The Server-Driven Execution and Session Test Cases step added these checks on 2026-11-10.
 
 | Tested                                                | Result                                                                                                                                         |
@@ -1013,6 +1060,10 @@ The Prompt service step added these checks on 2026-11-07.
 - Server-Driven Execution in the all-in-one image and Docker Compose, where the worker must reach
   the Target from inside a container; the e2e tests run it only in the all-in-one process and
   separate services
+- Metric ingestion and queries at load: a busy Metric with many Time Series may hit the query limits
+  before the database is the bottleneck, and the limits were chosen, not measured
+- A histogram query's memory: up to 100,000 points with their bucket counts are held at once
+- Metrics from SDKs other than OpenTelemetry JS, and from the OpenTelemetry Collector
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
 - The web UI's colours, spacing and typography, and browsers other than Chromium
@@ -1042,3 +1093,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0012: Daily log partitions on the record's own time](adr/0012-daily-log-partitions-on-the-record-time.md)
 - [ADR 0013: Secrets sealed with keys derived from one master key](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md)
 - [ADR 0014: A user from the directory is linked to their first OIDC sign-in by email, once](adr/0014-directory-users-linked-to-oidc-by-email-once.md)
+- [ADR 0015: Metric Time Series stored once, cumulative values resolved at query time](adr/0015-metric-time-series-stored-once-and-cumulative-values-at-query-time.md)

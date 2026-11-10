@@ -7,10 +7,13 @@ import {
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import type { LogIngestion } from "./log-ingestion.ts";
+import type { MetricIngestion } from "./metric-ingestion.ts";
 import {
   decodeProtobufLogsRequest,
+  decodeProtobufMetricsRequest,
   decodeProtobufTraceRequest,
   encodeProtobufLogsResponse,
+  encodeProtobufMetricsResponse,
   encodeProtobufTraceResponse,
   MAXIMUM_OTLP_PAYLOAD_BYTES,
   OtlpPayloadError,
@@ -20,6 +23,7 @@ import type { TraceIngestion } from "./trace-ingestion.ts";
 export interface OtlpGrpcServerDependencies {
   traceIngestion: TraceIngestion;
   logIngestion: LogIngestion;
+  metricIngestion: MetricIngestion;
   requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
 }
@@ -59,6 +63,13 @@ export function createOtlpGrpcServer(dependencies: OtlpGrpcServerDependencies): 
     decodeRequest: decodeProtobufLogsRequest,
     encodeResponse: encodeProtobufLogsResponse,
     ingest: dependencies.logIngestion.ingestLogs,
+  });
+  addOtlpSignalService(grpcServer, dependencies, {
+    methodPath: "/opentelemetry.proto.collector.metrics.v1.MetricsService/Export",
+    recordsName: "Metric data points",
+    decodeRequest: decodeProtobufMetricsRequest,
+    encodeResponse: encodeProtobufMetricsResponse,
+    ingest: dependencies.metricIngestion.ingestMetrics,
   });
   return grpcServer;
 }

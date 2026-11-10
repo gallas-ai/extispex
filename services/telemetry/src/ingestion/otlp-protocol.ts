@@ -1,6 +1,7 @@
 import protobuf from "protobufjs";
 import otlpDescriptor from "./generated/otlp-descriptor.json" with { type: "json" };
 import type { LogsExportOutcome, OtlpExportLogsRequest } from "./otlp-log-types.ts";
+import type { MetricsExportOutcome, OtlpExportMetricsRequest } from "./otlp-metric-types.ts";
 import type { OtlpExportTraceRequest, TraceExportOutcome } from "./otlp-trace-types.ts";
 
 /**
@@ -27,6 +28,13 @@ const exportLogsResponseType = otlpRoot.lookupType(
   "opentelemetry.proto.collector.logs.v1.ExportLogsServiceResponse",
 );
 
+const exportMetricsRequestType = otlpRoot.lookupType(
+  "opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest",
+);
+const exportMetricsResponseType = otlpRoot.lookupType(
+  "opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceResponse",
+);
+
 function decodeProtobufMessage<DecodedRequest>(
   messageType: protobuf.Type,
   payload: Uint8Array,
@@ -51,12 +59,20 @@ export function decodeProtobufLogsRequest(payload: Uint8Array): OtlpExportLogsRe
   return decodeProtobufMessage(exportLogsRequestType, payload);
 }
 
+export function decodeProtobufMetricsRequest(payload: Uint8Array): OtlpExportMetricsRequest {
+  return decodeProtobufMessage(exportMetricsRequestType, payload);
+}
+
 export function decodeJsonTraceRequest(payloadText: string): OtlpExportTraceRequest {
   return parseJsonRequest(payloadText) as OtlpExportTraceRequest;
 }
 
 export function decodeJsonLogsRequest(payloadText: string): OtlpExportLogsRequest {
   return parseJsonRequest(payloadText) as OtlpExportLogsRequest;
+}
+
+export function decodeJsonMetricsRequest(payloadText: string): OtlpExportMetricsRequest {
+  return parseJsonRequest(payloadText) as OtlpExportMetricsRequest;
 }
 
 function parseJsonRequest(payloadText: string): unknown {
@@ -113,4 +129,27 @@ export function encodeProtobufLogsResponse(outcome: LogsExportOutcome): Uint8Arr
 
 export function createJsonLogsResponse(outcome: LogsExportOutcome): Record<string, unknown> {
   return createLogsResponsePayload(outcome);
+}
+
+function createMetricsResponsePayload(outcome: MetricsExportOutcome): Record<string, unknown> {
+  if (outcome.rejectedDataPointCount === 0) {
+    return {};
+  }
+  return {
+    partialSuccess: {
+      rejectedDataPoints: outcome.rejectedDataPointCount,
+      errorMessage: outcome.errorMessage ?? "",
+    },
+  };
+}
+
+export function encodeProtobufMetricsResponse(outcome: MetricsExportOutcome): Uint8Array {
+  const responseMessage = exportMetricsResponseType.fromObject(
+    createMetricsResponsePayload(outcome),
+  );
+  return exportMetricsResponseType.encode(responseMessage).finish();
+}
+
+export function createJsonMetricsResponse(outcome: MetricsExportOutcome): Record<string, unknown> {
+  return createMetricsResponsePayload(outcome);
 }

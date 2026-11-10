@@ -9,14 +9,19 @@ import {
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import type { LogIngestion } from "./log-ingestion.ts";
+import type { MetricIngestion } from "./metric-ingestion.ts";
 import {
   createJsonLogsResponse,
+  createJsonMetricsResponse,
   createJsonTraceResponse,
   decodeJsonLogsRequest,
+  decodeJsonMetricsRequest,
   decodeJsonTraceRequest,
   decodeProtobufLogsRequest,
+  decodeProtobufMetricsRequest,
   decodeProtobufTraceRequest,
   encodeProtobufLogsResponse,
+  encodeProtobufMetricsResponse,
   encodeProtobufTraceResponse,
   MAXIMUM_OTLP_PAYLOAD_BYTES,
   OtlpPayloadError,
@@ -32,6 +37,7 @@ type ContentEncoding = typeof SUPPORTED_CONTENT_ENCODINGS[number] | "identity";
 export interface OtlpHttpRouteDependencies {
   traceIngestion: TraceIngestion;
   logIngestion: LogIngestion;
+  metricIngestion: MetricIngestion;
   requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
 }
@@ -69,6 +75,15 @@ export function registerOtlpHttpRoutes<Environment extends Env>(
     encodeProtobufResponse: encodeProtobufLogsResponse,
     createJsonResponse: createJsonLogsResponse,
     ingest: dependencies.logIngestion.ingestLogs,
+  });
+  registerOtlpSignalRoute(app, dependencies, {
+    path: "/v1/metrics",
+    recordsName: "Metric data points",
+    decodeProtobufRequest: decodeProtobufMetricsRequest,
+    decodeJsonRequest: decodeJsonMetricsRequest,
+    encodeProtobufResponse: encodeProtobufMetricsResponse,
+    createJsonResponse: createJsonMetricsResponse,
+    ingest: dependencies.metricIngestion.ingestMetrics,
   });
 }
 

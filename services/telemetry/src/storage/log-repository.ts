@@ -1,8 +1,12 @@
 import type { ListLogsQuery, LogRecord } from "@extispex/contracts";
-import { logSeverityFromNumber, MINIMUM_SEVERITY_NUMBERS } from "@extispex/contracts";
+import {
+  logSeverityFromNumber,
+  MINIMUM_SEVERITY_NUMBERS,
+  parseAttributeFilters,
+} from "@extispex/contracts";
 import type { EntityManager } from "@mikro-orm/sql";
 import type { IncomingLogRecord } from "../ingestion/log-normalization.ts";
-import { createLogPartitions } from "./log-partitions.ts";
+import { createDailyPartitions } from "./daily-partitions.ts";
 import {
   formatUnixNanosecondsForStorage,
   parseStoredUnixNanoseconds,
@@ -54,7 +58,7 @@ interface LogFilter {
 }
 
 export function createLogRepository(database: TelemetryDatabase): LogRepository {
-  const logPartitions = createLogPartitions(database);
+  const logPartitions = createDailyPartitions(database, "logs");
   const isPostgres = database.dialect === "postgresql";
 
   return {
@@ -148,7 +152,7 @@ function buildLogFilter(
   if (query.minimumSeverity !== undefined) {
     addCondition("severity_number >= ?", MINIMUM_SEVERITY_NUMBERS[query.minimumSeverity]);
   }
-  for (const attributeFilter of readAttributeFilters(query)) {
+  for (const attributeFilter of parseAttributeFilters(query.attribute)) {
     if (isPostgres) {
       addCondition("attributes ->> ?::text = ?", attributeFilter.key, attributeFilter.value);
     } else {
@@ -184,22 +188,6 @@ function buildLogFilter(
     addCondition("(time_unix_nano, log_id) < (?, ?)", storedCursorTime, cursorLogId);
   }
   return filter;
-}
-
-/** `gen_ai.request.model=gpt-4` as a key and a value; the value may contain `=`. */
-function readAttributeFilters(query: ListLogsQuery): { key: string; value: string }[] {
-  const attributeFilters = query.attribute === undefined
-    ? []
-    : Array.isArray(query.attribute)
-    ? query.attribute
-    : [query.attribute];
-  return attributeFilters.map((attributeFilter) => {
-    const separatorIndex = attributeFilter.indexOf("=");
-    return {
-      key: attributeFilter.slice(0, separatorIndex),
-      value: attributeFilter.slice(separatorIndex + 1),
-    };
-  });
 }
 
 /** Every word as a quoted FTS5 string, so that user input cannot be read as query syntax. */

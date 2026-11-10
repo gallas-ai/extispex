@@ -22,7 +22,7 @@ export const listLogsRoute = createRoute({
 export const getRejectedTelemetryRoute = createRoute({
   method: "get",
   path: "/v1/rejected-telemetry",
-  summary: "Count the spans and log records that ingestion rejected in the last 24 hours.",
+  summary: "Count the spans, log records and metric data points rejected in the last 24 hours.",
   tags: ["Logs", "Traces"],
   security: projectDataSecurity,
   responses: {

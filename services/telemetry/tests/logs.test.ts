@@ -258,7 +258,12 @@ defineLogTest("counts rejected spans and log records per Project", async (servic
     assertEquals(response.status, 200);
     return await response.json() as RejectedTelemetry;
   };
-  assertEquals(await readCounts(), { windowHours: 24, spans: emptyCounts, logs: emptyCounts });
+  assertEquals(await readCounts(), {
+    windowHours: 24,
+    spans: emptyCounts,
+    logs: emptyCounts,
+    metrics: emptyCounts,
+  });
 
   for (let batchNumber = 0; batchNumber < 2; batchNumber++) {
     await postJsonLogs(
@@ -294,6 +299,7 @@ defineLogTest("counts rejected spans and log records per Project", async (servic
     windowHours: 24,
     spans: emptyCounts,
     logs: emptyCounts,
+    metrics: emptyCounts,
   });
 });
 

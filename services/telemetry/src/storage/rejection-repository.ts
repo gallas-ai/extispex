@@ -2,7 +2,7 @@ import type { RejectedTelemetry, RejectedTelemetrySummary } from "@extispex/cont
 import { makeTextStorable } from "../ingestion/stored-text.ts";
 import type { TelemetryDatabase } from "./telemetry-database.ts";
 
-export type TelemetrySignal = "spans" | "logs";
+export type TelemetrySignal = "spans" | "logs" | "metrics";
 
 export interface RecordedRejections {
   projectId: string;
@@ -65,6 +65,7 @@ export function createRejectionRepository(database: TelemetryDatabase): Rejectio
         windowHours,
         spans: summarizeSignal(rows, "spans"),
         logs: summarizeSignal(rows, "logs"),
+        metrics: summarizeSignal(rows, "metrics"),
       };
     },
   };

@@ -2,7 +2,7 @@ import { Migration } from "@mikro-orm/migrations";
 
 /**
  * Log records are partitioned by day on their time, so that retention can drop a whole partition.
- * Ingestion creates each day's partition, see `log-partitions.ts`. The time is the same padded
+ * Ingestion creates each day's partition, see `daily-partitions.ts`. The time is the same padded
  * decimal text as on spans; such text sorts like the number, so range partitions work on it.
  * Only the first 65,536 characters are indexed: PostgreSQL refuses a tsvector above 1 MiB, which
  * would fail the record's whole batch on every retry.

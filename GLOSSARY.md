@@ -21,6 +21,12 @@ body and attributes. _Avoid_: Log line, log entry, event
 **Uncorrelated Log**: A Log Record that belongs to no trace, such as a startup message. It needs no
 Correlation ID. _Avoid_: Orphan log
 
+**Metric**: A named measurement that an application reports over OTLP, such as token usage or
+request duration. It is a sum, a gauge or a histogram. _Avoid_: KPI, stat
+
+**Time Series**: The values of one Metric with one combination of attributes from one application,
+in time order. A Metric has as many Time Series as it has such combinations. _Avoid_: Stream, line
+
 ### Evaluation
 
 **Dataset**: A named collection of Test Cases. _Avoid_: Test suite

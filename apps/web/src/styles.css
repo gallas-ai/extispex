@@ -40,6 +40,16 @@
   --color-model-soft: #f3edff;
   --color-tool: #b45309;
   --color-tool-soft: #fdf3e4;
+  /* Chart series, assigned in this order and never cycled. Validated with the dataviz palette
+     checks on this surface; three light steps are below 3:1, so every chart has a table view. */
+  --chart-series-1: #2a78d6;
+  --chart-series-2: #eb6834;
+  --chart-series-3: #1baf7a;
+  --chart-series-4: #eda100;
+  --chart-series-5: #e87ba4;
+  --chart-series-6: #008300;
+  --chart-series-7: #6250d6;
+  --chart-series-8: #e34948;
 
   --shadow-small: 0 1px 2px rgb(16 16 24 / 0.05);
   --shadow-medium: 0 1px 2px rgb(16 16 24 / 0.04), 0 4px 16px rgb(16 16 24 / 0.06);
@@ -60,6 +70,14 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --color-canvas: #0c0c0f;
+    --chart-series-1: #3987e5;
+    --chart-series-2: #d95926;
+    --chart-series-3: #199e70;
+    --chart-series-4: #c98500;
+    --chart-series-5: #d55181;
+    --chart-series-6: #008300;
+    --chart-series-7: #9085e9;
+    --chart-series-8: #e66767;
     --color-surface: #141418;
     --color-surface-sunken: #101013;
     --color-surface-hover: #1b1b21;
@@ -102,6 +120,14 @@
 
 :root[data-theme="dark"] {
   --color-canvas: #0c0c0f;
+  --chart-series-1: #3987e5;
+  --chart-series-2: #d95926;
+  --chart-series-3: #199e70;
+  --chart-series-4: #c98500;
+  --chart-series-5: #d55181;
+  --chart-series-6: #008300;
+  --chart-series-7: #9085e9;
+  --chart-series-8: #e66767;
   --color-surface: #141418;
   --color-surface-sunken: #101013;
   --color-surface-hover: #1b1b21;
@@ -3072,10 +3098,11 @@ textarea {
 
 /* On narrow screens the top bar keeps only icons; the names stay available to screen readers. */
 /*
- * Below this width the section names no longer fit beside the Project switcher. It leaves room for
- * Linux fonts, which are wider than macOS ones: CI caught 8 names overlapping that fitted locally.
+ * Below this width the nine section names no longer fit beside the Project switcher. It leaves about
+ * 150px for Linux fonts, which are wider than macOS ones: CI caught names overlapping that fitted
+ * locally.
  */
-@media (max-width: 1240px) {
+@media (max-width: 1360px) {
   .top-bar-start {
     gap: 12px;
   }
@@ -3103,9 +3130,9 @@ textarea {
 }
 
 /*
- * On a phone the sections sit behind a menu button, so that any number of them fits beside the
- * Project switcher. The opened menu lists them with their names. Wider screens show them in the
- * bar, where the wrapper takes no part in the layout.
+ * On a phone or an upright tablet the sections sit behind a menu button, so that any number of them
+ * fits beside the Project switcher. The opened menu lists them with their names. Wider screens show
+ * them in the bar, where the wrapper takes no part in the layout.
  */
 .navigation-menu {
   display: contents;
@@ -3115,7 +3142,7 @@ textarea {
   display: none;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 800px) {
   .navigation-menu {
     position: relative;
     display: block;
@@ -4283,4 +4310,109 @@ textarea {
 .transcript-label {
   color: var(--color-text-muted);
   font-weight: 600;
+}
+
+/* Metrics */
+
+.metric-query-builder {
+  align-items: flex-end;
+}
+
+.metric-builder-field {
+  display: flex;
+  flex: 0 1 180px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.metric-builder-metric {
+  flex-basis: 280px;
+}
+
+.metric-builder-label {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.metric-builder-field .select-input {
+  width: 100%;
+  height: 34px;
+}
+
+.metric-query-builder .filter-field {
+  flex-basis: 220px;
+}
+
+.metric-result-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 14px 16px 4px;
+}
+
+.metric-result-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.metric-result-meta {
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-chart-note {
+  margin: 0;
+  padding: 0 16px;
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+}
+
+.metric-chart {
+  height: 320px;
+  margin: 8px 16px 16px;
+  min-width: 0;
+  /* The chart redraws for a new width only after a resize event, and must not widen the page. */
+  overflow: hidden;
+}
+
+.metric-series-table .metric-series-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.metric-series-swatch {
+  flex: none;
+  width: 12px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border-strong);
+}
+
+.metric-series-name {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .metric-builder-field,
+  .metric-builder-metric,
+  .metric-query-builder .filter-field {
+    flex: 1 1 100%;
+  }
+
+  .metric-chart {
+    height: 260px;
+    margin-inline: 8px;
+  }
+
+  .metric-series-table .metric-secondary-column {
+    display: none;
+  }
 }

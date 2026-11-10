@@ -18,6 +18,8 @@ const protoFilesInDependencyOrder = [
   "collector/trace/v1/trace_service.proto",
   "logs/v1/logs.proto",
   "collector/logs/v1/logs_service.proto",
+  "metrics/v1/metrics.proto",
+  "collector/metrics/v1/metrics_service.proto",
 ];
 
 const otlpRoot = new protobuf.Root();

@@ -32,6 +32,9 @@
     "npm:@opentelemetry/exporter-logs-otlp-grpc@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/exporter-logs-otlp-http@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/exporter-logs-otlp-proto@0.300": "0.300.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/exporter-metrics-otlp-grpc@0.300": "0.300.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/exporter-metrics-otlp-http@0.300": "0.300.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/exporter-metrics-otlp-proto@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/exporter-trace-otlp-grpc@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/exporter-trace-otlp-http@0.300": "0.300.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/exporter-trace-otlp-proto@0.300": "0.300.0_@opentelemetry+api@1.10.0",
@@ -39,11 +42,13 @@
     "npm:@opentelemetry/resources@3": "3.0.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/sdk-logs@3": "3.0.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/sdk-logs@3.0.0": "3.0.0_@opentelemetry+api@1.10.0",
+    "npm:@opentelemetry/sdk-metrics@3": "3.0.0_@opentelemetry+api@1.10.0",
     "npm:@opentelemetry/sdk-trace@3": "3.0.0_@opentelemetry+api@1.10.0",
     "npm:@types/react-dom@19": "19.3.0_@types+react@19.3.0",
     "npm:@types/react@19": "19.3.0",
     "npm:@vitejs/plugin-react@5": "5.2.0_vite@7.3.7",
     "npm:diff@9.0.0": "9.0.0",
+    "npm:echarts@6.1.0": "6.1.0",
     "npm:hono@^4.10.0": "4.13.16",
     "npm:jose@6.2.15": "6.2.15",
     "npm:openid-client@6.8.9": "6.8.9",
@@ -550,6 +555,34 @@
         "@opentelemetry/sdk-logs"
       ]
     },
+    "@opentelemetry/exporter-metrics-otlp-grpc@0.300.0_@opentelemetry+api@1.10.0": {
+      "integrity": "sha512-Kbfh2eVuj19WxByTI+UOhzjsyhNnl4lovjl9DYr0QsEpAPDyzWxGQmBDaTgIq1Tv3/Zc9ZDczAa//T2bjzac3w==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/exporter-metrics-otlp-http",
+        "@opentelemetry/otlp-grpc-exporter-base",
+        "@opentelemetry/otlp-transformer"
+      ]
+    },
+    "@opentelemetry/exporter-metrics-otlp-http@0.300.0_@opentelemetry+api@1.10.0": {
+      "integrity": "sha512-y8KYKyM69l9PG4Ax9DKlKH5jaVJCJo9hXOpT6v0/PDX+uC302AhHVitEz8M600ljqLGdPYodnyn+wbYIYXPh6g==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/core",
+        "@opentelemetry/otlp-exporter-base",
+        "@opentelemetry/otlp-transformer",
+        "@opentelemetry/sdk-metrics"
+      ]
+    },
+    "@opentelemetry/exporter-metrics-otlp-proto@0.300.0_@opentelemetry+api@1.10.0": {
+      "integrity": "sha512-tCL75kJ0JgLmbNCcpYgYpsRht8HgQJwd6LatK9g19O2nTd2GE3v2d38I1m1cVjKw1NRR+vtqei8AzGrznYtm9A==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/exporter-metrics-otlp-http",
+        "@opentelemetry/otlp-exporter-base",
+        "@opentelemetry/otlp-transformer"
+      ]
+    },
     "@opentelemetry/exporter-trace-otlp-grpc@0.300.0_@opentelemetry+api@1.10.0": {
       "integrity": "sha512-I0/XvL7lLsn8aU8wnoIjIbcjcFfltEHsgf56s1vzAxB7CLRKzv/MUpTbIHWY5Eeci1448cAqiDSuj5GU5OcfKg==",
       "dependencies": [
@@ -946,6 +979,13 @@
     "diff@9.0.0": {
       "integrity": "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="
     },
+    "echarts@6.1.0": {
+      "integrity": "sha512-q0yaFPggC9FUdsWH4blavRWFmxdrIodbkoKNAjJudAI6CA9gNPxHtV2RcZNEepZVlk4yvBYkOkbk6HIVpIyHZA==",
+      "dependencies": [
+        "tslib",
+        "zrender"
+      ]
+    },
     "electron-to-chromium@1.5.476": {
       "integrity": "sha512-LnPnRZ0esKB9NjsSIaC+mffW+5dAtBui6kbK5f9Qykblj4Q33cn6yIhuCcTVjwpvL3YJPqqQ4IlsNyriGNpyFQ=="
     },
@@ -1322,6 +1362,9 @@
         "picomatch"
       ]
     },
+    "tslib@2.3.0": {
+      "integrity": "sha512-N82ooyxVNm6h1riLCoyS9e3fuJ3AMG2zIZs2Gd1ATcSFjSA23Q0fzjjZeh0jbJvWVDZ0cJT8yaNNaaXHzueNjg=="
+    },
     "type-fest@5.10.0": {
       "integrity": "sha512-NoSdpq/WEiAg5sjmBkmV/hfxv6HJH4NqPNrqjtSO5CwRmpsDfaf4begxW34KdJykH/l1yHtwBWQkCRdoXO8mPA==",
       "dependencies": [
@@ -1393,6 +1436,12 @@
     },
     "zod@4.6.7": {
       "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="
+    },
+    "zrender@6.1.0": {
+      "integrity": "sha512-oEGMDB6pOP2S6OwRR4PdVv610zrjnA3Bh+JnSG12fYJlBKjtNAoEb5fSUoCOOINlH96I2fU38/A2UpRKs67xYQ==",
+      "dependencies": [
+        "tslib"
+      ]
     }
   },
   "workspace": {
@@ -1403,6 +1452,7 @@
           "npm:@types/react-dom@19",
           "npm:@types/react@19",
           "npm:@vitejs/plugin-react@5",
+          "npm:echarts@6.1.0",
           "npm:react-dom@19",
           "npm:react-router@8.5.1",
           "npm:react@19",
@@ -1524,12 +1574,16 @@
           "npm:@opentelemetry/exporter-logs-otlp-grpc@0.300",
           "npm:@opentelemetry/exporter-logs-otlp-http@0.300",
           "npm:@opentelemetry/exporter-logs-otlp-proto@0.300",
+          "npm:@opentelemetry/exporter-metrics-otlp-grpc@0.300",
+          "npm:@opentelemetry/exporter-metrics-otlp-http@0.300",
+          "npm:@opentelemetry/exporter-metrics-otlp-proto@0.300",
           "npm:@opentelemetry/exporter-trace-otlp-grpc@0.300",
           "npm:@opentelemetry/exporter-trace-otlp-http@0.300",
           "npm:@opentelemetry/exporter-trace-otlp-proto@0.300",
           "npm:@opentelemetry/otlp-exporter-base@0.300",
           "npm:@opentelemetry/resources@3",
           "npm:@opentelemetry/sdk-logs@3",
+          "npm:@opentelemetry/sdk-metrics@3",
           "npm:@opentelemetry/sdk-trace@3",
           "npm:playwright-core@1.64.1"
         ]

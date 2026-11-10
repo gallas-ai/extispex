@@ -11,6 +11,7 @@ import { EvaluationRunsPage } from "./evaluation-runs/evaluation-runs-page.tsx";
 import { getCurrentUser, listProjects } from "./api/identity-api.ts";
 import { signOut } from "./api/sign-in-api.ts";
 import { LogsPage } from "./logs/logs-page.tsx";
+import { MetricsPage } from "./metrics/metrics-page.tsx";
 import { ProjectPage } from "./projects/project-page.tsx";
 import { ProjectSwitcher } from "./projects/project-switcher.tsx";
 import { ProjectsPage } from "./projects/projects-page.tsx";
@@ -32,6 +33,7 @@ import {
   ActivityIcon,
   AlertIcon,
   BrandMark,
+  ChartIcon,
   DatasetIcon,
   FolderIcon,
   InboxIcon,
@@ -211,6 +213,10 @@ function AppShell() {
                     <LogsIcon size={15} />
                     <span className="navigation-link-text">Logs</span>
                   </NavLink>
+                  <NavLink className="navigation-link" to="/metrics">
+                    <ChartIcon size={15} />
+                    <span className="navigation-link-text">Metrics</span>
+                  </NavLink>
                   <Link
                     className="navigation-link"
                     to="/prompts"
@@ -273,6 +279,10 @@ function AppShell() {
                 <Route
                   path="/logs"
                   element={<LogsPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/metrics"
+                  element={<MetricsPage key={selectedProject.id} {...pageProps} />}
                 />
                 <Route
                   path="/prompts"

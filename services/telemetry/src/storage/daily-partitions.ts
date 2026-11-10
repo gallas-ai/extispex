@@ -4,11 +4,11 @@ export const NANOSECONDS_PER_DAY = 86_400_000_000_000n;
 const UNIX_NANOSECONDS_TEXT_LENGTH = 20;
 
 /** Any 64-bit number that only this code uses, so that replicas take turns creating partitions. */
-const LOG_PARTITION_ADVISORY_LOCK_KEY = 7_207_301_100_001n;
-/** A partition takes a brief exclusive lock on `logs`; waiting long would hold up every query. */
+const PARTITION_ADVISORY_LOCK_KEY = 7_207_301_100_001n;
+/** A partition takes a brief exclusive lock on its table; waiting long would hold up every query. */
 const PARTITION_LOCK_TIMEOUT = "5s";
 
-export interface LogPartitions {
+export interface DailyPartitions {
   /** Makes sure that a partition exists for each of these record times. */
   ensurePartitionsFor(timesUnixNano: bigint[]): Promise<void>;
 }
@@ -28,7 +28,10 @@ function findDayStart(timeUnixNano: bigint): bigint {
  * in advance. SQLite has no partitions. An advisory lock makes replicas take turns, because
  * concurrent `create table if not exists` statements can still collide in PostgreSQL's catalogs.
  */
-export function createLogPartitions(database: TelemetryDatabase): LogPartitions {
+export function createDailyPartitions(
+  database: TelemetryDatabase,
+  tableName: string,
+): DailyPartitions {
   if (database.dialect === "sqlite") {
     return { ensurePartitionsFor: () => Promise.resolve() };
   }
@@ -38,22 +41,26 @@ export function createLogPartitions(database: TelemetryDatabase): LogPartitions 
       const dayStarts = new Set(timesUnixNano.map(findDayStart));
       for (const dayStart of dayStarts) {
         if (knownDayStarts.has(dayStart)) continue;
-        await createPartition(database, dayStart);
+        await createPartition(database, tableName, dayStart);
         knownDayStarts.add(dayStart);
       }
     },
   };
 }
 
-async function createPartition(database: TelemetryDatabase, dayStart: bigint): Promise<void> {
-  const partitionName = `logs_${formatPartitionDay(dayStart)}`;
+async function createPartition(
+  database: TelemetryDatabase,
+  tableName: string,
+  dayStart: bigint,
+): Promise<void> {
+  const partitionName = `${tableName}_${formatPartitionDay(dayStart)}`;
   const lowerBound = formatPartitionBound(dayStart);
   const upperBound = formatPartitionBound(dayStart + NANOSECONDS_PER_DAY);
   await database.orm.em.fork().transactional(async (entityManager) => {
     await entityManager.execute(`set local lock_timeout = '${PARTITION_LOCK_TIMEOUT}'`);
-    await entityManager.execute(`select pg_advisory_xact_lock(${LOG_PARTITION_ADVISORY_LOCK_KEY})`);
+    await entityManager.execute(`select pg_advisory_xact_lock(${PARTITION_ADVISORY_LOCK_KEY})`);
     await entityManager.execute(
-      `create table if not exists "${partitionName}" partition of "logs"
+      `create table if not exists "${partitionName}" partition of "${tableName}"
         for values from ('${lowerBound}') to ('${upperBound}')`,
     );
   });

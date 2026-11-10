@@ -11,6 +11,7 @@ export const rejectedTelemetrySchema = z.object({
   windowHours: z.number().int(),
   spans: rejectedTelemetrySummarySchema,
   logs: rejectedTelemetrySummarySchema,
+  metrics: rejectedTelemetrySummarySchema,
 });
 
 export type RejectedTelemetrySummary = z.infer<typeof rejectedTelemetrySummarySchema>;

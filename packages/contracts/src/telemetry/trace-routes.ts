@@ -6,6 +6,7 @@ import {
   projectDataSecurity,
 } from "../openapi-route-parts.ts";
 import { telemetryLogRoutes } from "./log-routes.ts";
+import { telemetryMetricRoutes } from "./metric-routes.ts";
 import {
   listTracesQuerySchema,
   listTracesResponseSchema,
@@ -48,4 +49,9 @@ export const getTraceRoute = createRoute({
 });
 
 /** The Telemetry endpoints reachable through the Gateway. OTLP ingestion bypasses it. */
-export const telemetryPublicRoutes = [listTracesRoute, getTraceRoute, ...telemetryLogRoutes];
+export const telemetryPublicRoutes = [
+  listTracesRoute,
+  getTraceRoute,
+  ...telemetryLogRoutes,
+  ...telemetryMetricRoutes,
+];

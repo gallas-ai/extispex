@@ -1,6 +1,21 @@
 import type { StructuredLogger } from "@extispex/service-runtime";
 import type { RecordedRejections, RejectionRepository } from "../storage/rejection-repository.ts";
 
+/** Builds a message such as `2 log records rejected: missing required attribute correlation.id (2)`. */
+export function describeRejections(
+  rejectionReasons: string[],
+  singularRecordWord: string,
+  pluralRecordWord: string,
+): string {
+  const countsByReason = new Map<string, number>();
+  for (const reason of rejectionReasons) {
+    countsByReason.set(reason, (countsByReason.get(reason) ?? 0) + 1);
+  }
+  const reasonDescriptions = [...countsByReason].map(([reason, count]) => `${reason} (${count})`);
+  const recordWord = rejectionReasons.length === 1 ? singularRecordWord : pluralRecordWord;
+  return `${rejectionReasons.length} ${recordWord} rejected: ${reasonDescriptions.join("; ")}`;
+}
+
 export interface RejectionRecorder {
   recordRejections(rejections: RecordedRejections): Promise<void>;
 }
