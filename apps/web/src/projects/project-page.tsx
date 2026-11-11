@@ -18,8 +18,9 @@ import {
   listRoleAssignments,
   removeRoleAssignment,
   revokeApiKey,
+  updateProject,
 } from "../api/identity-api.ts";
-import { ROLES } from "../access/access-rules.ts";
+import { MAXIMUM_RETENTION_DAYS, MINIMUM_RETENTION_DAYS, ROLES } from "../access/access-rules.ts";
 import { useAccess } from "../sign-in/access-context.ts";
 import { formatRelativeTime } from "../traces/trace-formatting.ts";
 import { CopyButton } from "../ui/copy-button.tsx";
@@ -119,6 +120,11 @@ export function ProjectPage() {
               </p>
             </div>
           </div>
+          <RetentionPanel
+            project={projectState.resource.project}
+            canChange={projectState.resource.management !== null}
+            onChange={reloadProject}
+          />
           {projectState.resource.management === null
             ? (
               <p className="panel panel-note">
@@ -144,6 +150,100 @@ export function ProjectPage() {
         </>
       )}
     </div>
+  );
+}
+
+function RetentionPanel(
+  { project, canChange, onChange }: {
+    project: AccessibleProject;
+    canChange: boolean;
+    onChange: () => void;
+  },
+) {
+  const { credentials, reloadAccess } = useAccess();
+  const [retentionDays, setRetentionDays] = useState(String(project.retentionDays));
+  const [isSaving, setIsSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const submit = async (submitEvent: FormEvent) => {
+    submitEvent.preventDefault();
+    const days = Number(retentionDays);
+    if (!Number.isInteger(days) || days < MINIMUM_RETENTION_DAYS || days > MAXIMUM_RETENTION_DAYS) {
+      setProblem(
+        `Choose a whole number of days from ${MINIMUM_RETENTION_DAYS} to ${MAXIMUM_RETENTION_DAYS}.`,
+      );
+      return;
+    }
+    setIsSaving(true);
+    setProblem(null);
+    try {
+      await updateProject(credentials, project.id, { retentionDays: days });
+      onChange();
+      // Result pages read the Retention Period of the selected Project.
+      await reloadAccess();
+    } catch (error) {
+      setProblem((error as Error).message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const explanation = (
+    <p className="field-hint">
+      Traces, logs and metrics older than this, by their own time, are removed within ten minutes.
+      Evaluation results keep their own copy and stay readable.
+    </p>
+  );
+
+  return (
+    <section className="panel retention-panel" aria-labelledby="retention-title">
+      <h2 id="retention-title" className="panel-title">Retention</h2>
+      {canChange
+        ? (
+          <form className="panel-form" onSubmit={submit} noValidate>
+            <label htmlFor="retention-days-input" className="field-label">
+              Keep telemetry for
+            </label>
+            <div className="inline-form retention-form">
+              <span className="retention-input">
+                <input
+                  id="retention-days-input"
+                  className="text-input"
+                  type="number"
+                  inputMode="numeric"
+                  min={MINIMUM_RETENTION_DAYS}
+                  max={MAXIMUM_RETENTION_DAYS}
+                  value={retentionDays}
+                  onChange={(changeEvent) => setRetentionDays(changeEvent.target.value)}
+                />
+                <span className="text-muted">days</span>
+              </span>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={isSaving || retentionDays === String(project.retentionDays)}
+              >
+                {isSaving ? "Saving…" : "Save retention"}
+              </button>
+            </div>
+            {explanation}
+            {problem !== null && (
+              <p className="form-problem" role="alert">
+                <AlertIcon size={14} />
+                {problem}
+              </p>
+            )}
+          </form>
+        )
+        : (
+          <div className="panel-form">
+            <p className="retention-value">
+              Telemetry is kept for <strong>{project.retentionDays} days</strong>.
+            </p>
+            {explanation}
+          </div>
+        )}
+    </section>
   );
 }
 
@@ -517,8 +617,9 @@ function DeleteProjectPanel({ project }: { project: AccessibleProject }) {
       <h2 id="delete-project-title" className="panel-title">Delete Project</h2>
       <div className="panel-form">
         <p className="danger-panel-text">
-          Its API keys stop working within a minute, and its telemetry and prompts become
-          unreachable. This cannot be undone.
+          Its API keys stop working within a minute, and every service then removes its telemetry,
+          prompts, Datasets and runs for good. Projects shows how far each service is. This cannot
+          be undone.
         </p>
         {problem !== null && (
           <p className="form-problem" role="alert">

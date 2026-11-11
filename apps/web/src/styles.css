@@ -4416,3 +4416,87 @@ textarea {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------------------------
+   Retention and deleted Projects
+   ------------------------------------------------------------------------------------------- */
+
+.retention-form {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.retention-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.retention-input .text-input {
+  width: 96px;
+}
+
+.retention-value {
+  margin: 0;
+}
+
+.deleted-project-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deleted-project {
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.deleted-project-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.deleted-project-name {
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.data-removal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.data-removal {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.data-removal-complete {
+  border-color: transparent;
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.data-removal-service {
+  font-weight: 550;
+}
+
+.trace-unavailable {
+  color: var(--color-text-muted);
+}

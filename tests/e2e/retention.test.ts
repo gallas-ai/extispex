@@ -70,7 +70,9 @@ async function sendTelemetryAt(
   await sendOtlpJson(deployment, apiKey, "/v1/logs", {
     resourceLogs: [{
       resource,
-      scopeLogs: [{ logRecords: [{ timeUnixNano, severityNumber: 9, body: { stringValue: label } }] }],
+      scopeLogs: [{
+        logRecords: [{ timeUnixNano, severityNumber: 9, body: { stringValue: label } }],
+      }],
     }],
   });
   await sendOtlpJson(deployment, apiKey, "/v1/metrics", {
@@ -81,7 +83,11 @@ async function sendTelemetryAt(
           name: "e2e.queue.depth",
           unit: "1",
           gauge: {
-            dataPoints: [{ timeUnixNano, asDouble: 3, attributes: [stringAttribute("age", label)] }],
+            dataPoints: [{
+              timeUnixNano,
+              asDouble: 3,
+              attributes: [stringAttribute("age", label)],
+            }],
           },
         }],
       }],
@@ -237,7 +243,8 @@ Deno.test("Retention and Project deletion through the gateway", async (testConte
           return deletedProjects.find((listed) => listed.id === project.id);
         },
         (listed) =>
-          listed !== undefined && listed.dataRemovals.every((removal) => removal.removedAt !== null),
+          listed !== undefined &&
+          listed.dataRemovals.every((removal) => removal.removedAt !== null),
       );
       assert(deletedProject !== undefined);
       assertEquals(
@@ -272,7 +279,13 @@ Deno.test("Retention and Project deletion through the gateway", async (testConte
       );
       assertEquals(metrics, []);
       assertEquals(
-        (await callGateway<ListPromptsResponse>(deployment, "GET", "/v1/prompts", 200, tokenRequest))
+        (await callGateway<ListPromptsResponse>(
+          deployment,
+          "GET",
+          "/v1/prompts",
+          200,
+          tokenRequest,
+        ))
           .prompts,
         [],
       );

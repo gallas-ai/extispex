@@ -15,11 +15,13 @@ import {
 } from "../api/evaluation-api.ts";
 import { serializeTracesUrlState } from "../navigation/traces-url-state.ts";
 import { Breadcrumbs } from "../prompts/prompt-parts.tsx";
+import { useAccess } from "../sign-in/access-context.ts";
 import { AlertIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
 import { usePagedResource } from "../ui/use-paged-resource.ts";
 import { usePollingWhile } from "../ui/use-polling-while.ts";
+import { findExpiredRetentionDays } from "./trace-availability.ts";
 import { VerdictBadge } from "./verdict-badge.tsx";
 
 interface EvaluationRunPageProps {
@@ -248,20 +250,47 @@ function IterationRow({ iteration }: { iteration: IterationResult }) {
   );
 }
 
+/** Results keep their own copy of what they show, so only the links to traces go. */
+function useExpiredRetentionDays(reportedAt: string): number | null {
+  const retentionDays = useAccess().selectedProject?.retentionDays;
+  return findExpiredRetentionDays(reportedAt, retentionDays, Date.now());
+}
+
+/** A link to the Correlation ID's traces, or why they are gone. */
+function TracesLink(
+  { correlationId, expiredRetentionDays }: {
+    correlationId: string;
+    expiredRetentionDays: number | null;
+  },
+) {
+  if (expiredRetentionDays === null) {
+    return <Link to={tracesPath(correlationId)}>View traces</Link>;
+  }
+  return (
+    <span className="trace-unavailable" role="note">
+      Trace no longer available: the Project keeps telemetry for {expiredRetentionDays} days.
+    </span>
+  );
+}
+
 function AttemptDetails(
   { attempt, showNumber }: { attempt: IterationAttempt; showNumber: boolean },
 ) {
+  const expiredRetentionDays = useExpiredRetentionDays(attempt.reportedAt);
   return (
     <div className="attempt-details">
       {showNumber && <p className="status-text">Attempt {attempt.attempt}</p>}
       {attempt.correlationId !== null && (
         <p className="status-text">
           Correlation ID <code className="cell-breaks-anywhere">{attempt.correlationId}</code>{" "}
-          <Link to={tracesPath(attempt.correlationId)}>View traces</Link>
+          <TracesLink
+            correlationId={attempt.correlationId}
+            expiredRetentionDays={expiredRetentionDays}
+          />
         </p>
       )}
       {attempt.transcript !== null
-        ? <Transcript steps={attempt.transcript} />
+        ? <Transcript steps={attempt.transcript} expiredRetentionDays={expiredRetentionDays} />
         : attempt.output !== null && <pre className="attempt-output">{attempt.output}</pre>}
       {attempt.error !== null && <p className="attempt-error" role="note">{attempt.error}</p>}
       {attempt.evaluatorResults.length > 0 && (
@@ -271,7 +300,11 @@ function AttemptDetails(
               <VerdictBadge status={result.outcome} />
               <span className="evaluator-result-name">{result.name}</span>
               <span className="text-muted evaluator-result-reason">{result.reason}</span>
-              <MatchedSpans result={result} correlationId={attempt.correlationId} />
+              <MatchedSpans
+                result={result}
+                correlationId={attempt.correlationId}
+                isTraceExpired={expiredRetentionDays !== null}
+              />
             </li>
           ))}
         </ul>
@@ -285,7 +318,12 @@ function formatStepInput(input: unknown): string {
 }
 
 /** What was sent at each step of a Session, and what the application answered. */
-function Transcript({ steps }: { steps: TranscriptStep[] }) {
+function Transcript(
+  { steps, expiredRetentionDays }: {
+    steps: TranscriptStep[];
+    expiredRetentionDays: number | null;
+  },
+) {
   if (steps.length === 0) return <p className="status-text">No step was answered.</p>;
   return (
     <ol className="transcript" aria-label="Transcript">
@@ -298,7 +336,10 @@ function Transcript({ steps }: { steps: TranscriptStep[] }) {
           <pre className="attempt-output">{step.output}</pre>
           <p className="status-text">
             Correlation ID <code className="cell-breaks-anywhere">{step.correlationId}</code>{" "}
-            <Link to={tracesPath(step.correlationId)}>View traces</Link>
+            <TracesLink
+              correlationId={step.correlationId}
+              expiredRetentionDays={expiredRetentionDays}
+            />
           </p>
         </li>
       ))}
@@ -318,7 +359,11 @@ function tracesPath(correlationId: string, traceId?: string, spanId?: string): s
 
 /** The spans a Telemetry Evaluator counted, from the result's own copy of them. */
 function MatchedSpans(
-  { result, correlationId }: { result: EvaluatorResult; correlationId: string | null },
+  { result, correlationId, isTraceExpired }: {
+    result: EvaluatorResult;
+    correlationId: string | null;
+    isTraceExpired: boolean;
+  },
 ) {
   const { matchedSpans = [], matchedSpanCount = 0 } = result;
   if (matchedSpans.length === 0) return null;
@@ -327,7 +372,13 @@ function MatchedSpans(
       <ul className="matched-span-list">
         {matchedSpans.map((span) => (
           <li key={`${span.traceId}:${span.spanId}`} className="matched-span">
-            <Link to={tracesPath(correlationId ?? "", span.traceId, span.spanId)}>{span.name}</Link>
+            {isTraceExpired
+              ? <span>{span.name}</span>
+              : (
+                <Link to={tracesPath(correlationId ?? "", span.traceId, span.spanId)}>
+                  {span.name}
+                </Link>
+              )}
             {span.serviceName !== null && <span className="text-muted">{span.serviceName}</span>}
             <span className="text-muted">{span.durationMilliseconds.toFixed(1)} ms</span>
           </li>

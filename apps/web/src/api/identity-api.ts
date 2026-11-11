@@ -7,6 +7,7 @@ import type {
   DirectoryStatus,
   Group,
   ListApiKeysResponse,
+  ListDeletedProjectsResponse,
   ListGroupsResponse,
   ListProjectsResponse,
   ListRoleAssignmentsResponse,
@@ -14,6 +15,7 @@ import type {
   Project,
   Role,
   RoleAssignment,
+  UpdateProjectRequest,
   UpdateUserRequest,
   User,
 } from "@extispex/contracts";
@@ -57,6 +59,20 @@ export function getProject(
   projectId: string,
 ): Promise<AccessibleProject> {
   return requestJson(credentials, projectPath(projectId));
+}
+
+export function updateProject(
+  credentials: ApiCredentials,
+  projectId: string,
+  request: UpdateProjectRequest,
+): Promise<AccessibleProject> {
+  return requestJson(credentials, projectPath(projectId), { method: "PATCH", body: request });
+}
+
+export function listDeletedProjects(
+  credentials: ApiCredentials,
+): Promise<ListDeletedProjectsResponse> {
+  return requestJson(credentials, "/v1/deleted-projects");
 }
 
 export function deleteProject(credentials: ApiCredentials, projectId: string): Promise<null> {
