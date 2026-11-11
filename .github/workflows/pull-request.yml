@@ -72,7 +72,9 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
       - run: deno install --frozen
-      - run: deno task install:browser --with-deps
+      - name: Install Chromium
+        run: .github/scripts/install-browser.sh
+        timeout-minutes: 40
       - run: deno task build:web
       # Started here and not under `services:`, which cannot give a container a command or a
       # file from the checkout.
@@ -103,7 +105,9 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
       - run: deno install --frozen
-      - run: deno task install:browser --with-deps
+      - name: Install Chromium
+        run: .github/scripts/install-browser.sh
+        timeout-minutes: 40
       - name: Build images
         run: |
           docker build -f deploy/docker/all-in-one.Dockerfile -t ghcr.io/gallas-ai/extispex:ci .
