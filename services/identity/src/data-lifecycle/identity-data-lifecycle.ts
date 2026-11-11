@@ -1,9 +1,8 @@
 import { DEACTIVATED_USER_RETENTION_DAYS } from "@extispex/contracts";
 import type { StructuredLogger } from "@extispex/service-runtime";
 import type { BackgroundLease } from "@extispex/service-storage";
-import { ACCESS_TOKEN_LIFETIME_SECONDS } from "../access-tokens/signing-keys.ts";
-import type { AccessRepository } from "../storage/access-repository.ts";
-import type { ProjectRepository } from "../storage/project-repository.ts";
+import { ACCESS_TOKEN_LIFETIME_SECONDS } from "../access-tokens/mod.ts";
+import type { AccessRepository, ProjectRepository } from "../storage/mod.ts";
 
 const MILLISECONDS_PER_DAY = 86_400_000;
 /** Identity's own name among the services that remove a deleted Project's data. */

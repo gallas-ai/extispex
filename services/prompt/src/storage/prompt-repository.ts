@@ -6,7 +6,7 @@ import type {
 } from "@extispex/contracts";
 import { type InferEntity, raw, UniqueConstraintViolationException } from "@mikro-orm/core";
 import type { EntityManager } from "@mikro-orm/sql";
-import type { NewPromptVersion } from "../prompts/prompt-versions.ts";
+import type { NewPromptVersion } from "../prompts/mod.ts";
 import type { PromptDatabase } from "./prompt-database.ts";
 import { PromptLabelRecord, PromptRecord, PromptVersionRecord } from "./prompt-entities.ts";
 

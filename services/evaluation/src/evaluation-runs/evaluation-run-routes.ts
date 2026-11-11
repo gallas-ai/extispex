@@ -12,10 +12,12 @@ import {
 } from "@extispex/contracts";
 import type { ProjectAccessEnvironment, StructuredLogger } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { AttemptJob, JobQueue } from "../job-queue/job-queue.ts";
-import type { DatasetRepository } from "../storage/dataset-repository.ts";
-import type { EvaluationRunRepository } from "../storage/evaluation-run-repository.ts";
-import type { TargetRepository } from "../storage/target-repository.ts";
+import type { AttemptJob, JobQueue } from "../job-queue/mod.ts";
+import type {
+  DatasetRepository,
+  EvaluationRunRepository,
+  TargetRepository,
+} from "../storage/mod.ts";
 
 export interface EvaluationRunRouteDependencies {
   datasetRepository: DatasetRepository;

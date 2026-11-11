@@ -13,51 +13,50 @@ import {
   type ServiceTokenSource,
   type StructuredLogger,
 } from "@extispex/service-runtime";
-import { registerDatasetRoutes } from "./datasets/dataset-routes.ts";
+import { registerDatasetRoutes } from "./datasets/mod.ts";
 import {
   createAttemptEvaluationWorker,
   DEFAULT_INACTIVE_RUN_TIMEOUT_MILLISECONDS,
   DEFAULT_REGEX_TIMEOUT_MILLISECONDS,
   type EvaluationWorker,
-} from "./evaluation-runs/attempt-evaluation-worker.ts";
-import { registerEvaluationRunRoutes } from "./evaluation-runs/evaluation-run-routes.ts";
-import { createTelemetryClient } from "./iterations/telemetry-client.ts";
+  registerEvaluationRunRoutes,
+} from "./evaluation-runs/mod.ts";
 import {
+  createTelemetryClient,
   DEFAULT_TRACE_COMPLETION_TIMING,
   type TraceCompletionTiming,
-} from "./iterations/trace-completion.ts";
-import type { JobQueue } from "./job-queue/job-queue.ts";
-import { createDatasetRepository } from "./storage/dataset-repository.ts";
-import type { EvaluationDatabase } from "./storage/evaluation-database.ts";
-import { createEvaluationRunRepository } from "./storage/evaluation-run-repository.ts";
-import { removeEvaluationProjectData } from "./storage/project-data-repository.ts";
-import { createTargetRepository } from "./storage/target-repository.ts";
-import { parseDestinationAllowlist } from "./targets/destination-allowlist.ts";
+} from "./iterations/mod.ts";
+import type { JobQueue } from "./job-queue/mod.ts";
+import {
+  createDatasetRepository,
+  createEvaluationRunRepository,
+  createTargetRepository,
+  type EvaluationDatabase,
+  removeEvaluationProjectData,
+} from "./storage/mod.ts";
 import {
   createTargetClient,
   DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
+  parseDestinationAllowlist,
+  registerTargetRoutes,
   type ResolveHostAddresses,
-} from "./targets/target-client.ts";
-import { registerTargetRoutes } from "./targets/target-routes.ts";
+} from "./targets/mod.ts";
 
 export {
   DEFAULT_INACTIVE_RUN_TIMEOUT_MILLISECONDS,
   DEFAULT_REGEX_TIMEOUT_MILLISECONDS,
   type EvaluationWorker,
-} from "./evaluation-runs/attempt-evaluation-worker.ts";
+} from "./evaluation-runs/mod.ts";
+export { DEFAULT_TRACE_COMPLETION_TIMING, type TraceCompletionTiming } from "./iterations/mod.ts";
 export {
-  DEFAULT_TRACE_COMPLETION_TIMING,
-  type TraceCompletionTiming,
-} from "./iterations/trace-completion.ts";
-export type {
-  AttemptJob,
-  EvaluateAttemptJob,
-  ExecuteAttemptJob,
-  JobQueue,
-} from "./job-queue/job-queue.ts";
-export { openJobQueue } from "./job-queue/open-job-queue.ts";
-export { type EvaluationDatabase, openEvaluationDatabase } from "./storage/evaluation-database.ts";
-export { DEFAULT_TARGET_TIMEOUT_MILLISECONDS } from "./targets/target-client.ts";
+  type AttemptJob,
+  type EvaluateAttemptJob,
+  type ExecuteAttemptJob,
+  type JobQueue,
+  openJobQueue,
+} from "./job-queue/mod.ts";
+export { type EvaluationDatabase, openEvaluationDatabase } from "./storage/mod.ts";
+export { DEFAULT_TARGET_TIMEOUT_MILLISECONDS } from "./targets/mod.ts";
 
 /** The purpose that Target credentials are encrypted for. */
 export const TARGET_CREDENTIAL_CIPHER_PURPOSE = "evaluation-target-credential";

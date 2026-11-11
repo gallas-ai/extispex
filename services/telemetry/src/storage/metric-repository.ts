@@ -4,7 +4,7 @@ import type {
   IncomingMetricSeries,
   MetricTemporality,
   MetricType,
-} from "../ingestion/metric-normalization.ts";
+} from "../ingestion/mod.ts";
 import { createDailyPartitions } from "./daily-partitions.ts";
 import { formatUnixNanosecondsForStorage } from "./span-record-entity.ts";
 import type { TelemetryDatabase } from "./telemetry-database.ts";

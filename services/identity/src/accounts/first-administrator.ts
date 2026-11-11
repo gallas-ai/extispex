@@ -1,6 +1,5 @@
 import type { User } from "@extispex/contracts";
-import type { IdentityDatabase } from "../storage/identity-database.ts";
-import { createAccessRepository } from "../storage/access-repository.ts";
+import { createAccessRepository, type IdentityDatabase } from "../storage/mod.ts";
 import { DEFAULT_PASSWORD_HASH_ITERATIONS, hashPassword } from "./password-hashing.ts";
 
 /** The first administrator's address in the local image, unless `BOOTSTRAP_ADMIN_EMAIL` is set. */

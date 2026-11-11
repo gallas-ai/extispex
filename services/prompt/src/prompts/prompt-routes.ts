@@ -17,7 +17,7 @@ import {
   requireProjectAccess,
 } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { PromptRepository } from "../storage/prompt-repository.ts";
+import type { PromptRepository } from "../storage/mod.ts";
 import { comparePromptVersions } from "./prompt-version-comparison.ts";
 import { createNewPromptVersion } from "./prompt-versions.ts";
 

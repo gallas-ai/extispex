@@ -11,17 +11,16 @@ import {
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
-import {
-  createDecoyPasswordHash,
-  hashPassword,
-  verifyPassword,
-} from "../accounts/password-hashing.ts";
-import type { AccessTokenSigner } from "../access-tokens/signing-keys.ts";
-import type { IdentityEnvironment } from "../access/user-authentication.ts";
-import { hashRandomSecret } from "../api-keys/api-key-secrets.ts";
-import type { AccessRepository, StoredUser } from "../storage/access-repository.ts";
-import type { ProjectRepository } from "../storage/project-repository.ts";
-import type { SignInRepository } from "../storage/sign-in-repository.ts";
+import { createDecoyPasswordHash, hashPassword, verifyPassword } from "../accounts/mod.ts";
+import type { AccessTokenSigner } from "../access-tokens/mod.ts";
+import type { IdentityEnvironment } from "../access/mod.ts";
+import { hashRandomSecret } from "../api-keys/mod.ts";
+import type {
+  AccessRepository,
+  ProjectRepository,
+  SignInRepository,
+  StoredUser,
+} from "../storage/mod.ts";
 import { type BrowserSignIns, SIGN_IN_IDLE_SECONDS } from "./browser-sign-ins.ts";
 import type { PasswordAttemptThrottle } from "./password-attempt-throttle.ts";
 

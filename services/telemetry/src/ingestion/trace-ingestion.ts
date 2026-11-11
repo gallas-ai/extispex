@@ -1,4 +1,4 @@
-import type { SpanRepository } from "../storage/span-repository.ts";
+import type { SpanRepository } from "../storage/mod.ts";
 import { applyCorrelationPolicy } from "./correlation-policy.ts";
 import type { OtlpExportTraceRequest, TraceExportOutcome } from "./otlp-trace-types.ts";
 import type { RejectionRecorder } from "./rejection-recorder.ts";

@@ -16,11 +16,10 @@ import {
   type IdentityEnvironment,
   INSTANCE_ADMIN_REQUIRED,
   PROJECT_ADMIN_REQUIRED,
-} from "../access/user-authentication.ts";
-import { ACCESS_TOKEN_LIFETIME_SECONDS } from "../access-tokens/signing-keys.ts";
-import { generateApiKey, hashApiKey, readKeyPrefix } from "../api-keys/api-key-secrets.ts";
-import type { AccessRepository } from "../storage/access-repository.ts";
-import type { ProjectRepository } from "../storage/project-repository.ts";
+} from "../access/mod.ts";
+import { ACCESS_TOKEN_LIFETIME_SECONDS } from "../access-tokens/mod.ts";
+import { generateApiKey, hashApiKey, readKeyPrefix } from "../api-keys/mod.ts";
+import type { AccessRepository, ProjectRepository } from "../storage/mod.ts";
 
 export interface ProjectRouteDependencies {
   projectRepository: ProjectRepository;

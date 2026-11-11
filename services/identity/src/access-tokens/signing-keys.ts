@@ -9,9 +9,7 @@ import {
   type SecretCipher,
   signAccessToken,
 } from "@extispex/service-runtime";
-import type { IdentityDatabase } from "../storage/identity-database.ts";
-import { SigningKeyRecord } from "../storage/identity-entities.ts";
-import { generateTimeOrderedId } from "../storage/time-ordered-id.ts";
+import { generateTimeOrderedId, type IdentityDatabase, SigningKeyRecord } from "../storage/mod.ts";
 
 /** Short enough that a removed Role or a deactivated user loses access within five minutes. */
 export const ACCESS_TOKEN_LIFETIME_SECONDS = 300;

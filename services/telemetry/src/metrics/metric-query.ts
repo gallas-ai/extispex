@@ -7,14 +7,14 @@ import {
   type QueryMetricQuery,
   type QueryMetricResponse,
 } from "@extispex/contracts";
-import type {
-  MetricReadRange,
-  MetricRepository,
-  StoredHistogramCounts,
-  StoredHistogramPoint,
-  StoredMetricSeries,
-} from "../storage/metric-repository.ts";
-import { formatUnixNanosecondsForStorage } from "../storage/span-record-entity.ts";
+import {
+  formatUnixNanosecondsForStorage,
+  type MetricReadRange,
+  type MetricRepository,
+  type StoredHistogramCounts,
+  type StoredHistogramPoint,
+  type StoredMetricSeries,
+} from "../storage/mod.ts";
 import { estimateHistogramQuantile } from "./histogram-quantile.ts";
 
 /** A request that cannot be answered as it stands; the message says how to change it. */

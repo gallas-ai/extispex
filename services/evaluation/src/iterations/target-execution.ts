@@ -1,5 +1,5 @@
 import type { ReportedStep, TestCaseDefinition } from "@extispex/contracts";
-import type { TargetClient, TargetEndpoint } from "../targets/target-client.ts";
+import type { TargetClient, TargetEndpoint } from "../targets/mod.ts";
 
 export type ExecutionResult =
   | { status: "output"; output: string; correlationId: string; sessionId: string | null }

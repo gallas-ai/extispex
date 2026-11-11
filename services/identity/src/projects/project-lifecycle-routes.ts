@@ -5,12 +5,9 @@ import {
   recordProjectDataRemovalRoute,
 } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { authenticateService, type IdentityEnvironment } from "../access/user-authentication.ts";
-import {
-  ACCESS_TOKEN_LIFETIME_SECONDS,
-  type AccessTokenSigner,
-} from "../access-tokens/signing-keys.ts";
-import type { ProjectRepository } from "../storage/project-repository.ts";
+import { authenticateService, type IdentityEnvironment } from "../access/mod.ts";
+import { ACCESS_TOKEN_LIFETIME_SECONDS, type AccessTokenSigner } from "../access-tokens/mod.ts";
+import type { ProjectRepository } from "../storage/mod.ts";
 
 export interface ProjectLifecycleRouteDependencies {
   projectRepository: ProjectRepository;

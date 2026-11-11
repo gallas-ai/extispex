@@ -5,7 +5,7 @@ import {
   MAXIMUM_DIRECTORY_IMPORT_ROWS,
 } from "@extispex/contracts";
 import { parse as parseCsv } from "@std/csv";
-import type { DirectoryImportRow } from "../storage/directory-import-repository.ts";
+import type { DirectoryImportRow } from "../storage/mod.ts";
 
 export type ParsedDirectoryFile =
   | { status: "parsed"; rows: DirectoryImportRow[] }

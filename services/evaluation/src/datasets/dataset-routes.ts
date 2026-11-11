@@ -12,7 +12,7 @@ import {
 } from "@extispex/contracts";
 import type { ProjectAccessEnvironment } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { DatasetRepository } from "../storage/dataset-repository.ts";
+import type { DatasetRepository } from "../storage/mod.ts";
 
 export interface DatasetRouteDependencies {
   datasetRepository: DatasetRepository;

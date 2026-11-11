@@ -1,7 +1,6 @@
 import type { Project } from "@extispex/contracts";
-import { hashApiKey, readKeyPrefix } from "../api-keys/api-key-secrets.ts";
-import type { IdentityDatabase } from "../storage/identity-database.ts";
-import { createProjectRepository } from "../storage/project-repository.ts";
+import { hashApiKey, readKeyPrefix } from "../api-keys/mod.ts";
+import { createProjectRepository, type IdentityDatabase } from "../storage/mod.ts";
 
 export const FIRST_PROJECT_NAME = "Default";
 const FIRST_API_KEY_NAME = "Created at first start";

@@ -6,8 +6,8 @@ import {
 } from "@extispex/contracts";
 import { extractBearerToken } from "@extispex/service-runtime";
 import type { MiddlewareHandler } from "hono";
-import type { AccessTokenSigner } from "../access-tokens/signing-keys.ts";
-import type { AccessRepository, StoredUser } from "../storage/access-repository.ts";
+import type { AccessTokenSigner } from "../access-tokens/mod.ts";
+import type { AccessRepository, StoredUser } from "../storage/mod.ts";
 
 /** Hono context variables of Identity's routes. */
 export interface IdentityEnvironment {

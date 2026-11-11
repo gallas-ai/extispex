@@ -5,8 +5,7 @@ import {
   requireProjectAccess,
 } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { LogRepository } from "../storage/log-repository.ts";
-import type { RejectionRepository } from "../storage/rejection-repository.ts";
+import type { LogRepository, RejectionRepository } from "../storage/mod.ts";
 
 export interface LogQueryRouteDependencies {
   logRepository: LogRepository;

@@ -1,5 +1,5 @@
 import type { RejectedTelemetry, RejectedTelemetrySummary } from "@extispex/contracts";
-import { makeTextStorable } from "../ingestion/stored-text.ts";
+import { makeTextStorable } from "../ingestion/mod.ts";
 import type { TelemetryDatabase } from "./telemetry-database.ts";
 
 export type TelemetrySignal = "spans" | "logs" | "metrics";
