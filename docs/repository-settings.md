@@ -27,6 +27,7 @@ default branch:
 | Review threads         | must be resolved                                                               |
 | Merge methods          | merge, squash and rebase                                                       |
 | Required status checks | the five jobs below, reported by GitHub Actions                                |
+| Up to date with `main` | required, so CI runs the exact combination that merges                         |
 | Bypass                 | the `Organization admin` role, always: direct pushes and merges without review |
 
 The owner pushes to `main` directly through the bypass.
@@ -76,6 +77,9 @@ permissions, and checks nothing out. It runs again when a review is submitted, e
 **Auto-merge** is allowed in the repository. It is enabled per pull request, for example with
 `gh pr merge <number> --auto --merge`, by the owner, so that the merge counts as the owner's and the
 push to `main` starts CI. A merge made with the workflow's `GITHUB_TOKEN` would start no workflow.
+
+**Automatically delete head branches** is on, so a merged pull request's branch disappears from
+GitHub. A local branch or worktree stays until you remove it.
 
 **Known weakness:** the review step runs on `pull_request_review`, which takes the workflow file
 from the pull request. A contributor could add a job named `Owner approval` that always passes. It
