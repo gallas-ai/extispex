@@ -37,6 +37,10 @@ export const ApiKeyRecord = defineEntity({
  * A person who signs in. A local account has a password hash; a user from the company's identity
  * provider has the provider's issuer and subject instead, which identify them for good while
  * their email may change. A deactivated user keeps their row, so that their email stays taken.
+ *
+ * `directorySource` says that the company's directory manages the user. Such a user may have
+ * neither a password nor an issuer and subject yet: the first OIDC sign-in with their verified
+ * email links them. `directoryRemovedAt` hides a user the directory deleted from SCIM.
  */
 export const UserRecord = defineEntity({
   name: "UserRecord",
@@ -48,11 +52,19 @@ export const UserRecord = defineEntity({
     passwordHash: p.string().nullable(),
     oidcIssuer: p.string().nullable(),
     oidcSubject: p.string().nullable(),
+    directorySource: p.string().nullable(),
+    directoryUserName: p.string().nullable(),
+    directoryExternalId: p.string().nullable(),
+    directoryRemovedAt: p.datetime().nullable(),
     isInstanceAdmin: p.boolean(),
     createdAt: p.datetime(),
     deactivatedAt: p.datetime().nullable(),
   },
-  uniques: [{ properties: ["email"] }, { properties: ["oidcIssuer", "oidcSubject"] }],
+  uniques: [
+    { properties: ["email"] },
+    { properties: ["oidcIssuer", "oidcSubject"] },
+    { properties: ["directoryUserName"] },
+  ],
 });
 
 /** A set of users that receives Roles in Projects. Its name is unique in the Instance. */
@@ -92,6 +104,69 @@ export const CompanyGroupMappingRecord = defineEntity({
     groupId: p.string().primary(),
   },
   indexes: [{ properties: ["groupId"] }],
+});
+
+/**
+ * A Company group that the directory or an import told Identity about. It is a copy of the
+ * directory and holds no permissions: only a mapping to a Group gives its members anything.
+ */
+export const CompanyGroupRecord = defineEntity({
+  name: "CompanyGroupRecord",
+  tableName: "company_groups",
+  properties: {
+    id: p.string().primary(),
+    displayName: p.string(),
+    externalId: p.string().nullable(),
+    source: p.string(),
+    createdAt: p.datetime(),
+  },
+  uniques: [{ properties: ["displayName"] }],
+  indexes: [{ properties: ["externalId"] }],
+});
+
+/** Who is in a Company group according to the directory. */
+export const CompanyGroupMemberRecord = defineEntity({
+  name: "CompanyGroupMemberRecord",
+  tableName: "company_group_members",
+  properties: {
+    companyGroupId: p.string().primary(),
+    userId: p.string().primary(),
+    addedAt: p.datetime(),
+  },
+  indexes: [{ properties: ["userId"] }],
+});
+
+/** Lets the company's directory call the SCIM endpoints, stored as a SHA-256 hash. */
+export const DirectoryTokenRecord = defineEntity({
+  name: "DirectoryTokenRecord",
+  tableName: "directory_tokens",
+  properties: {
+    id: p.string().primary(),
+    name: p.string(),
+    tokenPrefix: p.string(),
+    tokenHash: p.string(),
+    createdAt: p.datetime(),
+    lastUsedAt: p.datetime().nullable(),
+    revokedAt: p.datetime().nullable(),
+  },
+  uniques: [{ properties: ["tokenHash"] }],
+});
+
+/** One applied file, for the sync status on the Access page. */
+export const DirectoryImportRecord = defineEntity({
+  name: "DirectoryImportRecord",
+  tableName: "directory_imports",
+  properties: {
+    id: p.string().primary(),
+    importedAt: p.datetime(),
+    importedByUserId: p.string(),
+    format: p.string(),
+    rowCount: p.integer(),
+    createdCount: p.integer(),
+    updatedCount: p.integer(),
+    deactivatedCount: p.integer(),
+    unchangedCount: p.integer(),
+  },
 });
 
 /** A Group's Role in a Project; a Group has at most one Role per Project. */

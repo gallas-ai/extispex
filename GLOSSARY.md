@@ -132,8 +132,15 @@ services. _Avoid_: Machine token, internal key
 **Group**: A set of users, imported from the company's identity system or created locally, that
 receives a Role in a Project. _Avoid_: Team
 
-**Company group**: A group in the company's identity system, named as its ID tokens name it. An
-Instance admin maps it to a Group, and its members then join that Group when they sign in. _Avoid_:
-External group, IdP group
+**Company group**: A group in the company's identity system, named as its ID tokens or the directory
+name it. An Instance admin maps it to a Group, and its members then join that Group when they sign
+in or when the directory says so. It never carries permissions. _Avoid_: External group, IdP group
+
+**Directory**: The company's record of its people and Company groups, which reaches the Instance
+over SCIM 2.0 or as an imported JSON or CSV file. A user it created is linked to their first OIDC
+sign-in by email. _Avoid_: User store, LDAP
+
+**Directory token**: A secret that an Instance admin creates for the directory's SCIM requests. It
+is shown once and stored only as a hash. _Avoid_: SCIM key, API key (which belongs to a Project)
 
 **Role**: What a Group may do in a Project: `viewer`, `editor` or `admin`. _Avoid_: Permission set

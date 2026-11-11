@@ -30,11 +30,16 @@ export const accessTokenSecurity: Record<string, string[]>[] = [{
 export const SERVICE_CLIENT_SECURITY_SCHEME_NAME = "serviceClient";
 export const SERVICE_CLIENT_SECURITY_SCHEME = { type: "http", scheme: "basic" } as const;
 
+/** A token an Instance admin created for the company's directory, for the SCIM endpoints. */
+export const DIRECTORY_TOKEN_SECURITY_SCHEME_NAME = "directoryToken";
+export const DIRECTORY_TOKEN_SECURITY_SCHEME = { type: "http", scheme: "bearer" } as const;
+
 /** Every security scheme of the public API, for the OpenAPI documents' components. */
 export const PUBLIC_API_SECURITY_SCHEMES = {
   [API_KEY_SECURITY_SCHEME_NAME]: API_KEY_SECURITY_SCHEME,
   [ACCESS_TOKEN_SECURITY_SCHEME_NAME]: ACCESS_TOKEN_SECURITY_SCHEME,
   [SERVICE_CLIENT_SECURITY_SCHEME_NAME]: SERVICE_CLIENT_SECURITY_SCHEME,
+  [DIRECTORY_TOKEN_SECURITY_SCHEME_NAME]: DIRECTORY_TOKEN_SECURITY_SCHEME,
 };
 
 export function describeErrorResponse(description: string) {

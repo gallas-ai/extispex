@@ -2,6 +2,7 @@ import { createRoute } from "@hono/zod-openapi";
 import { z } from "zod";
 import { accessTokenSecurity, describeErrorResponse } from "../openapi-route-parts.ts";
 import { accessRoutes } from "./access-routes.ts";
+import { directoryRoutes } from "./directory-routes.ts";
 import {
   accessibleProjectSchema,
   createApiKeyRequestSchema,
@@ -138,6 +139,7 @@ export const revokeApiKeyRoute = createRoute({
 /** The Identity service's endpoints, all reachable through the Gateway. */
 export const identityPublicRoutes = [
   ...accessRoutes,
+  ...directoryRoutes,
   createProjectRoute,
   listProjectsRoute,
   getProjectRoute,

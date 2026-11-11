@@ -154,6 +154,9 @@ function defineOidcTest(testName: string, testBody: (context: OidcTestContext) =
       try {
         for (
           const tableName of [
+            "company_group_members",
+            "company_groups",
+            "directory_imports",
             "company_group_mappings",
             "oidc_sign_in_attempts",
             "sign_in_throttles",
@@ -617,5 +620,85 @@ Deno.test("needs every OIDC setting, and TLS unless told otherwise", () => {
     read({ OIDC_ISSUER_URL: "http://localhost:8180", OIDC_ALLOW_INSECURE_HTTP: "enabled" })
       ?.allowsInsecureHttp,
     true,
+  );
+});
+
+/** Imports one person, as a company without SCIM would, and maps their Company group. */
+async function importPerson(
+  context: OidcTestContext,
+  person: { email: string; companyGroups: string[]; active?: boolean },
+) {
+  const response = await send(context.identityService, "POST", "/v1/directory/imports", {
+    bearerToken: context.adminToken,
+    body: { users: [{ displayName: "Imported Person", ...person }] },
+  });
+  assertEquals(response.status, 200, await response.clone().text());
+  await response.body?.cancel();
+}
+
+async function listUsers(context: OidcTestContext): Promise<User[]> {
+  const response = await send(context.identityService, "GET", "/v1/users", {
+    bearerToken: context.adminToken,
+  });
+  return (await response.json() as { users: User[] }).users;
+}
+
+defineOidcTest("links the first sign-in to a user from the directory, once", async (context) => {
+  await importPerson(context, { email: "grace@example.com", companyGroups: ["team-research"] });
+  const researchers = await createGroupWithCompanyGroup(context, "Researchers", "team-research");
+  const [importedUser] = (await listUsers(context)).filter((user) =>
+    user.email === "grace@example.com"
+  );
+
+  const signIn = await signInAs(context, {
+    sub: "grace-at-provider",
+    email: "grace@example.com",
+    email_verified: true,
+    name: "Grace Hopper",
+    groups: [],
+  });
+  assertEquals(signIn.status, 302);
+  readSignInCookie(signIn);
+  const usersAfter = (await listUsers(context)).filter((user) =>
+    user.email === "grace@example.com"
+  );
+  assertEquals(usersAfter.map((user) => user.id), [importedUser.id]);
+  // A token without groups keeps what the directory says.
+  assertEquals(
+    (await readGroupMembers(context, researchers.id)).map((member) => member.email),
+    ["grace@example.com"],
+  );
+
+  // Linked once: another subject with the same email is someone else.
+  assertFailure(
+    await signInAs(context, {
+      sub: "someone-else",
+      email: "grace@example.com",
+      email_verified: true,
+    }),
+    "email_taken",
+  );
+  assertEquals(
+    (await signInAs(context, { sub: "grace-at-provider", email: "grace@example.com" }))
+      .status,
+    302,
+  );
+});
+
+defineOidcTest("refuses to link a deactivated user from the directory", async (context) => {
+  await importPerson(context, { email: "alan@example.com", companyGroups: [], active: false });
+  assertFailure(
+    await signInAs(context, { sub: "alan", email: "alan@example.com", email_verified: true }),
+    "user_deactivated",
+  );
+});
+
+defineOidcTest("refuses to link a user from the directory with an unverified email", async (
+  context,
+) => {
+  await importPerson(context, { email: "eve@example.com", companyGroups: [] });
+  assertFailure(
+    await signInAs(context, { sub: "eve", email: "eve@example.com", email_verified: false }),
+    "email_missing",
   );
 });

@@ -5,7 +5,13 @@
  * a cross-site navigation, as it is in production.
  */
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import type { AccessTokenResponse, Group, Project, SignInOptions } from "@extispex/contracts";
+import type {
+  AccessTokenResponse,
+  Group,
+  ListUsersResponse,
+  Project,
+  SignInOptions,
+} from "@extispex/contracts";
 import type { Browser } from "playwright-core";
 import {
   assertNoHorizontalOverflow,
@@ -19,6 +25,12 @@ import { callGateway, signInThroughGateway } from "./sign-in.ts";
 
 const COMPANY_GROUP = "e2e-engineering";
 const PERSON_AT_PROVIDER = { username: "ada", password: "ada-e2e-password" };
+/** Someone the directory knows before their first sign-in; Keycloak gives her no groups. */
+const IMPORTED_PERSON = {
+  username: "grace",
+  password: "grace-e2e-password",
+  email: "grace@e2e.extispex.test",
+};
 
 Deno.test({
   name: "OIDC sign-in through Keycloak",
@@ -142,6 +154,68 @@ Deno.test({
           }],
         );
       });
+
+      await testContext.step(
+        "links the first sign-in to a user from an imported file",
+        async () => {
+          const companyGroup = `e2e-research-${uniquePart}`;
+          const researchers = await callGateway<Group>(deployment, "POST", "/v1/groups", 201, {
+            bearerToken: admin.accessToken,
+            body: { name: `OIDC researchers ${uniquePart}` },
+          });
+          await callGateway(deployment, "PUT", `/v1/groups/${researchers.id}/company-groups`, 200, {
+            bearerToken: admin.accessToken,
+            body: { companyGroups: [companyGroup] },
+          });
+          await callGateway(deployment, "POST", "/v1/directory/imports", 200, {
+            bearerToken: admin.accessToken,
+            body: {
+              users: [{
+                email: IMPORTED_PERSON.email,
+                displayName: "Grace Hopper",
+                companyGroups: [companyGroup],
+              }],
+            },
+          });
+          const findGraces = async () =>
+            (await callGateway<ListUsersResponse>(deployment, "GET", "/v1/users", 200, {
+              bearerToken: admin.accessToken,
+            })).users.filter((user) => user.email === IMPORTED_PERSON.email);
+          const [importedUser] = await findGraces();
+
+          const uiSession = await openUi(openBrowser, deployment, {
+            width: 1280,
+            account: null,
+            path: "/projects",
+          });
+          const { page } = uiSession;
+          await page.getByRole("link", { name: "Sign in with Keycloak" }).click();
+          await page.locator("#username").fill(IMPORTED_PERSON.username);
+          await page.locator("#password").fill(IMPORTED_PERSON.password);
+          await page.locator("#kc-login").click();
+          await page.getByRole("heading", { name: "Projects", level: 1 }).waitFor();
+          forgetExpectedRequestFailures(uiSession, [401]);
+          assertNoPageErrors(uiSession);
+          await uiSession.close();
+
+          assertEquals((await findGraces()).map((user) => user.id), [importedUser.id]);
+          const { groups } = await callGateway<{ groups: Group[] }>(
+            deployment,
+            "GET",
+            "/v1/groups",
+            200,
+            { bearerToken: admin.accessToken },
+          );
+          // Her ID token names no groups; the file's Company group keeps her in the Group.
+          assertEquals(
+            groups.find((candidate) => candidate.id === researchers.id)!.members.map((member) => [
+              member.email,
+              member.isFromCompanyGroup,
+            ]),
+            [[IMPORTED_PERSON.email, true]],
+          );
+        },
+      );
 
       await testContext.step("explains a failed sign-in on the sign-in page", async () => {
         const uiSession = await openUi(openBrowser, deployment, {

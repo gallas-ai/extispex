@@ -5,17 +5,22 @@ import { registerInternalTokenRoutes } from "./access-tokens/internal-token-rout
 import { createAccessTokenSigner } from "./access-tokens/signing-keys.ts";
 import { registerAccessRoutes } from "./access/access-routes.ts";
 import { type IdentityEnvironment, requireSignedInUser } from "./access/user-authentication.ts";
+import { registerDirectoryRoutes } from "./directory/directory-routes.ts";
 import { createOidcProvider } from "./oidc/oidc-provider.ts";
 import type { OidcSettings } from "./oidc/oidc-settings.ts";
 import { registerOidcSignInRoutes } from "./oidc/oidc-sign-in-routes.ts";
 import { registerProjectRoutes } from "./projects/project-routes.ts";
+import { registerScimRoutes } from "./scim/scim-routes.ts";
 import { createBrowserSignIns } from "./sign-in/browser-sign-ins.ts";
 import { createPasswordAttemptThrottle } from "./sign-in/password-attempt-throttle.ts";
 import { registerSignInRoutes } from "./sign-in/sign-in-routes.ts";
 import { createAccessRepository } from "./storage/access-repository.ts";
+import { createDirectoryImportRepository } from "./storage/directory-import-repository.ts";
+import { createDirectoryTokenRepository } from "./storage/directory-token-repository.ts";
 import type { IdentityDatabase } from "./storage/identity-database.ts";
 import { createOidcRepository } from "./storage/oidc-repository.ts";
 import { createProjectRepository } from "./storage/project-repository.ts";
+import { createScimRepository } from "./storage/scim-repository.ts";
 import { createSignInRepository } from "./storage/sign-in-repository.ts";
 import { createSignInThrottleRepository } from "./storage/sign-in-throttle-repository.ts";
 
@@ -53,8 +58,9 @@ export interface IdentityServiceDependencies {
 
 export interface IdentityService {
   /**
-   * Handles sign-in, users, Groups, Roles, Projects and API keys, the internal endpoints for
-   * tokens and API key resolution, the OpenAPI document and health checks.
+   * Handles sign-in, users, Groups, Roles, Projects and API keys, the SCIM endpoints and file
+   * import, the internal endpoints for tokens and API key resolution, the OpenAPI document and
+   * health checks.
    */
   handleRequest: ServiceRequestHandler;
 }
@@ -73,11 +79,18 @@ export function createIdentityService(dependencies: IdentityServiceDependencies)
   const signInRepository = createSignInRepository(dependencies.database);
   const browserSignIns = createBrowserSignIns(signInRepository, readCurrentTime);
   const oidcSettings = dependencies.oidcSettings ?? null;
+  const directoryTokenRepository = createDirectoryTokenRepository(dependencies.database);
 
   registerInternalTokenRoutes(app, {
     projectRepository,
     accessTokenSigner,
     serviceClientSecrets: dependencies.serviceClientSecrets,
+  });
+  // Outside /v1/, because a directory has a token of its own instead of a user's.
+  registerScimRoutes(app, {
+    scimRepository: createScimRepository(dependencies.database),
+    directoryTokenRepository,
+    readCurrentTime,
   });
   app.use("/v1/*", requireSignedInUser(accessTokenSigner, accessRepository));
   registerSignInRoutes(app, {
@@ -109,6 +122,11 @@ export function createIdentityService(dependencies: IdentityServiceDependencies)
     projectRepository,
     areLocalAccountsEnabled: dependencies.areLocalAccountsEnabled,
     passwordHashIterations,
+    readCurrentTime,
+  });
+  registerDirectoryRoutes(app, {
+    directoryTokenRepository,
+    directoryImportRepository: createDirectoryImportRepository(dependencies.database),
     readCurrentTime,
   });
   registerProjectRoutes(app, { projectRepository, accessRepository, readCurrentTime });

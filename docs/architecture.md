@@ -420,7 +420,8 @@ those definitions, and the Gateway builds its forwarding table and the combined 
 ### Identity
 
 - **OIDC** signs users in.
-- **SCIM 2.0** keeps users and Groups in sync between sign-ins.
+- **SCIM 2.0** keeps users and Company groups in sync between sign-ins, see
+  [Directory sync](#directory-sync).
 - **JSON or CSV import** serves companies without SCIM.
 - **Local accounts** sign in with a password that Identity stores. The local image always enables
   them; the separate Identity service enables them with `LOCAL_ACCOUNTS=enabled`, and they are off
@@ -526,6 +527,48 @@ sequenceDiagram
 - **Failures** redirect to the UI with `signInError`, because the browser arrives by navigating.
 - **The Gateway** does not follow redirects, so each reaches the browser.
 - **Signing out** ends the Extispex sign-in only. The browser stays signed in at the provider.
+
+### Directory sync
+
+Built in roadmap step 10. See [ADR 0014](adr/0014-directory-users-linked-to-oidc-by-email-once.md)
+for why a user from the directory is linked to their first OIDC sign-in by email.
+
+```http
+POST /scim/v2/Groups
+Authorization: Bearer extispex_…   (a directory token)
+Content-Type: application/scim+json
+
+{ "displayName": "team-engineering", "externalId": "5f0e…", "members": [{ "value": "<user id>" }] }
+```
+
+- **SCIM 2.0** lives at `/scim/v2` with `Users`, `Groups`, `ServiceProviderConfig`, `ResourceTypes`
+  and `Schemas`, outside `/v1` because RFC 7644 versions it. The routes are in the shared contracts,
+  so the Gateway forwards them like any other. Filters are `eq` on `userName`, `externalId`,
+  `displayName` and `id`; pages hold at most 200 resources. PATCH accepts Microsoft Entra's dialect:
+  capitalised operations, `"False"` as a string, and a value without a path.
+- **Directory tokens** are created by an Instance admin, look like API keys, are shown once and
+  stored as a SHA-256 hash. A token's last use is stored to the minute for the sync status.
+- **What the directory sees:** only users and Company groups it created, or took over from a file or
+  from an earlier OIDC sign-in by email. Local accounts stay out of its reach, so it cannot touch a
+  break-glass Instance admin. `roles`, `entitlements` and any attribute that Extispex does not keep
+  are ignored: permissions are never imported.
+- **Company groups** are a copy of the directory. A Group mapped to one, by its display name or its
+  `externalId`, gets its active members at once and loses them when the directory removes them. A
+  member added by hand stays, and a renamed Company group keeps its mappings. A sign-in counts the
+  Company groups of the ID token and of the directory together, so a token without groups does not
+  undo SCIM.
+- **Removed users:** `active: false` and `DELETE` both deactivate. Memberships from Company groups
+  and sign-ins end at once and access tokens within five minutes; the record stays. `DELETE` also
+  hides the user from SCIM, and creating them again reactivates the same record. The Instance keeps
+  at least one active Instance admin, so the directory cannot deactivate the last one.
+- **Files** for a company without SCIM go to `POST /v1/directory/imports` as `application/json` or
+  `text/csv` with the columns `email`, `displayName`, and optionally `companyGroups` separated by
+  `|` and `active`. Columns may be separated by commas or, as Excel does in some locales, by
+  semicolons. At most 5,000 rows apply in one transaction, or none when any row is invalid, and the
+  answer names each bad row. A row without `companyGroups` or `active` leaves those as they are, so
+  a partial file never removes anyone by leaving them out.
+- **The Access page** shows the SCIM address, tokens with their last use, recent imports, and each
+  Company group with its members and mapped Groups.
 
 ### Guessing passwords
 
@@ -736,6 +779,19 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The SCIM and file import step added these checks on 2026-11-10.
+
+| Tested                                        | Result                                                                                                                                         |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| SCIM 2.0 on SQLite and PostgreSQL             | Users and Groups are created, filtered, paged, replaced and changed, including Entra's PATCH dialect; a duplicate gets `409` with `uniqueness` |
+| Company groups on both databases              | Mapping, adding and removing members, a rename and a deleted Company group move people in and out of Groups and leave members added by hand    |
+| Removed users on both databases               | `active: false` and `DELETE` end memberships and keep the record; reactivating or creating the user again restores the memberships             |
+| Local accounts and the last Instance admin    | The directory cannot see, take over or put a local account in a group, and cannot deactivate the last active Instance admin                    |
+| Imported files on both databases              | CSV with a byte order mark and semicolons, and JSON, create, update and deactivate; a file with a bad row or a local account applies nothing   |
+| Linking to OIDC                               | A fake provider and Keycloak sign in a user from a file as the same user, once; a deactivated user or an unverified email is refused           |
+| SCIM and a CSV file through the Gateway       | In all-in-one and in separate services, a mapped Company group moves a SCIM user into a Group and deactivation takes them out again            |
+| The Directory sync panel in headless Chromium | A token, a refused file with its rows, an applied file, mapping and unmapping work, and the Access page fits from 360px to 2,040px             |
+
 The Logs step added these checks on 2026-11-09.
 
 | Tested                                                             | Result                                                                                                                                       |
@@ -845,6 +901,11 @@ The Prompt service step added these checks on 2026-11-07.
 - The 10,000-span limit for one Correlation ID: a read that large has not been measured
 - Very large Outputs in a result page: 50 Iterations with three attempts of 1 MB each can still
   reach 150 MB in one response
+- SCIM with a real Microsoft Entra ID or Okta client; the tests send the requests these clients are
+  documented to send. Responses have no `meta.location` and no `ETag`, and bulk requests, sorting
+  and attribute selection other than leaving out a group's members are not offered
+- A directory with tens of thousands of users or a Company group with as many members, and SCIM
+  requests during a large import, which only retries once on a conflicting insert
 - Log ingestion and search at the capacity target, and how attribute filters behave on a large
   Project: they have no index, so they read every record that the other filters leave
 - The exclusive lock of creating a partition under load
@@ -876,3 +937,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0010: Telemetry Evaluator conditions as JSON](adr/0010-telemetry-evaluator-conditions-as-json.md)
 - [ADR 0011: OIDC users identified by issuer and subject](adr/0011-oidc-users-identified-by-issuer-and-subject.md)
 - [ADR 0012: Daily log partitions on the record's own time](adr/0012-daily-log-partitions-on-the-record-time.md)
+- [ADR 0014: A user from the directory is linked to their first OIDC sign-in by email, once](adr/0014-directory-users-linked-to-oidc-by-email-once.md)

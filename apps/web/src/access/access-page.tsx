@@ -1,10 +1,11 @@
-import type { Group, User } from "@extispex/contracts";
+import type { DirectoryStatus, Group, User } from "@extispex/contracts";
 import { type FormEvent, useCallback, useState } from "react";
 import {
   addGroupMember,
   createGroup,
   createUser,
   deleteGroup,
+  getDirectoryStatus,
   listGroups,
   listUsers,
   removeGroupMember,
@@ -14,6 +15,7 @@ import {
 import { getSignInOptions } from "../api/sign-in-api.ts";
 import { useAccess } from "../sign-in/access-context.ts";
 import { MINIMUM_PASSWORD_LENGTH } from "./access-rules.ts";
+import { DirectoryPanel } from "./directory-panel.tsx";
 import { AlertIcon, PlusIcon, ShieldIcon, TrashIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
@@ -22,18 +24,25 @@ interface AccessDirectory {
   users: User[];
   groups: Group[];
   isOidcEnabled: boolean;
+  directoryStatus: DirectoryStatus;
 }
 
 /** Users and Groups, for Instance admins. Roles are given per Project, on each Project's page. */
 export function AccessPage() {
   const { credentials, showSignIn } = useAccess();
   const loadDirectory = useCallback(async (): Promise<AccessDirectory> => {
-    const [{ users }, { groups }, signInOptions] = await Promise.all([
+    const [{ users }, { groups }, signInOptions, directoryStatus] = await Promise.all([
       listUsers(credentials),
       listGroups(credentials),
       getSignInOptions(),
+      getDirectoryStatus(credentials),
     ]);
-    return { users, groups, isOidcEnabled: signInOptions.oidcProviderName !== null };
+    return {
+      users,
+      groups,
+      isOidcEnabled: signInOptions.oidcProviderName !== null,
+      directoryStatus,
+    };
   }, [credentials]);
   const [directoryState, reloadDirectory] = useApiResource(loadDirectory);
 
@@ -64,7 +73,13 @@ export function AccessPage() {
           <GroupsPanel
             groups={directoryState.resource.groups}
             users={directoryState.resource.users}
-            isOidcEnabled={directoryState.resource.isOidcEnabled}
+            hasCompanyGroups={directoryState.resource.isOidcEnabled ||
+              directoryState.resource.directoryStatus.companyGroupCount > 0}
+            onChange={reloadDirectory}
+          />
+          <DirectoryPanel
+            status={directoryState.resource.directoryStatus}
+            groups={directoryState.resource.groups}
             onChange={reloadDirectory}
           />
           <UsersPanel users={directoryState.resource.users} onChange={reloadDirectory} />
@@ -106,10 +121,11 @@ function FormProblem({ problem }: { problem: string | null }) {
 }
 
 function GroupsPanel(
-  { groups, users, isOidcEnabled, onChange }: {
+  { groups, users, hasCompanyGroups, onChange }: {
     groups: Group[];
     users: User[];
-    isOidcEnabled: boolean;
+    /** Whether Company groups exist here, from ID tokens or from the directory. */
+    hasCompanyGroups: boolean;
     onChange: () => void;
   },
 ) {
@@ -161,7 +177,7 @@ function GroupsPanel(
                 key={group.id}
                 group={group}
                 users={users}
-                isOidcEnabled={isOidcEnabled}
+                hasCompanyGroups={hasCompanyGroups}
                 isChanging={isChanging}
                 runChange={runChange}
               />
@@ -173,10 +189,10 @@ function GroupsPanel(
 }
 
 function GroupItem(
-  { group, users, isOidcEnabled, isChanging, runChange }: {
+  { group, users, hasCompanyGroups, isChanging, runChange }: {
     group: Group;
     users: User[];
-    isOidcEnabled: boolean;
+    hasCompanyGroups: boolean;
     isChanging: boolean;
     runChange: (makeChange: () => Promise<unknown>) => Promise<boolean>;
   },
@@ -239,7 +255,7 @@ function GroupItem(
               <span
                 className="member-chip-name"
                 title={member.isFromCompanyGroup
-                  ? `${member.email}, from a Company group: their next sign-in decides again`
+                  ? `${member.email}, from a Company group: the directory or their next sign-in decides again`
                   : member.email}
               >
                 {member.displayName}
@@ -287,8 +303,14 @@ function GroupItem(
           </button>
         </form>
       )}
-      {isOidcEnabled && (
-        <CompanyGroupsForm group={group} isChanging={isChanging} runChange={runChange} />
+      {hasCompanyGroups && (
+        <CompanyGroupsForm
+          // The Directory panel can change the mapping too, which starts the text over.
+          key={group.companyGroups.join("\n")}
+          group={group}
+          isChanging={isChanging}
+          runChange={runChange}
+        />
       )}
     </li>
   );
@@ -441,6 +463,11 @@ function UsersPanel({ users, onChange }: { users: User[]; onChange: () => void }
                     <span className="role-badge role-badge-admin">
                       <ShieldIcon size={11} />
                       Instance admin
+                    </span>
+                  )}
+                  {user.directorySource !== null && (
+                    <span className="status-text">
+                      {user.directorySource === "scim" ? "SCIM" : "Imported"}
                     </span>
                   )}
                   {user.deactivatedAt !== null && <span className="status-text">Deactivated</span>}
