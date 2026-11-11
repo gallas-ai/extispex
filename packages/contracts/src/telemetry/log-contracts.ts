@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { attributeFiltersSchema } from "./attribute-filter.ts";
 
 export const logSeveritySchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 
@@ -31,10 +32,6 @@ export const logRecordSchema = z.object({
 });
 
 const isoTimeSchema = z.iso.datetime({ offset: true });
-const attributeFilterSchema = z.string().regex(/^[^=]+=/);
-
-export const MAXIMUM_LOG_ATTRIBUTE_FILTERS = 10;
-
 export const listLogsQuerySchema = z.object({
   /** Records at or after this time. */
   from: isoTimeSchema.optional(),
@@ -48,10 +45,7 @@ export const listLogsQuerySchema = z.object({
   /** This severity or a higher one. */
   minimumSeverity: logSeveritySchema.optional(),
   /** `key=value`, which may be repeated. Every filter must match. */
-  attribute: z.union([
-    attributeFilterSchema,
-    z.array(attributeFilterSchema).max(MAXIMUM_LOG_ATTRIBUTE_FILTERS),
-  ]).optional(),
+  attribute: attributeFiltersSchema.optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
   cursor: z.string().regex(/^\d{1,20}\.[0-9a-f]{64}$/).optional(),
 });

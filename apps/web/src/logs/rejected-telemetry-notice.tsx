@@ -7,6 +7,7 @@ import { useApiResource } from "../ui/use-api-resource.ts";
 const RECORD_WORDS = {
   spans: ["span", "spans"],
   logs: ["log record", "log records"],
+  metrics: ["metric data point", "metric data points"],
 } as const;
 
 interface RejectedTelemetryNoticeProps {

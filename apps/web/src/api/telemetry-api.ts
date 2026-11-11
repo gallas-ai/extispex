@@ -1,7 +1,11 @@
 import type {
   ListLogsResponse,
+  ListMetricAttributesResponse,
+  ListMetricsResponse,
   ListTracesResponse,
   LogSeverity,
+  MetricAggregation,
+  QueryMetricResponse,
   RejectedTelemetry,
   TraceDetailResponse,
 } from "@extispex/contracts";
@@ -52,4 +56,36 @@ export function listLogs(credentials: ApiCredentials, query: LogQuery): Promise<
 
 export function getRejectedTelemetry(credentials: ApiCredentials): Promise<RejectedTelemetry> {
   return requestJson(credentials, "/v1/rejected-telemetry");
+}
+
+export function listMetrics(credentials: ApiCredentials): Promise<ListMetricsResponse> {
+  return requestJson(credentials, "/v1/metrics");
+}
+
+export function listMetricAttributes(
+  credentials: ApiCredentials,
+  metricName: string,
+): Promise<ListMetricAttributesResponse> {
+  const searchParameters = new URLSearchParams({ metric: metricName });
+  return requestJson(credentials, `/v1/metrics/attributes?${searchParameters}`);
+}
+
+export interface MetricQuery {
+  metric: string;
+  aggregation: MetricAggregation;
+  from: string;
+  to: string;
+  groupBy?: string;
+  attribute?: string;
+}
+
+export function queryMetric(
+  credentials: ApiCredentials,
+  query: MetricQuery,
+): Promise<QueryMetricResponse> {
+  const searchParameters = new URLSearchParams();
+  for (const [parameter, value] of Object.entries(query)) {
+    if (value !== undefined && value !== "") searchParameters.set(parameter, value);
+  }
+  return requestJson(credentials, `/v1/metrics/query?${searchParameters}`);
 }

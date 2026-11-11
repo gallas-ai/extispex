@@ -13,9 +13,9 @@ their Groups, and applications send its API keys.
 > judged whether an undertaking would end well. Looking inside and judging the outcome is tracing
 > and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
 
-**Status:** early development. The trace and log pipelines, versioned prompts, Projects with API
-keys, users with Groups and Roles synced from the company's directory, and Datasets judged by Regex
-Evaluators work end to end. Metrics and the other Evaluators are designed in
+**Status:** early development. The trace, log and metric pipelines, versioned prompts, Projects with
+API keys, users with Groups and Roles synced from the company's directory, and Datasets judged by
+Regex Evaluators work end to end. The other Evaluators are designed in
 [docs/architecture.md](docs/architecture.md) but not built yet.
 
 ## Try it locally
@@ -132,6 +132,10 @@ Logs go to the same ports, at `/v1/logs` over HTTP. A log with a `trace_id` must
 as a startup message, needs nothing extra. A log more than 30 days old or more than one day ahead is
 rejected. **Traces** and **Logs** in the UI show how many records were rejected in the last 24
 hours, and why.
+
+Metrics go to `/v1/metrics` over HTTP and need neither attribute. Sums, gauges and explicit-bucket
+histograms are accepted, cumulative or delta; exponential histograms and summaries are rejected.
+**Metrics** in the UI charts one metric with `sum`, `avg`, `rate` or `p95`, grouped by an attribute.
 
 Requests may be compressed with gzip or deflate, over HTTP (`Content-Encoding`) and gRPC alike.
 Other encodings, such as zstd or snappy, are refused with `415` on HTTP. One export request may hold

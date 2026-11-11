@@ -20,7 +20,7 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 9    | [OIDC sign-in](#9-oidc-sign-in)                                                                        | Done   |
 | 10   | [SCIM and file import](#10-scim-and-file-import)                                                       | Done   |
 | 11   | [Logs](#11-logs)                                                                                       | Done   |
-| 12   | [Metrics](#12-metrics)                                                                                 |        |
+| 12   | [Metrics](#12-metrics)                                                                                 | Done   |
 | 13   | [Retention and Project deletion](#13-retention-and-project-deletion)                                   |        |
 | 14   | [Helm chart](#14-helm-chart)                                                                           |        |
 | 15   | [Nightly performance test and module boundaries](#15-nightly-performance-test-and-module-boundaries)   |        |
@@ -419,6 +419,11 @@ data disappears from every service.
 - Left over from step 11: dropping expired `logs_<yyyymmdd>` partitions on PostgreSQL, see
   [ADR 0012](adr/0012-daily-log-partitions-on-the-record-time.md), deleting old log records on
   SQLite, and removing `rejection_counts` rows older than the 24 hours they are shown for.
+- Left over from step 12: dropping expired `metric_points_<yyyymmdd>` partitions on PostgreSQL the
+  same way, see
+  [ADR 0015](adr/0015-metric-time-series-stored-once-and-cumulative-values-at-query-time.md),
+  deleting old metric points on SQLite, and removing `metric_series` rows whose
+  `last_seen_unix_nano` is older than the retention period.
 
 **Decisions to make first:**
 

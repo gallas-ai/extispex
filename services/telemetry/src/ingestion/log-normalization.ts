@@ -9,6 +9,7 @@ import {
   SPAN_ID_HEX_LENGTH,
   TRACE_ID_HEX_LENGTH,
 } from "./otlp-values.ts";
+import { findTimeWindowRejection } from "./record-time-window.ts";
 import { makeTextStorable, makeValueStorable } from "./stored-text.ts";
 
 /** A log record converted from OTLP into the platform's own representation. */
@@ -36,14 +37,6 @@ export interface LogNormalizationResult {
 }
 
 const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
-const MILLISECONDS_PER_DAY = 86_400_000n;
-
-/**
- * Records outside this window around the receive time are rejected. It bounds how many daily
- * partitions a wrong clock can create, and older records would fall to retention at once.
- */
-export const OLDEST_ACCEPTED_LOG_AGE_DAYS = 30n;
-export const LATEST_ACCEPTED_LOG_DAYS_AHEAD = 1n;
 
 const SERVICE_NAME_RESOURCE_ATTRIBUTE = "service.name";
 const HIGHEST_SEVERITY_NUMBER = 24;
@@ -145,24 +138,6 @@ function chooseLogTime(otlpLogRecord: OtlpLogRecord): bigint | null {
   for (const candidate of [otlpLogRecord.timeUnixNano, otlpLogRecord.observedTimeUnixNano]) {
     const parsedTime = parseUnixNanoseconds(candidate);
     if (parsedTime !== null && parsedTime > 0n) return parsedTime;
-  }
-  return null;
-}
-
-function findTimeWindowRejection(
-  timeUnixNano: bigint,
-  receivedUnixNanoseconds: bigint,
-): string | null {
-  const nanosecondsPerDay = MILLISECONDS_PER_DAY * NANOSECONDS_PER_MILLISECOND;
-  const oldestAccepted = receivedUnixNanoseconds -
-    OLDEST_ACCEPTED_LOG_AGE_DAYS * nanosecondsPerDay;
-  const latestAccepted = receivedUnixNanoseconds +
-    LATEST_ACCEPTED_LOG_DAYS_AHEAD * nanosecondsPerDay;
-  if (timeUnixNano < oldestAccepted) {
-    return `time is more than ${OLDEST_ACCEPTED_LOG_AGE_DAYS} days old`;
-  }
-  if (timeUnixNano > latestAccepted) {
-    return `time is more than ${LATEST_ACCEPTED_LOG_DAYS_AHEAD} day in the future`;
   }
   return null;
 }

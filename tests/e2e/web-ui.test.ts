@@ -25,7 +25,7 @@ const COLUMNS_BESIDE_OPEN_TRACE = ["trace", "duration", "started"];
 /** Every window width the layout must fit without scrolling sideways, phone to wide monitor. */
 const SWEPT_WIDTHS = Array.from({ length: 42 }, (_, widthIndex) => 360 + widthIndex * 40);
 /** Up to this window width the sections sit behind a menu button, as `styles.css` sets it. */
-const NAVIGATION_MENU_MAXIMUM_WIDTH = 720;
+const NAVIGATION_MENU_MAXIMUM_WIDTH = 800;
 
 /** The waterfall of the agent trace: span name and nesting level, in display order. */
 const AGENT_TRACE_WATERFALL: [string, number][] = [
