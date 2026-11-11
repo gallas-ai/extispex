@@ -10,3 +10,4 @@ export * from "./service-http-app.ts";
 export * from "./service-tokens.ts";
 export * from "./periodic-task.ts";
 export * from "./project-lifecycle-client.ts";
+export * from "./deleted-project-removal.ts";

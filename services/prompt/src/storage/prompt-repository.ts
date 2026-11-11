@@ -54,6 +54,8 @@ export interface PromptRepository {
   ): Promise<PromptLabel | null>;
   /** False when the label does not exist. */
   removeLabel(prompt: StoredPrompt, labelName: string): Promise<boolean>;
+  /** Deletes every prompt of a deleted Project, with its versions and labels. */
+  removeProjectData(projectId: string): Promise<void>;
 }
 
 type PromptVersionRow = InferEntity<typeof PromptVersionRecord>;
@@ -61,6 +63,20 @@ type PromptLabelRow = InferEntity<typeof PromptLabelRecord>;
 type PromptRow = InferEntity<typeof PromptRecord>;
 
 export function createPromptRepository(database: PromptDatabase): PromptRepository {
+  const removeProjectData = async (projectId: string) => {
+    await database.orm.em.fork().transactional(async (entityManager) => {
+      // Children first, so that it does not depend on foreign keys being enforced.
+      for (const tableName of ["prompt_labels", "prompt_versions"]) {
+        await entityManager.execute(
+          `delete from ${tableName}
+            where prompt_id in (select id from prompts where project_id = ?)`,
+          [projectId],
+        );
+      }
+      await entityManager.execute("delete from prompts where project_id = ?", [projectId]);
+    });
+  };
+
   const findVersionRow = async (
     entityManager: EntityManager,
     prompt: StoredPrompt,
@@ -79,6 +95,8 @@ export function createPromptRepository(database: PromptDatabase): PromptReposito
   };
 
   return {
+    removeProjectData,
+
     async createPrompt(projectId, prompt, firstVersion, createdAt) {
       const promptId = crypto.randomUUID();
       try {

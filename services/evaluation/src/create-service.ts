@@ -1,7 +1,12 @@
 import type { ServiceClient, ServiceRequestHandler } from "@extispex/service-client";
+import { createBackgroundLease } from "@extispex/service-storage";
 import {
+  createDeletedProjectRemoval,
   createServiceHttpApp,
+  DEFAULT_DATA_LIFECYCLE_INTERVAL_MILLISECONDS,
+  type DeletedProjectRemovalOutcome,
   type ProjectAccessEnvironment,
+  type ProjectLifecycleSource,
   type RequestAuthenticator,
   requireProjectAccess,
   type SecretCipher,
@@ -25,6 +30,7 @@ import type { JobQueue } from "./job-queue/job-queue.ts";
 import { createDatasetRepository } from "./storage/dataset-repository.ts";
 import type { EvaluationDatabase } from "./storage/evaluation-database.ts";
 import { createEvaluationRunRepository } from "./storage/evaluation-run-repository.ts";
+import { removeEvaluationProjectData } from "./storage/project-data-repository.ts";
 import { createTargetRepository } from "./storage/target-repository.ts";
 import { parseDestinationAllowlist } from "./targets/destination-allowlist.ts";
 import {
@@ -112,17 +118,48 @@ export interface EvaluationWorkerServiceDependencies {
   /** Reaches Telemetry's internal API, with the service token that `serviceTokens` provides. */
   telemetryService: ServiceClient;
   serviceTokens: ServiceTokenSource;
+  /** Identity's deleted Projects, asked with this service's token. */
+  projectLifecycle: ProjectLifecycleSource;
   logger: StructuredLogger;
   traceCompletionTiming?: Partial<TraceCompletionTiming>;
   regexTimeoutMilliseconds?: number;
   inactiveRunTimeoutMilliseconds?: number;
   readCurrentTime?: () => Date;
+  /** How often `runDataLifecycle` runs; its lease lasts two intervals. */
+  dataLifecycleIntervalMilliseconds?: number;
+  /** Who holds the data lifecycle's lease; one ID per process by default. */
+  leaseHolder?: string;
+}
+
+export interface EvaluationWorkerService extends EvaluationWorker {
+  /**
+   * One run of the periodic data work, if this worker gets the lease: removes deleted Projects'
+   * Datasets, runs and Targets. `main-worker.ts` runs it every
+   * `DATA_LIFECYCLE_INTERVAL_MILLISECONDS`. A lease rather than the job queue, so that it works
+   * like the other services and needs no job kind of its own in pg-boss and the SQLite queue.
+   */
+  runDataLifecycle(): Promise<DeletedProjectRemovalOutcome>;
 }
 
 export function createEvaluationWorker(
   dependencies: EvaluationWorkerServiceDependencies,
-): EvaluationWorker {
-  return createAttemptEvaluationWorker({
+): EvaluationWorkerService {
+  const readCurrentTime = dependencies.readCurrentTime ?? (() => new Date());
+  const lease = createBackgroundLease(dependencies.database, {
+    name: "data-lifecycle",
+    holder: dependencies.leaseHolder ?? crypto.randomUUID(),
+    durationMilliseconds: 2 *
+      (dependencies.dataLifecycleIntervalMilliseconds ??
+        DEFAULT_DATA_LIFECYCLE_INTERVAL_MILLISECONDS),
+  });
+  const runDataLifecycle = createDeletedProjectRemoval({
+    tryAcquireLease: lease.tryAcquire,
+    projectLifecycle: dependencies.projectLifecycle,
+    removeProjectData: (projectId) => removeEvaluationProjectData(dependencies.database, projectId),
+    logger: dependencies.logger,
+    readCurrentTime,
+  });
+  const worker = createAttemptEvaluationWorker({
     evaluationRunRepository: createEvaluationRunRepository(dependencies.database),
     targetRepository: createTargetRepository(
       dependencies.database,
@@ -148,6 +185,7 @@ export function createEvaluationWorker(
       DEFAULT_REGEX_TIMEOUT_MILLISECONDS,
     inactiveRunTimeoutMilliseconds: dependencies.inactiveRunTimeoutMilliseconds ??
       DEFAULT_INACTIVE_RUN_TIMEOUT_MILLISECONDS,
-    readCurrentTime: dependencies.readCurrentTime ?? (() => new Date()),
+    readCurrentTime,
   });
+  return { ...worker, runDataLifecycle };
 }

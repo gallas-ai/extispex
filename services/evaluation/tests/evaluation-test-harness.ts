@@ -17,7 +17,11 @@ import {
   generateMasterKey,
   type ProjectResolver,
 } from "@extispex/service-runtime";
-import { createTestAccessTokens } from "@extispex/service-runtime/testing";
+import {
+  createTestAccessTokens,
+  createTestProjectLifecycle,
+  type TestProjectLifecycle,
+} from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import {
   type AttemptJob,
@@ -25,7 +29,7 @@ import {
   createEvaluationWorker,
   type EvaluationApiService,
   type EvaluationDatabase,
-  type EvaluationWorker,
+  type EvaluationWorkerService,
   type JobQueue,
   openEvaluationDatabase,
   TARGET_CREDENTIAL_CIPHER_PURPOSE,
@@ -124,7 +128,9 @@ export function answerLikeAnApplication(
 export interface TestHarness {
   api: EvaluationApiService;
   database: EvaluationDatabase;
-  worker: EvaluationWorker;
+  worker: EvaluationWorkerService;
+  /** What the worker's data lifecycle hears from Identity. */
+  projectLifecycle: TestProjectLifecycle;
   queuedJobs: AttemptJob[];
   telemetry: FakeTelemetry;
   readClock(): Date;
@@ -148,6 +154,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
         await entityManager.execute("delete from evaluation_runs");
         await entityManager.execute("delete from datasets");
         await entityManager.execute("delete from targets");
+        await entityManager.execute("delete from background_leases");
         let clockMilliseconds = Date.parse("2026-11-08T10:00:00Z");
         const readCurrentTime = () => new Date(clockMilliseconds += 1_000);
         const queuedJobs: AttemptJob[] = [];
@@ -160,6 +167,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
           stop: () => Promise.resolve(),
         };
         const logger = createStructuredLogger("evaluation-test");
+        const projectLifecycle = createTestProjectLifecycle();
         const telemetry: FakeTelemetry = {
           correlations: new Map(),
           firstReceivedAtBySession: new Map(),
@@ -193,6 +201,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
           targetTimeoutMilliseconds: 2_000,
           telemetryService: createFakeTelemetryService(telemetry, readClock),
           serviceTokens: FAKE_SERVICE_TOKENS,
+          projectLifecycle,
           logger,
           regexTimeoutMilliseconds: 300,
           inactiveRunTimeoutMilliseconds: INACTIVE_RUN_TIMEOUT_MILLISECONDS,
@@ -209,6 +218,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
             readCurrentTime,
           }),
           worker,
+          projectLifecycle,
           queuedJobs,
           telemetry,
           readClock,
