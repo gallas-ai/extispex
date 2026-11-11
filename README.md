@@ -50,6 +50,9 @@ image also keeps it in `/data/initial-admin-password`. Then send a sample conver
 To choose them yourself, set `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` (at least 12
 characters) and `BOOTSTRAP_PROJECT_API_KEY` (at least 32 characters) before the first start.
 
+The image also creates `/data/master-key`, which encrypts Target credentials and the key that signs
+access tokens. Keep the volume, or set `MASTER_KEY` (`openssl rand -base64 32`) yourself.
+
 ## Projects, users and Roles
 
 A Project keeps its telemetry and prompts apart from every other Project. People belong to Groups,
@@ -166,10 +169,18 @@ The full API, including comparing two versions, is described at `/v1/openapi.jso
 
 ## Evaluating your application
 
-A Dataset holds Test Cases: an input and the Regex Evaluators that judge your application's Output.
-Your own script runs the application and reports each Output, so this works from any CI job. Create
-Datasets under **Datasets** in the UI or through the REST API, and see the results under **Runs**.
-[examples/](examples/README.md) has a complete script in TypeScript and Python:
+A Dataset holds Test Cases: an input, or the steps of a whole Session, and the Evaluators that judge
+your application's Output and spans. Create Datasets under **Datasets** in the UI or through the
+REST API, and see the results under **Runs**. There are two ways to run one:
+
+- **Server-Driven Execution:** create a Target under **Targets**, the URL of your application, and
+  choose **Run against Target** on a Dataset. The platform calls the Target for every step. Separate
+  services call only the addresses in `EVALUATION_TARGET_ALLOWED_DESTINATIONS`, such as
+  `agent.company.example:443,10.20.0.0/16`; the local image allows any.
+  [examples/](examples/README.md) has a sample Target.
+- **Client-Driven Execution:** your own script runs the application and reports each Output, so this
+  works from any CI job. [examples/](examples/README.md) has a complete script in TypeScript and
+  Python:
 
 ```sh
 cd examples/typescript && API_KEY=$EXTISPEX_API_KEY deno task run-dataset

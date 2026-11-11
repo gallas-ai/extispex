@@ -3071,8 +3071,11 @@ textarea {
 }
 
 /* On narrow screens the top bar keeps only icons; the names stay available to screen readers. */
-/* Below this width the section names no longer fit beside the Project switcher. */
-@media (max-width: 1080px) {
+/*
+ * Below this width the section names no longer fit beside the Project switcher. It leaves room for
+ * Linux fonts, which are wider than macOS ones: CI caught 8 names overlapping that fitted locally.
+ */
+@media (max-width: 1240px) {
   .top-bar-start {
     gap: 12px;
   }
@@ -3096,6 +3099,84 @@ textarea {
   .top-bar-theme,
   .project-switcher-trigger .role-badge {
     display: none;
+  }
+}
+
+/*
+ * On a phone the sections sit behind a menu button, so that any number of them fits beside the
+ * Project switcher. The opened menu lists them with their names. Wider screens show them in the
+ * bar, where the wrapper takes no part in the layout.
+ */
+.navigation-menu {
+  display: contents;
+}
+
+.navigation-menu-button {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .navigation-menu {
+    position: relative;
+    display: block;
+  }
+
+  .navigation-menu-button {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    cursor: pointer;
+  }
+
+  .navigation-menu-button:hover,
+  .navigation-menu-button[aria-expanded="true"] {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
+
+  .navigation-menu-button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--color-focus-ring);
+  }
+
+  .primary-navigation {
+    display: none;
+  }
+
+  .primary-navigation-open {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: min(240px, calc(100vw - 32px));
+    padding: 6px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-large);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-large);
+    animation: popover-in 120ms ease-out;
+  }
+
+  .primary-navigation-open .navigation-link {
+    height: 36px;
+    padding: 0 10px;
+  }
+
+  .primary-navigation-open .navigation-link-text {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
   }
 }
 
@@ -4119,20 +4200,6 @@ textarea {
   }
 }
 
-@media (max-width: 480px) {
-  .top-bar-start {
-    gap: 8px;
-  }
-
-  .primary-navigation {
-    gap: 0;
-  }
-
-  .navigation-link {
-    padding: 0 5px;
-  }
-}
-
 @media (max-width: 640px) {
   .log-table .column-log-time {
     width: 112px;
@@ -4162,4 +4229,58 @@ textarea {
   .log-filter-select .select-input {
     width: 100%;
   }
+}
+
+/* Targets, Session Test Cases and Transcripts */
+
+.target-form {
+  display: grid;
+  gap: 12px;
+}
+
+.step-editor-list {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.step-editor-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.step-editor-row .text-area {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.transcript {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--color-border);
+  list-style: none;
+}
+
+.transcript-step {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.transcript-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.transcript-label {
+  color: var(--color-text-muted);
+  font-weight: 600;
 }

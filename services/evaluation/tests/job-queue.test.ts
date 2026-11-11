@@ -1,11 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { createStructuredLogger } from "@extispex/service-runtime";
 import { listTestDatabases } from "@extispex/service-storage/testing";
-import {
-  type EvaluateAttemptJob,
-  openEvaluationDatabase,
-  openJobQueue,
-} from "../src/create-service.ts";
+import { type AttemptJob, openEvaluationDatabase, openJobQueue } from "../src/create-service.ts";
 import { JOB_RETRY_LIMIT } from "../src/job-queue/job-queue.ts";
 
 const logger = createStructuredLogger("evaluation-queue-test");
@@ -56,7 +52,7 @@ for (const testDatabase of listTestDatabases("evaluation")) {
       const database = await openEvaluationDatabase(testDatabase.url);
       const jobQueue = await openJobQueue(testDatabase.url, database, logger);
       const iterationPrefix = crypto.randomUUID();
-      const deliveries: EvaluateAttemptJob[] = [];
+      const deliveries: AttemptJob[] = [];
       try {
         await jobQueue.startWorking((job) => {
           if (!job.iterationId.startsWith(iterationPrefix)) return Promise.resolve();

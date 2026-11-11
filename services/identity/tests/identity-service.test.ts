@@ -1,4 +1,10 @@
-import { assert, assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertMatch,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import type {
   AccessibleProject,
   AccessTokenResponse,
@@ -12,7 +18,13 @@ import type {
   Project,
   User,
 } from "@extispex/contracts";
-import { createAccessTokenVerifier, createStructuredLogger } from "@extispex/service-runtime";
+import {
+  createAccessTokenVerifier,
+  createStructuredLogger,
+  generateMasterKey,
+  InvalidConfigurationError,
+  isSealedSecret,
+} from "@extispex/service-runtime";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import {
   createFirstAdministratorIfNone,
@@ -21,7 +33,10 @@ import {
   type IdentityDatabase,
   type IdentityService,
   openIdentityDatabase,
+  protectStoredSigningKeys,
 } from "../src/create-service.ts";
+import { createSigningKeyCipher } from "../src/access-tokens/signing-keys.ts";
+import { SigningKeyRecord } from "../src/storage/identity-entities.ts";
 import {
   MAXIMUM_ATTEMPTS_PER_ACCOUNT,
   MAXIMUM_ATTEMPTS_PER_ADDRESS,
@@ -71,6 +86,8 @@ const IDENTITY_TABLES = [
   "signing_keys",
 ];
 
+const TEST_SIGNING_KEY_CIPHER = await createSigningKeyCipher(generateMasterKey());
+
 function createTestIdentityService(
   database: IdentityDatabase,
   options: { areLocalAccountsEnabled?: boolean } = {},
@@ -78,6 +95,7 @@ function createTestIdentityService(
   let clockMilliseconds = Date.parse("2026-11-07T10:00:00Z");
   return createIdentityService({
     database,
+    signingKeyCipher: TEST_SIGNING_KEY_CIPHER,
     areLocalAccountsEnabled: options.areLocalAccountsEnabled ?? true,
     serviceClientSecrets: new Map([["evaluation", EVALUATION_CLIENT_SECRET]]),
     logger: createStructuredLogger("identity-test"),
@@ -969,6 +987,7 @@ defineIdentityTest("lets an account try again after the window ends", async ({ d
   let nowMilliseconds = Date.parse("2026-11-07T10:00:00Z");
   const identityService = createIdentityService({
     database,
+    signingKeyCipher: TEST_SIGNING_KEY_CIPHER,
     areLocalAccountsEnabled: true,
     serviceClientSecrets: new Map(),
     logger: createStructuredLogger("identity-test"),
@@ -1049,3 +1068,70 @@ defineIdentityTest("keeps Company groups on a Group, for Instance admins only", 
   // Deleting the Group removes its mappings with it.
   await expectJson(admin.send("DELETE", `/v1/groups/${group.id}`), 204);
 });
+
+interface StoredSigningKeyRow {
+  id: string;
+  private_key_jwk: string;
+}
+
+function readStoredSigningKeys(database: IdentityDatabase): Promise<StoredSigningKeyRow[]> {
+  return database.orm.em.fork().execute<StoredSigningKeyRow[]>(
+    "select id, private_key_jwk from signing_keys order by id",
+  );
+}
+
+function readKeyId(accessToken: string): string {
+  const header = accessToken.split(".")[0].replaceAll("-", "+").replaceAll("_", "/");
+  return JSON.parse(atob(header)).kid;
+}
+
+defineIdentityTest(
+  "keeps the private signing key encrypted in the database",
+  async ({ database, admin }) => {
+    // The administrator's sign-in issued a token, so the first key exists.
+    const storedKeys = await readStoredSigningKeys(database);
+    assertEquals(storedKeys.length, 1);
+    assert(isSealedSecret(storedKeys[0].private_key_jwk));
+    assert(!storedKeys[0].private_key_jwk.includes('"d"'));
+    assertEquals(readKeyId(admin.accessToken), storedKeys[0].id);
+  },
+);
+
+defineIdentityTest(
+  "encrypts a signing key that an earlier version stored in plain text",
+  async ({ database }) => {
+    await database.orm.em.fork().execute("delete from signing_keys");
+    const keyPair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign", "verify"],
+    ) as CryptoKeyPair;
+    const plainPrivateKey = JSON.stringify(
+      await crypto.subtle.exportKey("jwk", keyPair.privateKey),
+    );
+    await database.orm.em.fork().insert(SigningKeyRecord, {
+      id: "01a00000-0000-7000-8000-000000000001",
+      sealedPrivateKeyJwk: plainPrivateKey,
+      publicKeyJwk: JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.publicKey)),
+      createdAt: new Date("2026-11-01T10:00:00Z"),
+    });
+
+    await protectStoredSigningKeys(database, TEST_SIGNING_KEY_CIPHER);
+    const [protectedKey] = await readStoredSigningKeys(database);
+    assert(isSealedSecret(protectedKey.private_key_jwk));
+    // A second start, or a second replica, leaves the key as it is.
+    await protectStoredSigningKeys(database, TEST_SIGNING_KEY_CIPHER);
+    assertEquals(await readStoredSigningKeys(database), [protectedKey]);
+
+    // Tokens are still signed with that key, so tokens issued before the upgrade stay valid.
+    const admin = await signIn(createTestIdentityService(database), ADMIN_EMAIL, ADMIN_PASSWORD);
+    assertEquals(readKeyId(admin.accessToken), protectedKey.id);
+
+    const otherCipher = await createSigningKeyCipher(generateMasterKey());
+    await assertRejects(
+      () => protectStoredSigningKeys(database, otherCipher),
+      InvalidConfigurationError,
+      "MASTER_KEY",
+    );
+  },
+);

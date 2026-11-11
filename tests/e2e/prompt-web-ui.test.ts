@@ -213,12 +213,20 @@ Deno.test({
           element.getBoundingClientRect().height
         );
         assertEquals(Math.round(topBarHeight), 52);
-        // The section names give way to icons but stay the links' accessible names.
-        const promptsLink = page.getByRole("link", { name: "Prompts" });
+        // On a phone the sections sit behind the menu button.
+        const promptsLink = page.getByRole("navigation", { name: "Sections" })
+          .getByRole("link", { name: "Prompts" });
+        assert(!(await promptsLink.isVisible()), "The sections should wait behind the menu.");
+        await page.getByRole("button", { name: "Show sections" }).click();
+        assertEquals(await promptsLink.getAttribute("aria-current"), "page");
+
+        // On a tablet the section names give way to icons but stay the links' accessible names.
+        await page.keyboard.press("Escape");
+        await page.setViewportSize({ width: 1000, height: 800 });
         assert(await promptsLink.isVisible());
         assert(
           (await promptsLink.evaluate((element) => element.getBoundingClientRect().width)) < 50,
-          "The Prompts link should show only its icon on a phone.",
+          "The Prompts link should show only its icon on a tablet.",
         );
         assertNoPageErrors(uiSession);
         await uiSession.close();

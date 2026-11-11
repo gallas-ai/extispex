@@ -49,6 +49,14 @@ export const CloseIcon = (props: IconProps) => (
   </StrokeIcon>
 );
 
+export const MenuIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <path d="M4 6h16" />
+    <path d="M4 12h16" />
+    <path d="M4 18h16" />
+  </StrokeIcon>
+);
+
 export const CopyIcon = (props: IconProps) => (
   <StrokeIcon {...props}>
     <rect width="14" height="14" x="8" y="8" rx="2" />
@@ -211,6 +219,14 @@ export const DatasetIcon = (props: IconProps) => (
 export const RunIcon = (props: IconProps) => (
   <StrokeIcon {...props}>
     <path d="M6 4l14 8-14 8Z" />
+  </StrokeIcon>
+);
+
+export const TargetIcon = (props: IconProps) => (
+  <StrokeIcon {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <circle cx="12" cy="12" r="6" />
+    <circle cx="12" cy="12" r="2" />
   </StrokeIcon>
 );
 

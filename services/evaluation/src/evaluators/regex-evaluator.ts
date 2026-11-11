@@ -8,6 +8,7 @@ export interface RegexEvaluation {
   pattern: string;
   flags: string;
   expectMatch: boolean;
+  step?: number;
 }
 
 type WorkerMessage = { ready: true } | { matched: boolean };
@@ -67,11 +68,14 @@ export async function runRegexEvaluator(
   }
   const hasMatched = matchResult.status === "matched";
   const expression = `/${evaluator.pattern}/${evaluator.flags}`;
+  const subject = evaluator.step === undefined
+    ? "The Output"
+    : `The Output of step ${evaluator.step}`;
   return {
     ...baseResult,
     outcome: hasMatched === evaluator.expectMatch ? "passed" : "failed",
     reason: hasMatched
-      ? `The Output matches ${expression}.`
-      : `The Output does not match ${expression}.`,
+      ? `${subject} matches ${expression}.`
+      : `${subject} does not match ${expression}.`,
   };
 }

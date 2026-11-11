@@ -1,7 +1,9 @@
 import { createHttpServiceClient } from "@extispex/service-client";
 import {
   createIdentityServiceTokenSource,
+  createSecretCipher,
   createStructuredLogger,
+  readOptionalEnvironmentVariable,
   readPositiveIntegerEnvironmentVariable,
   readRequiredEnvironmentVariable,
   runOnTerminationSignal,
@@ -10,9 +12,11 @@ import {
   createEvaluationWorker,
   DEFAULT_INACTIVE_RUN_TIMEOUT_MILLISECONDS,
   DEFAULT_REGEX_TIMEOUT_MILLISECONDS,
+  DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   DEFAULT_TRACE_COMPLETION_TIMING,
   openEvaluationDatabase,
   openJobQueue,
+  TARGET_CREDENTIAL_CIPHER_PURPOSE,
 } from "./create-service.ts";
 
 const logger = createStructuredLogger("evaluation-worker");
@@ -23,6 +27,18 @@ const jobQueue = await openJobQueue(databaseUrl, database, logger);
 const evaluationWorker = createEvaluationWorker({
   database,
   jobQueue,
+  targetCredentialCipher: await createSecretCipher(
+    readRequiredEnvironmentVariable("MASTER_KEY"),
+    TARGET_CREDENTIAL_CIPHER_PURPOSE,
+  ),
+  // Nothing is allowed unless an operator says so: Targets are URLs that users supply.
+  targetAllowedDestinations: readOptionalEnvironmentVariable(
+    "EVALUATION_TARGET_ALLOWED_DESTINATIONS",
+  ) ?? "",
+  targetTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
+    "EVALUATION_TARGET_TIMEOUT_MILLISECONDS",
+    DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
+  ),
   telemetryService: createHttpServiceClient(readRequiredEnvironmentVariable("TELEMETRY_URL")),
   serviceTokens: createIdentityServiceTokenSource({
     identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),

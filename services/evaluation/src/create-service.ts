@@ -4,6 +4,7 @@ import {
   type ProjectAccessEnvironment,
   type RequestAuthenticator,
   requireProjectAccess,
+  type SecretCipher,
   type ServiceTokenSource,
   type StructuredLogger,
 } from "@extispex/service-runtime";
@@ -24,6 +25,14 @@ import type { JobQueue } from "./job-queue/job-queue.ts";
 import { createDatasetRepository } from "./storage/dataset-repository.ts";
 import type { EvaluationDatabase } from "./storage/evaluation-database.ts";
 import { createEvaluationRunRepository } from "./storage/evaluation-run-repository.ts";
+import { createTargetRepository } from "./storage/target-repository.ts";
+import { parseDestinationAllowlist } from "./targets/destination-allowlist.ts";
+import {
+  createTargetClient,
+  DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
+  type ResolveHostAddresses,
+} from "./targets/target-client.ts";
+import { registerTargetRoutes } from "./targets/target-routes.ts";
 
 export {
   DEFAULT_INACTIVE_RUN_TIMEOUT_MILLISECONDS,
@@ -34,13 +43,24 @@ export {
   DEFAULT_TRACE_COMPLETION_TIMING,
   type TraceCompletionTiming,
 } from "./iterations/trace-completion.ts";
-export type { EvaluateAttemptJob, JobQueue } from "./job-queue/job-queue.ts";
+export type {
+  AttemptJob,
+  EvaluateAttemptJob,
+  ExecuteAttemptJob,
+  JobQueue,
+} from "./job-queue/job-queue.ts";
 export { openJobQueue } from "./job-queue/open-job-queue.ts";
 export { type EvaluationDatabase, openEvaluationDatabase } from "./storage/evaluation-database.ts";
+export { DEFAULT_TARGET_TIMEOUT_MILLISECONDS } from "./targets/target-client.ts";
+
+/** The purpose that Target credentials are encrypted for. */
+export const TARGET_CREDENTIAL_CIPHER_PURPOSE = "evaluation-target-credential";
 
 export interface EvaluationApiDependencies {
   database: EvaluationDatabase;
   jobQueue: JobQueue;
+  /** Encrypts Target credentials, with the purpose {@link TARGET_CREDENTIAL_CIPHER_PURPOSE}. */
+  targetCredentialCipher: SecretCipher;
   requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
   readCurrentTime?: () => Date;
@@ -62,9 +82,15 @@ export function createEvaluationApiService(
   // Reading takes the Role viewer, and every change editor.
   app.use("/v1/*", requireProjectAccess(dependencies.requestAuthenticator));
   const datasetRepository = createDatasetRepository(dependencies.database);
+  const targetRepository = createTargetRepository(
+    dependencies.database,
+    dependencies.targetCredentialCipher,
+  );
   registerDatasetRoutes(app, { datasetRepository, readCurrentTime });
+  registerTargetRoutes(app, { targetRepository, readCurrentTime });
   registerEvaluationRunRoutes(app, {
     datasetRepository,
+    targetRepository,
     evaluationRunRepository: createEvaluationRunRepository(dependencies.database),
     jobQueue: dependencies.jobQueue,
     logger: dependencies.logger,
@@ -76,6 +102,13 @@ export function createEvaluationApiService(
 export interface EvaluationWorkerServiceDependencies {
   database: EvaluationDatabase;
   jobQueue: JobQueue;
+  /** Opens Target credentials, with the purpose {@link TARGET_CREDENTIAL_CIPHER_PURPOSE}. */
+  targetCredentialCipher: SecretCipher;
+  /** `EVALUATION_TARGET_ALLOWED_DESTINATIONS`; an empty value allows no Target. */
+  targetAllowedDestinations: string;
+  targetTimeoutMilliseconds?: number;
+  /** How a Target's host name is resolved; tests answer with changing addresses. */
+  resolveTargetHostAddresses?: ResolveHostAddresses;
   /** Reaches Telemetry's internal API, with the service token that `serviceTokens` provides. */
   telemetryService: ServiceClient;
   serviceTokens: ServiceTokenSource;
@@ -91,6 +124,16 @@ export function createEvaluationWorker(
 ): EvaluationWorker {
   return createAttemptEvaluationWorker({
     evaluationRunRepository: createEvaluationRunRepository(dependencies.database),
+    targetRepository: createTargetRepository(
+      dependencies.database,
+      dependencies.targetCredentialCipher,
+    ),
+    targetClient: createTargetClient({
+      allowlist: parseDestinationAllowlist(dependencies.targetAllowedDestinations),
+      timeoutMilliseconds: dependencies.targetTimeoutMilliseconds ??
+        DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
+      resolveHostAddresses: dependencies.resolveTargetHostAddresses,
+    }),
     jobQueue: dependencies.jobQueue,
     telemetryClient: createTelemetryClient(
       dependencies.telemetryService,

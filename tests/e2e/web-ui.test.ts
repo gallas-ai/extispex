@@ -24,6 +24,8 @@ const COLUMNS_ON_A_NARROW_LIST = ["trace", "session", "spans", "duration", "star
 const COLUMNS_BESIDE_OPEN_TRACE = ["trace", "duration", "started"];
 /** Every window width the layout must fit without scrolling sideways, phone to wide monitor. */
 const SWEPT_WIDTHS = Array.from({ length: 42 }, (_, widthIndex) => 360 + widthIndex * 40);
+/** Up to this window width the sections sit behind a menu button, as `styles.css` sets it. */
+const NAVIGATION_MENU_MAXIMUM_WIDTH = 720;
 
 /** The waterfall of the agent trace: span name and nesting level, in display order. */
 const AGENT_TRACE_WATERFALL: [string, number][] = [
@@ -115,10 +117,15 @@ Deno.test({
         const { page } = uiSession;
         await waitForTraceRows(page, 2);
         const lastNavigationLink = page.locator(".primary-navigation .navigation-link").last();
+        const menuButton = page.getByRole("button", { name: "Show sections" });
         const projectSwitcher = page.locator(".project-switcher-trigger");
         for (const width of SWEPT_WIDTHS) {
           await page.setViewportSize({ width, height: 900 });
-          const navigationBox = await lastNavigationLink.boundingBox();
+          // On a phone the sections sit behind the menu button, and the button must stay clear.
+          const isMenuShown = await menuButton.isVisible();
+          assertEquals(isMenuShown, width <= NAVIGATION_MENU_MAXIMUM_WIDTH, `At ${width}px.`);
+          const navigationBox = await (isMenuShown ? menuButton : lastNavigationLink)
+            .boundingBox();
           const switcherBox = await projectSwitcher.boundingBox();
           assert(navigationBox !== null && switcherBox !== null);
           assert(
@@ -126,6 +133,39 @@ Deno.test({
             `The navigation runs into the Project switcher at ${width}px.`,
           );
         }
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
+      await testContext.step("opens the sections from a menu on a phone", async () => {
+        const uiSession = await openUi(openBrowser, deployment, {
+          width: 360,
+          account: deployment.admin,
+          path: agentSessionPath,
+        });
+        const { page } = uiSession;
+        await waitForTraceRows(page, 2);
+        const menuButton = page.getByRole("button", { name: "Show sections" });
+        const sections = page.getByRole("navigation", { name: "Sections" });
+        assertEquals(await sections.isVisible(), false);
+
+        await menuButton.click();
+        assertEquals(await menuButton.getAttribute("aria-expanded"), "true");
+        const sectionLinks = sections.getByRole("link");
+        assert((await sectionLinks.count()) >= 7, "Every section is listed.");
+        for (const sectionLink of await sectionLinks.all()) {
+          const linkBox = await sectionLink.boundingBox();
+          assert(linkBox !== null && linkBox.x >= 0 && linkBox.x + linkBox.width <= 360);
+        }
+        await assertNoHorizontalOverflow(page, "with the section menu open");
+        await page.keyboard.press("Escape");
+        assertEquals(await sections.isVisible(), false);
+
+        await menuButton.click();
+        await sections.getByRole("link", { name: "Logs" }).click();
+        await page.getByRole("heading", { name: "Logs", level: 1 }).waitFor();
+        assertEquals(new URL(page.url()).pathname, "/logs");
+        assertEquals(await sections.isVisible(), false);
         assertNoPageErrors(uiSession);
         await uiSession.close();
       });

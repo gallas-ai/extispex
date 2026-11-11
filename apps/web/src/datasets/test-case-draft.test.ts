@@ -17,6 +17,7 @@ const VALID_DRAFT = {
     pattern: "Hi",
     flags: "i",
     expectMatch: true,
+    step: "",
   }],
 };
 
@@ -141,4 +142,31 @@ Deno.test("shows a stored Telemetry Evaluator in the editor", () => {
     match: { name: "delete_order", attributes: { retries: 2 } },
     count: { min: 0, max: 0 },
   }]);
+});
+
+Deno.test("turns a Session draft into steps, and lets a Regex Evaluator pick one", () => {
+  const sessionDraft: TestCaseDraft = {
+    ...VALID_DRAFT,
+    scope: "session",
+    input: "ignored",
+    steps: ['{"message": "Where is my order?"}', "Can I cancel it?"],
+    evaluators: [{ ...VALID_DRAFT.evaluators[0], step: "1" }],
+  };
+  const definition = readDefinition(sessionDraft);
+  assertEquals(definition.scope, "session");
+  assertEquals(definition.input, undefined);
+  assertEquals(definition.steps, [
+    { input: { message: "Where is my order?" } },
+    { input: "Can I cancel it?" },
+  ]);
+  assertEquals((definition.evaluators[0] as { step?: number }).step, 1);
+  assertEquals(checkDraft({ ...sessionDraft, steps: ["Hello", " "] }).isValid, false);
+  assertEquals(checkDraft({ ...sessionDraft, steps: [] }).isValid, false);
+  // A trace-scoped Test Case ignores a step left over from editing a Session.
+  assertEquals(
+    (readDefinition({ ...sessionDraft, scope: "trace", input: "Hi" }).evaluators[0] as {
+      step?: number;
+    }).step,
+    undefined,
+  );
 });

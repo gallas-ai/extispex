@@ -4,7 +4,8 @@
  */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { AccessTokenResponse, Group, Project, SignInOptions, User } from "@extispex/contracts";
-import { createStructuredLogger } from "@extispex/service-runtime";
+import { createStructuredLogger, generateMasterKey } from "@extispex/service-runtime";
+import { createSigningKeyCipher } from "../src/access-tokens/signing-keys.ts";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import { calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import {
@@ -182,6 +183,7 @@ function defineOidcTest(testName: string, testBody: (context: OidcTestContext) =
           database,
           areLocalAccountsEnabled: true,
           serviceClientSecrets: new Map(),
+          signingKeyCipher: await createSigningKeyCipher(generateMasterKey()),
           oidcSettings: OIDC_SETTINGS,
           fetchFromOidcProvider: provider.fetch,
           logger: createStructuredLogger("identity-test"),

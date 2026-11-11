@@ -2,6 +2,7 @@ import type { IterationStatus, Verdict } from "@extispex/contracts";
 
 const STATUS_LABELS: Record<IterationStatus, string> = {
   awaiting_report: "Waiting for report",
+  executing: "Calling Target",
   evaluating: "Evaluating",
   passed: "Passed",
   failed: "Failed",

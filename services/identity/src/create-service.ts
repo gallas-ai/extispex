@@ -1,5 +1,9 @@
 import type { ServiceRequestHandler } from "@extispex/service-client";
-import { createServiceHttpApp, type StructuredLogger } from "@extispex/service-runtime";
+import {
+  createServiceHttpApp,
+  type SecretCipher,
+  type StructuredLogger,
+} from "@extispex/service-runtime";
 import { DEFAULT_PASSWORD_HASH_ITERATIONS } from "./accounts/password-hashing.ts";
 import { registerInternalTokenRoutes } from "./access-tokens/internal-token-routes.ts";
 import { createAccessTokenSigner } from "./access-tokens/signing-keys.ts";
@@ -29,6 +33,7 @@ export {
   DEFAULT_FIRST_ADMINISTRATOR_EMAIL,
   type FirstAdministrator,
 } from "./accounts/first-administrator.ts";
+export { createSigningKeyCipher, protectStoredSigningKeys } from "./access-tokens/signing-keys.ts";
 export { parseServiceClients } from "./accounts/service-clients.ts";
 export {
   generateApiKey,
@@ -42,6 +47,8 @@ export { type IdentityDatabase, openIdentityDatabase } from "./storage/identity-
 
 export interface IdentityServiceDependencies {
   database: IdentityDatabase;
+  /** Protects the private signing keys in the database; from `createSigningKeyCipher`. */
+  signingKeyCipher: SecretCipher;
   /** Whether users may sign in with a password stored by Identity, from `LOCAL_ACCOUNTS`. */
   areLocalAccountsEnabled: boolean;
   /** Each service's client secret by client ID, from `SERVICE_CLIENTS`. */
@@ -75,7 +82,11 @@ export function createIdentityService(dependencies: IdentityServiceDependencies)
     DEFAULT_PASSWORD_HASH_ITERATIONS;
   const projectRepository = createProjectRepository(dependencies.database);
   const accessRepository = createAccessRepository(dependencies.database);
-  const accessTokenSigner = createAccessTokenSigner(dependencies.database, readCurrentTime);
+  const accessTokenSigner = createAccessTokenSigner(
+    dependencies.database,
+    dependencies.signingKeyCipher,
+    readCurrentTime,
+  );
   const signInRepository = createSignInRepository(dependencies.database);
   const browserSignIns = createBrowserSignIns(signInRepository, readCurrentTime);
   const oidcSettings = dependencies.oidcSettings ?? null;

@@ -8,6 +8,7 @@ import {
 import {
   createDatasetRequestSchema,
   createEvaluationRunRequestSchema,
+  createTargetRequestSchema,
   createTestCaseRequestSchema,
   datasetNameSchema,
   datasetSchema,
@@ -17,22 +18,28 @@ import {
   listEvaluationRunsQuerySchema,
   listEvaluationRunsResponseSchema,
   listIterationResultsResponseSchema,
+  listTargetsResponseSchema,
   listTestCaseResultsResponseSchema,
   listTestCasesResponseSchema,
   reportIterationsRequestSchema,
   reportIterationsResponseSchema,
   resultPageQuerySchema,
+  targetNameSchema,
+  targetSchema,
   testCaseDefinitionSchema,
   testCaseNameSchema,
   testCaseSchema,
+  updateTargetRequestSchema,
 } from "./evaluation-contracts.ts";
 
 const DATASET_TAGS = ["Datasets"];
 const RUN_TAGS = ["Evaluation Runs"];
+const TARGET_TAGS = ["Targets"];
 
 const datasetPathParameters = z.object({ datasetName: datasetNameSchema });
 const testCasePathParameters = datasetPathParameters.extend({ testCaseName: testCaseNameSchema });
 const runPathParameters = z.object({ runId: z.string().min(1).max(64) });
+const targetPathParameters = z.object({ targetName: targetNameSchema });
 
 function jsonBody<Schema extends z.ZodType>(schema: Schema) {
   return { content: { "application/json": { schema } }, required: true };
@@ -45,6 +52,7 @@ function jsonResponse<Schema extends z.ZodType>(description: string, schema: Sch
 const datasetNotFound = describeErrorResponse("No Dataset with this name exists in the Project.");
 const testCaseNotFound = describeErrorResponse("The Dataset or the Test Case does not exist.");
 const runNotFound = describeErrorResponse("No Evaluation Run with this ID exists in the Project.");
+const targetNotFound = describeErrorResponse("No Target with this name exists in the Project.");
 
 export const createDatasetRoute = createRoute({
   method: "post",
@@ -181,7 +189,7 @@ export const createEvaluationRunRoute = createRoute({
   responses: {
     201: jsonResponse("The run and its first Iterations.", evaluationRunWorkSchema),
     ...commonErrorResponses,
-    404: datasetNotFound,
+    404: describeErrorResponse("The Dataset or the Target does not exist in the Project."),
     409: describeErrorResponse("The Dataset has no Test Cases."),
   },
 });
@@ -293,6 +301,74 @@ export const finishEvaluationRunRoute = createRoute({
   },
 });
 
+export const createTargetRoute = createRoute({
+  method: "post",
+  path: "/v1/targets",
+  summary: "Create a Target that Server-Driven Execution can call.",
+  tags: TARGET_TAGS,
+  security: projectDataSecurity,
+  request: { body: jsonBody(createTargetRequestSchema) },
+  responses: {
+    201: jsonResponse("The Target, without its credential.", targetSchema),
+    ...commonErrorResponses,
+    409: describeErrorResponse("A Target with this name already exists in the Project."),
+  },
+});
+
+export const listTargetsRoute = createRoute({
+  method: "get",
+  path: "/v1/targets",
+  summary: "List the Project's Targets by name.",
+  tags: TARGET_TAGS,
+  security: projectDataSecurity,
+  responses: {
+    200: jsonResponse("The Targets, without their credentials.", listTargetsResponseSchema),
+    ...commonErrorResponses,
+  },
+});
+
+export const getTargetRoute = createRoute({
+  method: "get",
+  path: "/v1/targets/{targetName}",
+  summary: "Get a Target, without its credential.",
+  tags: TARGET_TAGS,
+  security: projectDataSecurity,
+  request: { params: targetPathParameters },
+  responses: {
+    200: jsonResponse("The Target.", targetSchema),
+    ...commonErrorResponses,
+    404: targetNotFound,
+  },
+});
+
+export const updateTargetRoute = createRoute({
+  method: "put",
+  path: "/v1/targets/{targetName}",
+  summary: "Change a Target. A running Evaluation Run uses the change from its next call.",
+  tags: TARGET_TAGS,
+  security: projectDataSecurity,
+  request: { params: targetPathParameters, body: jsonBody(updateTargetRequestSchema) },
+  responses: {
+    200: jsonResponse("The Target, without its credential.", targetSchema),
+    ...commonErrorResponses,
+    404: targetNotFound,
+  },
+});
+
+export const deleteTargetRoute = createRoute({
+  method: "delete",
+  path: "/v1/targets/{targetName}",
+  summary: "Delete a Target and its credential. Finished Evaluation Runs keep its name.",
+  tags: TARGET_TAGS,
+  security: projectDataSecurity,
+  request: { params: targetPathParameters },
+  responses: {
+    204: { description: "The Target was deleted." },
+    ...commonErrorResponses,
+    404: targetNotFound,
+  },
+});
+
 export const evaluationPublicRoutes: RouteConfig[] = [
   createDatasetRoute,
   listDatasetsRoute,
@@ -311,4 +387,9 @@ export const evaluationPublicRoutes: RouteConfig[] = [
   getEvaluationRunWorkRoute,
   reportIterationsRoute,
   finishEvaluationRunRoute,
+  createTargetRoute,
+  listTargetsRoute,
+  getTargetRoute,
+  updateTargetRoute,
+  deleteTargetRoute,
 ];

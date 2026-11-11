@@ -29,6 +29,11 @@ export interface RunningDeployment {
    * Only the services deployment reaches it: the others keep Identity inside, as production does.
    */
   identityInternalAccess: IdentityInternalAccess | null;
+  /**
+   * Whether the worker can call a Target that the test runs on this machine. An external
+   * deployment, such as a container, has its own network.
+   */
+  canCallLocalTargets: boolean;
   stop(): Promise<void>;
 }
 
@@ -58,6 +63,8 @@ const SERVICE_CLIENT_SECRETS = {
   e2e: "e2e-test-client-secret-00000000000000000",
 };
 const E2E_OIDC_CLIENT_SECRET = "e2eOidcClientSecret";
+/** 32 bytes in base64, as `MASTER_KEY` requires. */
+const E2E_MASTER_KEY = "ZTJlLW1hc3Rlci1rZXktZm9yLXRlc3RzLW9ubHktMDA=";
 const STARTUP_TIMEOUT_MILLISECONDS = 60_000;
 /** Short waits, so that a missing root span does not cost a minute per attempt. */
 const TRACE_COMPLETION_ENVIRONMENT = {
@@ -120,6 +127,7 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
     ...createOidcEnvironment(gatewayPort),
   });
   const deployment = {
+    canCallLocalTargets: true,
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
     otlpHttpUrl: `http://127.0.0.1:${otlpHttpPort}`,
     otlpGrpcAddress: `localhost:${otlpGrpcPort}`,
@@ -148,6 +156,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   const identityUrl = `http://127.0.0.1:${identityPort}`;
   const identityProcess = startDenoProcess("identity", "services/identity/src/main.ts", {
     IDENTITY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "identity_e2e"),
+    MASTER_KEY: E2E_MASTER_KEY,
     LOCAL_ACCOUNTS: "enabled",
     SERVICE_CLIENTS: Object.entries(SERVICE_CLIENT_SECRETS)
       .map(([clientId, clientSecret]) => `${clientId}:${clientSecret}`)
@@ -179,6 +188,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     "services/evaluation/src/main-api.ts",
     {
       EVALUATION_DATABASE_URL: evaluationDatabaseUrl,
+      MASTER_KEY: E2E_MASTER_KEY,
       IDENTITY_URL: identityUrl,
       IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.evaluation,
       EVALUATION_PORT: String(evaluationPort),
@@ -189,9 +199,12 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     "services/evaluation/src/main-worker.ts",
     {
       EVALUATION_DATABASE_URL: evaluationDatabaseUrl,
+      MASTER_KEY: E2E_MASTER_KEY,
       TELEMETRY_URL: `http://127.0.0.1:${otlpHttpPort}`,
       IDENTITY_URL: identityUrl,
       IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.evaluation,
+      // The sample Target runs on this machine; production lists its own Targets.
+      EVALUATION_TARGET_ALLOWED_DESTINATIONS: "127.0.0.1",
       ...TRACE_COMPLETION_ENVIRONMENT,
     },
   );
@@ -204,6 +217,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     WEB_ASSETS_DIRECTORY: `${REPOSITORY_ROOT}apps/web/dist`,
   });
   const deployment = {
+    canCallLocalTargets: true,
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
     otlpHttpUrl: `http://127.0.0.1:${otlpHttpPort}`,
     otlpGrpcAddress: `localhost:${otlpGrpcPort}`,
@@ -271,6 +285,7 @@ function readExternalDeployment(): RunningDeployment {
     apiKey: readRequired("E2E_API_KEY"),
     admin: { email: readRequired("E2E_ADMIN_EMAIL"), password: readRequired("E2E_ADMIN_PASSWORD") },
     identityInternalAccess: null,
+    canCallLocalTargets: false,
     stop: () => Promise.resolve(),
   };
 }

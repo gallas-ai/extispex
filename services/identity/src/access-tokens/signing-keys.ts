@@ -3,6 +3,10 @@ import {
   type AccessTokenSigningKey,
   type AccessTokenVerifier,
   createAccessTokenVerifier,
+  createSecretCipher,
+  InvalidConfigurationError,
+  isSealedSecret,
+  type SecretCipher,
   signAccessToken,
 } from "@extispex/service-runtime";
 import type { IdentityDatabase } from "../storage/identity-database.ts";
@@ -13,6 +17,47 @@ import { generateTimeOrderedId } from "../storage/time-ordered-id.ts";
 export const ACCESS_TOKEN_LIFETIME_SECONDS = 300;
 
 const SIGNING_KEY_ALGORITHM = { name: "ECDSA", namedCurve: "P-256" } as const;
+
+/** The cipher that protects the private signing keys in Identity's database. */
+export function createSigningKeyCipher(masterKey: string): Promise<SecretCipher> {
+  return createSecretCipher(masterKey, "identity-signing-key");
+}
+
+/**
+ * Run before the service starts. Encrypts private keys stored by an earlier version, and fails at
+ * once when the master key cannot open a stored key, rather than at the first sign-in. The update
+ * only applies to a value that is still in plain text, so replicas starting together are safe.
+ */
+export async function protectStoredSigningKeys(
+  database: IdentityDatabase,
+  signingKeyCipher: SecretCipher,
+): Promise<void> {
+  const entityManager = database.orm.em.fork();
+  for (const storedKey of await entityManager.find(SigningKeyRecord, {})) {
+    if (!isSealedSecret(storedKey.sealedPrivateKeyJwk)) {
+      await entityManager.nativeUpdate(
+        SigningKeyRecord,
+        { id: storedKey.id, sealedPrivateKeyJwk: storedKey.sealedPrivateKeyJwk },
+        {
+          sealedPrivateKeyJwk: await signingKeyCipher.seal(
+            storedKey.sealedPrivateKeyJwk,
+            storedKey.id,
+          ),
+        },
+      );
+      continue;
+    }
+    try {
+      await signingKeyCipher.open(storedKey.sealedPrivateKeyJwk, storedKey.id);
+    } catch (error) {
+      throw new InvalidConfigurationError(
+        "MASTER_KEY cannot open the signing keys in Identity's database. Is it the key this " +
+          "Instance was set up with?",
+        { cause: error },
+      );
+    }
+  }
+}
 
 export interface IssuedAccessToken {
   accessToken: string;
@@ -38,6 +83,7 @@ export interface AccessTokenSigner {
  */
 export function createAccessTokenSigner(
   database: IdentityDatabase,
+  signingKeyCipher: SecretCipher,
   readCurrentTime: () => Date,
 ): AccessTokenSigner {
   let signingKey: Promise<AccessTokenSigningKey> | null = null;
@@ -56,7 +102,7 @@ export function createAccessTokenSigner(
       keyId: oldestKey.id,
       privateKey: await crypto.subtle.importKey(
         "jwk",
-        JSON.parse(oldestKey.privateKeyJwk),
+        JSON.parse(await signingKeyCipher.open(oldestKey.sealedPrivateKeyJwk, oldestKey.id)),
         SIGNING_KEY_ALGORITHM,
         false,
         ["sign"],
@@ -70,9 +116,13 @@ export function createAccessTokenSigner(
       "verify",
     ]) as CryptoKeyPair;
     const createdAt = readCurrentTime();
+    const id = generateTimeOrderedId(createdAt);
     return {
-      id: generateTimeOrderedId(createdAt),
-      privateKeyJwk: JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.privateKey)),
+      id,
+      sealedPrivateKeyJwk: await signingKeyCipher.seal(
+        JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.privateKey)),
+        id,
+      ),
       publicKeyJwk: JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.publicKey)),
       createdAt,
     };

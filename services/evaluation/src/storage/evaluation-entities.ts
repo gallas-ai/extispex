@@ -48,6 +48,9 @@ export const EvaluationRunRecord = defineEntity({
     projectId: p.string(),
     datasetName: p.string(),
     executionMode: p.string(),
+    /** Server-Driven Execution only. The run keeps working from the Target that has this ID. */
+    targetId: p.string().nullable(),
+    targetName: p.string().nullable(),
     status: p.string(),
     verdict: p.string().$type<Verdict>().nullable(),
     batchSize: p.integer(),
@@ -91,8 +94,10 @@ export const IterationRecord = defineEntity({
     iterationNumber: p.integer(),
     status: p.string().$type<IterationStatus>(),
     currentAttempt: p.integer(),
-    /** When a job for the current attempt was last queued; null unless `evaluating`. */
+    /** When a job for the current attempt was last queued; null unless a worker has work to do. */
     evaluationRequestedAt: p.datetime().nullable(),
+    /** A worker calling the Target renews this; null until a worker has claimed the attempt. */
+    executionHeartbeatAt: p.datetime().nullable(),
   },
   uniques: [
     { properties: ["runId", "sequence"] },
@@ -120,6 +125,39 @@ export const IterationAttemptRecord = defineEntity({
     evaluatedAt: p.datetime().nullable(),
   },
   indexes: [{ properties: ["correlationId"] }, { properties: ["sessionId"] }],
+});
+
+/** What a Session Test Case's step returned. `iteration_attempts` holds the last step's values. */
+export const IterationAttemptStepRecord = defineEntity({
+  name: "IterationAttemptStepRecord",
+  tableName: "iteration_attempt_steps",
+  properties: {
+    iterationId: p.string().primary(),
+    attemptNumber: p.integer().primary(),
+    stepNumber: p.integer().primary(),
+    output: p.text(),
+    correlationId: p.string(),
+    sessionId: p.string(),
+  },
+  indexes: [{ properties: ["correlationId"] }, { properties: ["sessionId"] }],
+});
+
+/** A user's application as an HTTP endpoint. The credential is stored only in sealed form. */
+export const TargetRecord = defineEntity({
+  name: "TargetRecord",
+  tableName: "targets",
+  properties: {
+    id: p.string().primary(),
+    projectId: p.string(),
+    name: p.string(),
+    url: p.text(),
+    description: p.text(),
+    credentialHeaderName: p.string().nullable(),
+    sealedCredentialValue: p.text().nullable(),
+    createdAt: p.datetime(),
+    updatedAt: p.datetime(),
+  },
+  uniques: [{ properties: ["projectId", "name"] }],
 });
 
 /** The local image's job queue; PostgreSQL deployments use pg-boss instead. */

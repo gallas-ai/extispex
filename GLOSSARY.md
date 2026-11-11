@@ -57,6 +57,9 @@ Test Case and defaults to 100%. _Avoid_: Success rate
 **LLM Summary**: An LLM-written overview of a finished Evaluation Run, using a default prompt unless
 the user provides their own. _Avoid_: Report
 
+**Step**: One message of a Session Test Case, sent in order within one Session, and the Output the
+application returns for it. _Avoid_: Turn
+
 **Output**: The value the application returns for one step of an Iteration, as stated by the Target
 or the user's script rather than read from spans. _Avoid_: Response, completion
 
@@ -64,7 +67,8 @@ or the user's script rather than read from spans. _Avoid_: Response, completion
 Evaluator. _Avoid_: Chat history
 
 **Target**: The user's application as an HTTP endpoint that the platform calls during server-driven
-execution. _Avoid_: Endpoint, system under test
+execution, with an optional credential that the platform stores encrypted. _Avoid_: Endpoint, system
+under test
 
 **Server-Driven Execution**: An Evaluation Run in which the platform calls the Target for each
 Iteration.

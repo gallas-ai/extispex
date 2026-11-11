@@ -1458,7 +1458,8 @@
           "npm:@mikro-orm/core@7.2.7",
           "npm:@mikro-orm/migrations@7.2.7",
           "npm:@mikro-orm/sql@7.2.7",
-          "npm:pg-boss@12.38.1"
+          "npm:pg-boss@12.38.1",
+          "npm:zod@^4.1.0"
         ]
       },
       "services/gateway": {

@@ -1,14 +1,24 @@
 /** Asks the worker to judge one reported attempt of an Iteration. */
 export interface EvaluateAttemptJob {
+  kind?: "evaluate";
   iterationId: string;
   attemptNumber: number;
 }
+
+/** Asks the worker to call the Target for one attempt of an Iteration. */
+export interface ExecuteAttemptJob {
+  kind: "execute";
+  iterationId: string;
+  attemptNumber: number;
+}
+
+export type AttemptJob = EvaluateAttemptJob | ExecuteAttemptJob;
 
 export interface EnqueueOptions {
   delayMilliseconds?: number;
 }
 
-export type EvaluateAttemptHandler = (job: EvaluateAttemptJob) => Promise<void>;
+export type AttemptJobHandler = (job: AttemptJob) => Promise<void>;
 
 /**
  * Evaluation's private queue, with pg-boss in production and a SQLite table in the local image.
@@ -16,8 +26,8 @@ export type EvaluateAttemptHandler = (job: EvaluateAttemptJob) => Promise<void>;
  */
 export interface JobQueue {
   /** With `delayMilliseconds`, the jobs are not delivered before that much time has passed. */
-  enqueue(jobs: EvaluateAttemptJob[], options?: EnqueueOptions): Promise<void>;
-  startWorking(handler: EvaluateAttemptHandler): Promise<void>;
+  enqueue(jobs: AttemptJob[], options?: EnqueueOptions): Promise<void>;
+  startWorking(handler: AttemptJobHandler): Promise<void>;
   /** Stops taking jobs and waits for the running ones. */
   stop(): Promise<void>;
 }

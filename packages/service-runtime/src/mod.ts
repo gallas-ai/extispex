@@ -5,5 +5,6 @@ export * from "./graceful-shutdown.ts";
 export * from "./identity-unavailable-error.ts";
 export * from "./project-authentication.ts";
 export * from "./request-authentication.ts";
+export * from "./secret-cipher.ts";
 export * from "./service-http-app.ts";
 export * from "./service-tokens.ts";

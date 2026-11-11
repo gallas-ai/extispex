@@ -5,9 +5,11 @@
 import {
   createEvaluationApiService,
   createEvaluationWorker,
+  DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   DEFAULT_TRACE_COMPLETION_TIMING,
   openEvaluationDatabase,
   openJobQueue,
+  TARGET_CREDENTIAL_CIPHER_PURPOSE,
 } from "@extispex/evaluation-service";
 import { createGatewayService } from "@extispex/gateway-service";
 import { MINIMUM_PASSWORD_LENGTH } from "@extispex/contracts";
@@ -15,6 +17,7 @@ import {
   createFirstAdministratorIfNone,
   createFirstProjectIfNone,
   createIdentityService,
+  createSigningKeyCipher,
   DEFAULT_FIRST_ADMINISTRATOR_EMAIL,
   generateApiKey,
   generateRandomCharacters,
@@ -22,6 +25,7 @@ import {
   type IdentityDatabase,
   MINIMUM_CONFIGURED_KEY_LENGTH,
   openIdentityDatabase,
+  protectStoredSigningKeys,
   readOidcSettings,
 } from "@extispex/identity-service";
 import { createPromptService, openPromptDatabase } from "@extispex/prompt-service";
@@ -29,7 +33,9 @@ import { createInProcessServiceClient } from "@extispex/service-client";
 import {
   createIdentityRequestAuthenticator,
   createIdentityServiceTokenSource,
+  createSecretCipher,
   createStructuredLogger,
+  generateMasterKey,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   readPositiveIntegerEnvironmentVariable,
@@ -48,6 +54,7 @@ import {
 const logger = createStructuredLogger("all-in-one");
 const dataDirectory = readOptionalEnvironmentVariable("DATA_DIRECTORY") ?? "./data";
 await Deno.mkdir(dataDirectory, { recursive: true });
+const masterKey = await readOrCreateMasterKey();
 
 const identityDatabase = await openIdentityDatabase(`sqlite:${dataDirectory}/identity.sqlite`);
 // The services in this process get service tokens like separate services do, with secrets that
@@ -57,8 +64,11 @@ const serviceClientSecrets = new Map([
   ["prompt", generateServiceClientSecret()],
   ["evaluation", generateServiceClientSecret()],
 ]);
+const signingKeyCipher = await createSigningKeyCipher(masterKey);
+await protectStoredSigningKeys(identityDatabase, signingKeyCipher);
 const identityService = createIdentityService({
   database: identityDatabase,
+  signingKeyCipher,
   // Local accounts are how people sign in to the local image.
   areLocalAccountsEnabled: true,
   serviceClientSecrets,
@@ -97,15 +107,29 @@ const evaluationJobQueue = await openJobQueue(
   evaluationDatabase,
   evaluationLogger,
 );
+const targetCredentialCipher = await createSecretCipher(
+  masterKey,
+  TARGET_CREDENTIAL_CIPHER_PURPOSE,
+);
 const evaluationApiService = createEvaluationApiService({
   database: evaluationDatabase,
   jobQueue: evaluationJobQueue,
+  targetCredentialCipher,
   requestAuthenticator: createRequestAuthenticator("evaluation"),
   logger: evaluationLogger,
 });
 const evaluationWorker = createEvaluationWorker({
   database: evaluationDatabase,
   jobQueue: evaluationJobQueue,
+  targetCredentialCipher,
+  // The local image runs on one person's machine, where Targets are usually on that machine.
+  targetAllowedDestinations: readOptionalEnvironmentVariable(
+    "EVALUATION_TARGET_ALLOWED_DESTINATIONS",
+  ) ?? "*",
+  targetTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
+    "EVALUATION_TARGET_TIMEOUT_MILLISECONDS",
+    DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
+  ),
   telemetryService: createInProcessServiceClient(telemetryService.handleRequest),
   serviceTokens: createIdentityServiceTokenSource({
     identityClient,
@@ -182,6 +206,22 @@ runOnTerminationSignal(logger, async () => {
     evaluationDatabase.close(),
   ]);
 });
+
+/** `MASTER_KEY`, or the key in the data directory, created there on first start. */
+async function readOrCreateMasterKey(): Promise<string> {
+  const configuredKey = readOptionalEnvironmentVariable("MASTER_KEY");
+  if (configuredKey !== undefined) return configuredKey;
+  const masterKeyFile = `${dataDirectory}/master-key`;
+  try {
+    return (await Deno.readTextFile(masterKeyFile)).trim();
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  const generatedKey = generateMasterKey();
+  await Deno.writeTextFile(masterKeyFile, `${generatedKey}\n`, { mode: 0o600, createNew: true });
+  logger.info("Generated the master key", { masterKeyFile });
+  return generatedKey;
+}
 
 function readGrpcTlsFiles(): GrpcTlsFiles | null {
   const certificateChainFile = readOptionalEnvironmentVariable(

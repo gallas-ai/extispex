@@ -16,6 +16,7 @@
   },
   "tasks": {
     "send-conversation": "deno run --allow-net --allow-env send-conversation.ts",
-    "run-dataset": "deno run --allow-net --allow-env run-dataset.ts"
+    "run-dataset": "deno run --allow-net --allow-env run-dataset.ts",
+    "sample-target": "deno run --allow-net --allow-env sample-target.ts"
   }
 }

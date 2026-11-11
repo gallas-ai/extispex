@@ -14,8 +14,8 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 3    | [Users, Groups, Roles and tokens](#3-users-groups-roles-and-tokens)                                    | Done   |
 | 4    | [Datasets and Client-Driven Execution](#4-datasets-and-client-driven-execution)                        | Done   |
 | 5    | [Trace completion and Telemetry Evaluator](#5-trace-completion-and-telemetry-evaluator)                | Done   |
-| 6    | [Server-Driven Execution and Session Test Cases](#6-server-driven-execution-and-session-test-cases)    | Next   |
-| 7    | [LLM providers, Grading Evaluator and LLM Summary](#7-llm-providers-grading-evaluator-and-llm-summary) |        |
+| 6    | [Server-Driven Execution and Session Test Cases](#6-server-driven-execution-and-session-test-cases)    | Done   |
+| 7    | [LLM providers, Grading Evaluator and LLM Summary](#7-llm-providers-grading-evaluator-and-llm-summary) | Next   |
 | 8    | [Reports](#8-reports)                                                                                  |        |
 | 9    | [OIDC sign-in](#9-oidc-sign-in)                                                                        | Done   |
 | 10   | [SCIM and file import](#10-scim-and-file-import)                                                       | Done   |
@@ -275,7 +275,8 @@ spans are judged across the whole Session, in both deployments.
 
 - Provider adapters with declared capabilities: OpenAI-compatible (including Azure and local
   models), Anthropic, and TypeSafe Jev.
-- Provider keys encrypted like Target credentials.
+- Provider keys encrypted like Target credentials, with their own purpose for `createSecretCipher`,
+  see [ADR 0013](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md).
 - Grading Evaluator referencing a Prompt Version, read from the Prompt service with a service token.
 - LLM Summary with a default prompt or the user's own Prompt Version.
 - Tests use a fake provider. Real providers are covered by optional tests that run only when keys
@@ -445,6 +446,11 @@ deployments.
   now tries again. That hides the race instead of removing it, and only the Evaluation service has a
   test for it. Settle it together with how migrations run during an upgrade, and cover every
   service.
+- Left over from step 6: rotating the master key. Sealed values carry a version prefix, which leaves
+  room for a key ID; re-encrypting them with a new key is not built.
+- Left over from step 6: Server-Driven Execution in a cluster, where the worker reaches Targets
+  through the cluster's network and egress rules, possibly through an HTTP proxy, which the worker
+  does not use yet.
 - Left over from step 3: rotating Identity's signing key. Services already read the keys again for
   an unknown key ID; what is missing is adding a new key, choosing which key signs, and removing the
   old one after the longest token lifetime.
