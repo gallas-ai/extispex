@@ -14,6 +14,10 @@
 # by default: for example "agent.company.example:443,*.internal.company.example,10.20.0.0/16". Sign in to the UI as
 # admin@extispex.local, or as BOOTSTRAP_ADMIN_EMAIL.
 #
+# Reports go only to the SMTP servers and Teams webhooks that EVALUATION_REPORT_ALLOWED_DESTINATIONS
+# lists, in the same format, for example "smtp.company.example:587,*.logic.azure.com". Their links
+# point at PUBLIC_UI_URL, where people open the UI.
+#
 # Local accounts are enabled here, for development. Production signs users in through the
 # company's identity provider: set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and
 # OIDC_REDIRECT_URL, as the README describes.
@@ -112,6 +116,8 @@ services:
       EVALUATION_DATABASE_URL: postgresql://extispex:extispex@postgres:5432/evaluation
       MASTER_KEY: ${MASTER_KEY:-ZGV2ZWxvcG1lbnQta2V5LW5vdC1mb3ItcHJvZC11c2U=}
       EVALUATION_TARGET_ALLOWED_DESTINATIONS: ${EVALUATION_TARGET_ALLOWED_DESTINATIONS:-}
+      EVALUATION_REPORT_ALLOWED_DESTINATIONS: ${EVALUATION_REPORT_ALLOWED_DESTINATIONS:-}
+      PUBLIC_UI_URL: ${PUBLIC_UI_URL:-http://localhost:8080}
       TELEMETRY_URL: http://telemetry:4318
       IDENTITY_URL: http://identity:8082
       IDENTITY_CLIENT_SECRET: ${EVALUATION_CLIENT_SECRET:-development-evaluation-client-secret-000}

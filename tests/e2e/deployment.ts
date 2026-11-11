@@ -220,6 +220,9 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
       // The sample Target runs on this machine; production lists its own Targets.
       EVALUATION_TARGET_ALLOWED_DESTINATIONS: "127.0.0.1",
       ...DATA_LIFECYCLE_ENVIRONMENT,
+      // So do the fake SMTP server and webhook that receive Reports.
+      EVALUATION_REPORT_ALLOWED_DESTINATIONS: "127.0.0.1",
+      PUBLIC_UI_URL: `http://127.0.0.1:${gatewayPort}`,
       ...TRACE_COMPLETION_ENVIRONMENT,
     },
   );

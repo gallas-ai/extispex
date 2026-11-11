@@ -511,6 +511,36 @@ When an Evaluation Run ends, Evaluation can send a Report by email over the cust
 or to Teams through a Workflows webhook. Each Project chooses "always" or "only on failure".
 Delivery failures are retried through the job queue and never change the run's result.
 
+Built in roadmap step 8. See
+[ADR 0017](adr/0017-reports-delivered-through-the-job-queue-with-nodemailer.md) for the delivery and
+the SMTP client.
+
+- **Settings:** `GET` and `PUT /v1/report-settings`, one set per Project: the condition `always` or
+  `on_failure`, an email channel and a Teams channel, each optional. "Only on failure" sends a
+  Report for every run whose verdict is not `passed`, so a run that ended with an Error sends one
+  too. The SMTP password and the webhook URL, which carries its own signature, are sealed with the
+  purpose `evaluation-report-channel` and bound to the Project; leaving one out of a `PUT` keeps it.
+- **Content:** the result, the Test Cases that passed, failed and ended with an Error, the Dataset,
+  the Target, the duration, up to 10 Test Cases that did not pass with links, the LLM Summary when
+  the run has one, and a link to the run. Email is `multipart/alternative` with plain text and HTML;
+  Teams gets an Adaptive Card 1.4 with an "Open run" button. Links start at `PUBLIC_UI_URL` and name
+  the Project with `?project=`, so they open the right Project whichever one the browser showed
+  last; `?testCase=` opens that Test Case at the top of the run page. Without `PUBLIC_UI_URL` a
+  Report has no links; the local image uses `http://localhost:<GATEWAY_PORT>`.
+- **Delivery:** the transaction that finishes a run inserts a row in `report_deliveries` for each
+  channel, and the jobs are queued after commit. Five attempts, 1, 4, 16 and 64 minutes apart
+  (`EVALUATION_REPORT_RETRY_DELAY_MILLISECONDS` sets the first), each with a 30-second limit
+  (`EVALUATION_REPORT_TIMEOUT_MILLISECONDS`). The maintenance task queues a delivery again that is
+  more than two minutes past due. `GET /v1/evaluation-runs/{id}/report-deliveries` and the run page
+  show each channel's status, attempts and last error.
+- **Allowed destinations:** SMTP servers and webhooks are addresses that users enter, so the worker
+  checks them like Targets, against `EVALUATION_REPORT_ALLOWED_DESTINATIONS` in the same format, for
+  example `smtp.company.example:587,*.logic.azure.com,*.environment.api.powerplatform.com`. Separate
+  services allow nothing by default; the local image allows `*`. The SMTP host is resolved once and
+  nodemailer connects to the checked address, with the configured name for the certificate check.
+- **SMTP security:** `starttls` (required), `tls` from the first byte, or `none` for a relay inside
+  the company's network.
+
 ## 6. Prompts
 
 Prompt Versions are immutable and numbered automatically. Prompt Labels such as `production` can
@@ -769,11 +799,11 @@ which Project a key belongs to.
 
 ### Secrets
 
-Target credentials, LLM provider keys (step 7) and Identity's private signing keys are encrypted
-with AES-256-GCM, each purpose with its own key derived from one master key. The master key comes
-from `MASTER_KEY`, a Kubernetes Secret in production, which Identity, the Evaluation API and the
-worker need. The local image generates it into `/data/master-key` on first start. See
-[ADR 0013](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md).
+Target credentials, LLM provider keys (step 7), Report channel secrets and Identity's private
+signing keys are encrypted with AES-256-GCM, each purpose with its own key derived from one master
+key. The master key comes from `MASTER_KEY`, a Kubernetes Secret in production, which Identity, the
+Evaluation API and the worker need. The local image generates it into `/data/master-key` on first
+start. See [ADR 0013](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md).
 
 ### Known risks to design for
 
@@ -993,6 +1023,17 @@ The Metrics step added these checks on 2026-11-10.
 | Eight replicas creating one day's metric partition         | All succeed, and a time range reads only the partitions it overlaps                                                                                                 |
 | Metrics page in headless Chromium                          | Choosing a metric, aggregation and grouping, filtering, eight lines at most with stable colours, the dark theme, and nothing scrolls sideways from 360px to 2,040px |
 
+The Reports step added these checks on 2026-11-11.
+
+| Tested                                        | Result                                                                                                                                        |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| A finished run's Report through the Gateway   | An SMTP server and a Teams webhook in the test process receive it, with links to the run and its failed Test Case, in all-in-one and services |
+| Reports on SQLite and PostgreSQL              | "Only on failure", a run ended early, a refused message retried, five failed webhook calls, a job delivered twice and a lost job work on both |
+| nodemailer 10.5.0 on Deno                     | Sends `multipart/alternative` mail with `AUTH PLAIN` to the fake SMTP server; a `451` reply is a failed attempt                               |
+| Report channel secrets at rest                | The SMTP password and the webhook URL are stored only in sealed form and never returned                                                       |
+| Destinations that are not allowed             | A host name that is not listed is refused before any connection                                                                               |
+| Report settings and delivery status, Chromium | Saving settings, the delivery status and a linked Test Case work, and nothing scrolls sideways from 360px to 2,040px                          |
+
 The Server-Driven Execution and Session Test Cases step added these checks on 2026-11-10.
 
 | Tested                                                | Result                                                                                                                                         |
@@ -1158,6 +1199,13 @@ The Prompt service step added these checks on 2026-11-07.
 - The default ten-minute data lifecycle end to end; the e2e tests run it every second
 - "Trace no longer available" in the UI, which needs a result older than a day; it follows from the
   Retention Period, and a unit test covers the rule
+- Reports against a real SMTP server, with STARTTLS or TLS, and against a real Teams Workflows
+  webhook: the tests use plain SMTP and a fake webhook, and how Teams renders the Adaptive Card has
+  not been seen
+- How email clients such as Outlook render the HTML Report
+- The LLM Summary in a Report: the field exists and is rendered when set, but runs have no LLM
+  Summary before roadmap step 7
+- Retries at their real intervals of 1 to 64 minutes; the tests check the scheduled delays
 - The web UI's colours, spacing and typography, and browsers other than Chromium
 
 ### First implementation step
@@ -1186,5 +1234,6 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0013: Secrets sealed with keys derived from one master key](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md)
 - [ADR 0014: A user from the directory is linked to their first OIDC sign-in by email, once](adr/0014-directory-users-linked-to-oidc-by-email-once.md)
 - [ADR 0015: Metric Time Series stored once, cumulative values resolved at query time](adr/0015-metric-time-series-stored-once-and-cumulative-values-at-query-time.md)
+- [ADR 0017: Reports delivered through the job queue, one row per channel, email through nodemailer](adr/0017-reports-delivered-through-the-job-queue-with-nodemailer.md)
 - [ADR 0018: Data removed in leased periodic runs, shared days dropped only past every Project](adr/0018-data-lifecycle-through-leased-periodic-runs.md)
 - [ADR 0021: Nightly performance compared with the previous run, kept as a workflow artifact](adr/0021-nightly-performance-compared-with-the-previous-run.md)

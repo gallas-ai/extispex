@@ -19,9 +19,14 @@ import { PromptComparisonPage } from "./prompts/prompt-comparison-page.tsx";
 import { NewPromptPage, NewPromptVersionPage } from "./prompts/prompt-editor-page.tsx";
 import { PromptPage } from "./prompts/prompt-page.tsx";
 import { NEW_PROMPT_PATH, PromptsPage } from "./prompts/prompts-page.tsx";
+import { REPORT_SETTINGS_PATH, ReportSettingsPage } from "./reports/report-settings-page.tsx";
 import { AccessContext, type AccessContextValue, useAccess } from "./sign-in/access-context.ts";
 import { createAccessTokenCredentials } from "./sign-in/access-token-credentials.ts";
-import { readStoredProjectId, storeProjectId } from "./sign-in/selected-project-storage.ts";
+import {
+  readLinkedProjectId,
+  readStoredProjectId,
+  storeProjectId,
+} from "./sign-in/selected-project-storage.ts";
 import { AccountPage } from "./sign-in/account-page.tsx";
 import { SignInPage } from "./sign-in/sign-in-page.tsx";
 import { TargetPage } from "./targets/target-page.tsx";
@@ -70,7 +75,13 @@ const ENDED_SIGN_IN_NOTICE = "Your sign-in has ended. Sign in again to continue.
  */
 function SignInGate() {
   const [signInState, setSignInState] = useState<SignInState>({ status: "checking" });
-  const [selectedProjectId, setSelectedProjectId] = useState(readStoredProjectId);
+  // A link from a Report names its Project, which then wins over the one shown last.
+  const [selectedProjectId, setSelectedProjectId] = useState(() => {
+    const linkedProjectId = readLinkedProjectId();
+    if (linkedProjectId === null) return readStoredProjectId();
+    storeProjectId(linkedProjectId);
+    return linkedProjectId;
+  });
   const hasSignedInRef = useRef(false);
 
   const showSignIn = useCallback(() => {
@@ -328,6 +339,10 @@ function AppShell() {
                 <Route
                   path="/evaluation-runs"
                   element={<EvaluationRunsPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path={REPORT_SETTINGS_PATH}
+                  element={<ReportSettingsPage key={selectedProject.id} {...pageProps} />}
                 />
                 <Route
                   path="/evaluation-runs/:runId"
