@@ -36,11 +36,13 @@ import {
   FolderIcon,
   InboxIcon,
   LogsIcon,
+  MenuIcon,
   PromptIcon,
   RunIcon,
   ShieldIcon,
   TargetIcon,
 } from "./ui/icons.tsx";
+import { usePopover } from "./ui/use-popover.ts";
 
 export function App() {
   return (
@@ -166,6 +168,7 @@ function AppShell() {
   const isInPrompts = pathname.startsWith("/prompts") || pathname === NEW_PROMPT_PATH;
   const pageProps = { credentials, onSignInRequired: showSignIn };
   const hasProject = selectedProject !== null;
+  const navigationMenu = usePopover();
 
   return (
     <div className="app-shell">
@@ -175,50 +178,73 @@ function AppShell() {
             <BrandMark size={26} />
             <span className="brand-name">Extispex</span>
           </Link>
-          <nav className="primary-navigation" aria-label="Sections">
-            {hasProject && (
-              <>
-                <NavLink className="navigation-link" to="/traces">
-                  <ActivityIcon size={15} />
-                  <span className="navigation-link-text">Traces</span>
-                </NavLink>
-                <NavLink className="navigation-link" to="/logs">
-                  <LogsIcon size={15} />
-                  <span className="navigation-link-text">Logs</span>
-                </NavLink>
-                <Link
-                  className="navigation-link"
-                  to="/prompts"
-                  aria-current={isInPrompts ? "page" : undefined}
-                >
-                  <PromptIcon size={15} />
-                  <span className="navigation-link-text">Prompts</span>
-                </Link>
-                <NavLink className="navigation-link" to="/datasets">
-                  <DatasetIcon size={15} />
-                  <span className="navigation-link-text">Datasets</span>
-                </NavLink>
-                <NavLink className="navigation-link" to="/targets">
-                  <TargetIcon size={15} />
-                  <span className="navigation-link-text">Targets</span>
-                </NavLink>
-                <NavLink className="navigation-link" to="/evaluation-runs">
-                  <RunIcon size={15} />
-                  <span className="navigation-link-text">Runs</span>
-                </NavLink>
-              </>
-            )}
-            <NavLink className="navigation-link" to="/projects">
-              <FolderIcon size={15} />
-              <span className="navigation-link-text">Projects</span>
-            </NavLink>
-            {user.isInstanceAdmin && (
-              <NavLink className="navigation-link" to="/access">
-                <ShieldIcon size={15} />
-                <span className="navigation-link-text">Access</span>
+          {/* On a phone the sections sit behind this button; wider screens show them in the bar. */}
+          <div className="navigation-menu" ref={navigationMenu.anchorRef}>
+            <button
+              type="button"
+              className="navigation-menu-button"
+              aria-expanded={navigationMenu.isOpen}
+              aria-controls="primary-navigation"
+              aria-label="Show sections"
+              onClick={() => navigationMenu.setIsOpen(!navigationMenu.isOpen)}
+            >
+              <MenuIcon size={16} />
+            </button>
+            <nav
+              id="primary-navigation"
+              className={navigationMenu.isOpen
+                ? "primary-navigation primary-navigation-open"
+                : "primary-navigation"}
+              aria-label="Sections"
+              // Choosing a section closes the menu, also when it is the page already open.
+              onClick={(clickEvent) => {
+                if ((clickEvent.target as Element).closest("a")) navigationMenu.setIsOpen(false);
+              }}
+            >
+              {hasProject && (
+                <>
+                  <NavLink className="navigation-link" to="/traces">
+                    <ActivityIcon size={15} />
+                    <span className="navigation-link-text">Traces</span>
+                  </NavLink>
+                  <NavLink className="navigation-link" to="/logs">
+                    <LogsIcon size={15} />
+                    <span className="navigation-link-text">Logs</span>
+                  </NavLink>
+                  <Link
+                    className="navigation-link"
+                    to="/prompts"
+                    aria-current={isInPrompts ? "page" : undefined}
+                  >
+                    <PromptIcon size={15} />
+                    <span className="navigation-link-text">Prompts</span>
+                  </Link>
+                  <NavLink className="navigation-link" to="/datasets">
+                    <DatasetIcon size={15} />
+                    <span className="navigation-link-text">Datasets</span>
+                  </NavLink>
+                  <NavLink className="navigation-link" to="/targets">
+                    <TargetIcon size={15} />
+                    <span className="navigation-link-text">Targets</span>
+                  </NavLink>
+                  <NavLink className="navigation-link" to="/evaluation-runs">
+                    <RunIcon size={15} />
+                    <span className="navigation-link-text">Runs</span>
+                  </NavLink>
+                </>
+              )}
+              <NavLink className="navigation-link" to="/projects">
+                <FolderIcon size={15} />
+                <span className="navigation-link-text">Projects</span>
               </NavLink>
-            )}
-          </nav>
+              {user.isInstanceAdmin && (
+                <NavLink className="navigation-link" to="/access">
+                  <ShieldIcon size={15} />
+                  <span className="navigation-link-text">Access</span>
+                </NavLink>
+              )}
+            </nav>
+          </div>
         </div>
         <div className="top-bar-end">
           <ProjectSwitcher />

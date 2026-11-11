@@ -210,8 +210,11 @@ Deno.test({
           element.getBoundingClientRect().height
         );
         assertEquals(Math.round(topBarHeight), 52);
+        // On a phone the sections sit behind the menu button, which still marks the current one.
+        await page.getByRole("button", { name: "Show sections" }).click();
         assertEquals(
-          await page.getByRole("link", { name: "Projects" }).getAttribute("aria-current"),
+          await page.getByRole("navigation", { name: "Sections" })
+            .getByRole("link", { name: "Projects" }).getAttribute("aria-current"),
           "page",
         );
         assertNoPageErrors(uiSession);
