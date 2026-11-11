@@ -870,7 +870,9 @@ Approved on 2026-11-06. The repository is one Deno workspace.
 │   ├── typescript/
 │   └── python/
 ├── tests/
-│   └── e2e/
+│   ├── architecture/                # Import rules and the naming lint plugin
+│   ├── e2e/
+│   └── performance/                 # Nightly performance run
 ├── deploy/
 │   ├── docker/
 │   ├── compose/
@@ -885,7 +887,11 @@ Approved on 2026-11-06. The repository is one Deno workspace.
 Import rules, enforced in CI:
 
 - A service may import `packages/*`, but never another service.
-- Modules inside a service import each other only through their public entry points.
+- Modules inside a service import each other only through their public entry points. A module is a
+  directory directly below a service's `src/`, such as `services/telemetry/src/ingestion`, and its
+  public entry point is the `mod.ts` there, which re-exports what other modules may use. The files
+  directly in `src/`, such as `create-service.ts`, also import modules through `mod.ts`. A service's
+  `tests/` may import any of its files, so a unit test can reach an internal helper.
 - Only `apps/all-in-one` may import several services, and only their `create-service.ts`.
 - `packages/` holds contracts and technical helpers, never domain logic.
 
@@ -896,10 +902,24 @@ types and import rules, runs unit tests on SQLite and PostgreSQL, runs e2e tests
 deployments, and builds the container images and runs the e2e tests against the `all-in-one` image.
 The e2e tests include browser tests of the web UI's main flows and layout rules.
 
+The import rules from [10. Repository structure](#10-repository-structure) are two tests in
+`tests/architecture`, run by `deno task test:architecture`, as part of `deno task check` and as
+their own step of the `Static checks and unit tests` job:
+
+- `import-boundaries.test.ts`: a workspace member reaches another only by its package name, and only
+  `apps/all-in-one` imports services.
+- `module-boundaries.test.ts`: modules inside a service import each other only through `mod.ts`.
+
 Performance tests follow one rule: they run only where GitHub Actions is free.
 
-- **Nightly regression test:** planned, not yet implemented. It runs on a standard runner, which is
-  free because the repository is public. It will live in `tests/performance/`.
+- **Nightly regression test:** `tests/performance/` runs every night on a standard runner, which is
+  free because the repository is public, against the separate services on PostgreSQL. It measures
+  OTLP ingestion of spans, log records and metric data points, the p95 latency of six queries
+  through the Gateway, and evaluation jobs through pg-boss. A throughput more than 25% lower or a
+  p95 more than 25% higher than the previous successful run on `main` fails it; see
+  [ADR 0021](adr/0021-nightly-performance-compared-with-the-previous-run.md). Locally:
+  `E2E_POSTGRES_URL=... deno task test:performance results.json`, then
+  `deno task compare:performance previous.json results.json`.
 - **Capacity check on a dedicated machine:** deferred, because larger runners are never free.
 
 Code, tests, examples, documentation and operations are written in English. Names must state their
@@ -1112,8 +1132,6 @@ The Prompt service step added these checks on 2026-11-07.
   before the database is the bottleneck, and the limits were chosen, not measured
 - A histogram query's memory: up to 100,000 points with their bucket counts are held at once
 - Metrics from SDKs other than OpenTelemetry JS, and from the OpenTelemetry Collector
-- The rule that modules inside a service import each other only through their public entry points;
-  no automated check enforces it yet
 - Retention and Project removal at the capacity target: each is one delete per table and Project,
   and spans, which have no partitions, are deleted row by row
 - Dropping a partition under load: it briefly locks the whole table, like creating one
@@ -1149,3 +1167,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0014: A user from the directory is linked to their first OIDC sign-in by email, once](adr/0014-directory-users-linked-to-oidc-by-email-once.md)
 - [ADR 0015: Metric Time Series stored once, cumulative values resolved at query time](adr/0015-metric-time-series-stored-once-and-cumulative-values-at-query-time.md)
 - [ADR 0018: Data removed in leased periodic runs, shared days dropped only past every Project](adr/0018-data-lifecycle-through-leased-periodic-runs.md)
+- [ADR 0021: Nightly performance compared with the previous run, kept as a workflow artifact](adr/0021-nightly-performance-compared-with-the-previous-run.md)

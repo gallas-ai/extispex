@@ -1,0 +1,102 @@
+name: Nightly performance
+
+# Measures ingestion throughput, query latency and the evaluation job queue against the separate
+# services on PostgreSQL, and fails when a measurement is more than 25% worse than the previous
+# successful run on main. See docs/adr/0021-nightly-performance-compared-with-the-previous-run.md.
+# Not a required check: it runs on main only, never on a pull request.
+
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+    inputs:
+      injected_delay_milliseconds:
+        description: "Delay before every request, to show that a slower run fails; 0 for a normal run"
+        type: number
+        default: 0
+
+permissions:
+  contents: read
+  # Reading the previous run's artifact.
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  DENO_VERSION: v2.9.5
+  RESULTS_ARTIFACT: performance-results
+  INJECTED_DELAY_MILLISECONDS: ${{ inputs.injected_delay_milliseconds || '0' }}
+
+jobs:
+  performance:
+    name: Performance compared with the previous run
+    # A standard runner, free for a public repository.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: extispex
+          POSTGRES_PASSWORD: extispex
+          POSTGRES_DB: extispex
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U extispex"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+      - run: deno install --frozen
+      - name: Find the previous successful run on main
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Only a successful run without an injected delay keeps its results under this name.
+        run: |
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$RESULTS_ARTIFACT&per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == "main")]
+                  | sort_by(.created_at) | last | .workflow_run.id // empty')
+          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Previous run: ${run_id:-none}"
+      - name: Download the previous run's results
+        if: steps.previous.outputs.run-id != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}
+          path: previous
+          run-id: ${{ steps.previous.outputs.run-id }}
+          github-token: ${{ github.token }}
+      - name: Measure ingestion, queries and the job queue
+        run: |
+          mkdir -p current
+          deno task test:performance current/performance-results.json
+        env:
+          E2E_DEPLOYMENT: services
+          # Each service creates its own database <service>_e2e on this server.
+          E2E_POSTGRES_URL: postgresql://extispex:extispex@localhost:5432/extispex
+          PERFORMANCE_INJECTED_DELAY_MILLISECONDS: ${{ env.INJECTED_DELAY_MILLISECONDS }}
+          PERFORMANCE_COMMIT: ${{ github.sha }}
+      - name: Compare with the previous run
+        run: >-
+          deno task compare:performance
+          previous/performance-results.json current/performance-results.json
+      - name: Keep the results for the next run
+        if: env.INJECTED_DELAY_MILLISECONDS == '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}
+          path: current/performance-results.json
+          retention-days: 90
+      - name: Keep the results of a failed or slowed run, never compared with
+        if: always() && (failure() || env.INJECTED_DELAY_MILLISECONDS != '0')
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}-not-compared
+          path: current/performance-results.json
+          retention-days: 14
+          if-no-files-found: ignore

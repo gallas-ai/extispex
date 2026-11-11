@@ -1,0 +1,10 @@
+{
+  "name": "@extispex/performance-tests",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./performance-results.ts"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.0"
+  }
+}
