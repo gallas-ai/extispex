@@ -50,7 +50,15 @@ export const userSchema = z.object({
   createdAt: z.string(),
   /** When the user lost access, or null while they have it. */
   deactivatedAt: z.string().nullable(),
+  /**
+   * When the user's email, name and sign-in identities were deleted, 30 days after deactivation.
+   * Only the ID stays, shown as "Deleted user", and the user cannot be changed any more.
+   */
+  personalDataDeletedAt: z.string().nullable(),
 });
+
+/** How long a deactivated user's personal data is kept before it is deleted for good. */
+export const DEACTIVATED_USER_RETENTION_DAYS = 30;
 
 export const createUserRequestSchema = z.object({
   email: emailSchema,

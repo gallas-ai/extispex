@@ -214,7 +214,10 @@ export const updateUserRoute = createRoute({
     200: jsonResponse("The changed user.", userSchema),
     ...accessErrorResponses,
     404: userNotFound,
-    409: describeErrorResponse("The change would leave the Instance without an active admin."),
+    409: describeErrorResponse(
+      "The change would leave the Instance without an active admin, or the user's personal data " +
+        "is deleted.",
+    ),
   },
 });
 

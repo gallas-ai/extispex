@@ -82,6 +82,7 @@ export function createOidcRepository(database: IdentityDatabase): OidcRepository
           isInstanceAdmin: false,
           createdAt: now,
           deactivatedAt: null,
+          personalDataDeletedAt: null,
         };
         await entityManager.insert(UserRecord, userRow);
       } else {

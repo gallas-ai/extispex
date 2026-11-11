@@ -1,6 +1,8 @@
 import type { ServiceRequestHandler } from "@extispex/service-client";
+import { createBackgroundLease } from "@extispex/service-storage";
 import {
   createServiceHttpApp,
+  DEFAULT_DATA_LIFECYCLE_INTERVAL_MILLISECONDS,
   type SecretCipher,
   type StructuredLogger,
 } from "@extispex/service-runtime";
@@ -10,9 +12,14 @@ import { createAccessTokenSigner } from "./access-tokens/signing-keys.ts";
 import { registerAccessRoutes } from "./access/access-routes.ts";
 import { type IdentityEnvironment, requireSignedInUser } from "./access/user-authentication.ts";
 import { registerDirectoryRoutes } from "./directory/directory-routes.ts";
+import {
+  createIdentityDataLifecycle,
+  type IdentityDataLifecycleOutcome,
+} from "./data-lifecycle/identity-data-lifecycle.ts";
 import { createOidcProvider } from "./oidc/oidc-provider.ts";
 import type { OidcSettings } from "./oidc/oidc-settings.ts";
 import { registerOidcSignInRoutes } from "./oidc/oidc-sign-in-routes.ts";
+import { registerProjectLifecycleRoutes } from "./projects/project-lifecycle-routes.ts";
 import { registerProjectRoutes } from "./projects/project-routes.ts";
 import { registerScimRoutes } from "./scim/scim-routes.ts";
 import { createBrowserSignIns } from "./sign-in/browser-sign-ins.ts";
@@ -44,6 +51,7 @@ export {
 export { type OidcSettings, readOidcSettings } from "./oidc/oidc-settings.ts";
 export { createFirstProjectIfNone, FIRST_PROJECT_NAME } from "./projects/first-project.ts";
 export { type IdentityDatabase, openIdentityDatabase } from "./storage/identity-database.ts";
+export type { IdentityDataLifecycleOutcome } from "./data-lifecycle/identity-data-lifecycle.ts";
 
 export interface IdentityServiceDependencies {
   database: IdentityDatabase;
@@ -61,6 +69,10 @@ export interface IdentityServiceDependencies {
   readCurrentTime?: () => Date;
   /** PBKDF2 iterations for new password hashes; tests lower it to stay fast. */
   passwordHashIterations?: number;
+  /** How often `runDataLifecycle` runs; its lease lasts two intervals. */
+  dataLifecycleIntervalMilliseconds?: number;
+  /** Who holds the data lifecycle's lease; one ID per process by default. */
+  leaseHolder?: string;
 }
 
 export interface IdentityService {
@@ -70,6 +82,12 @@ export interface IdentityService {
    * health checks.
    */
   handleRequest: ServiceRequestHandler;
+  /**
+   * One run of the periodic data work, if this replica gets the lease: removes Identity's data of
+   * deleted Projects and the personal data of users deactivated 30 days ago. `main.ts` runs it
+   * every `DATA_LIFECYCLE_INTERVAL_MILLISECONDS`.
+   */
+  runDataLifecycle(): Promise<IdentityDataLifecycleOutcome>;
 }
 
 export function createIdentityService(dependencies: IdentityServiceDependencies): IdentityService {
@@ -141,5 +159,19 @@ export function createIdentityService(dependencies: IdentityServiceDependencies)
     readCurrentTime,
   });
   registerProjectRoutes(app, { projectRepository, accessRepository, readCurrentTime });
-  return { handleRequest: (request) => app.fetch(request) };
+  registerProjectLifecycleRoutes(app, { projectRepository, accessTokenSigner, readCurrentTime });
+  const runDataLifecycle = createIdentityDataLifecycle({
+    projectRepository,
+    accessRepository,
+    lease: createBackgroundLease(dependencies.database, {
+      name: "data-lifecycle",
+      holder: dependencies.leaseHolder ?? crypto.randomUUID(),
+      durationMilliseconds: 2 *
+        (dependencies.dataLifecycleIntervalMilliseconds ??
+          DEFAULT_DATA_LIFECYCLE_INTERVAL_MILLISECONDS),
+    }),
+    logger: dependencies.logger,
+    readCurrentTime,
+  });
+  return { handleRequest: (request) => app.fetch(request), runDataLifecycle };
 }

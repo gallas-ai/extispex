@@ -41,6 +41,8 @@ const DIRECTORY_TABLES = [
   "role_assignments",
   "groups",
   "users",
+  "project_data_removals",
+  "background_leases",
   "api_keys",
   "projects",
   "signing_keys",

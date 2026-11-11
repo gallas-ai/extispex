@@ -2,11 +2,13 @@ import { MINIMUM_PASSWORD_LENGTH } from "@extispex/contracts";
 import {
   createStructuredLogger,
   InvalidConfigurationError,
+  readDataLifecycleIntervalMilliseconds,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
   readSecretEnvironmentVariable,
   runOnTerminationSignal,
+  startPeriodicTask,
 } from "@extispex/service-runtime";
 import {
   createFirstAdministratorIfNone,
@@ -75,12 +77,20 @@ if (bootstrapAdminEmail !== undefined && bootstrapAdminPassword !== undefined) {
   }
 }
 
+const dataLifecycleIntervalMilliseconds = readDataLifecycleIntervalMilliseconds();
 const identityService = createIdentityService({
   database,
   signingKeyCipher,
   areLocalAccountsEnabled,
   serviceClientSecrets,
   oidcSettings: readOidcSettings(readOptionalEnvironmentVariable),
+  logger,
+  dataLifecycleIntervalMilliseconds,
+});
+const dataLifecycle = startPeriodicTask({
+  taskName: "data lifecycle",
+  intervalMilliseconds: dataLifecycleIntervalMilliseconds,
+  runTask: identityService.runDataLifecycle,
   logger,
 });
 
@@ -94,6 +104,7 @@ const httpServer = Deno.serve(
 
 runOnTerminationSignal(logger, async () => {
   await httpServer.shutdown();
+  await dataLifecycle.stop();
   await database.close();
 });
 

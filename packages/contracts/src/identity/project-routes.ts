@@ -9,8 +9,10 @@ import {
   createdApiKeySchema,
   createProjectRequestSchema,
   listApiKeysResponseSchema,
+  listDeletedProjectsResponseSchema,
   listProjectsResponseSchema,
   projectSchema,
+  updateProjectRequestSchema,
 } from "./project-contracts.ts";
 
 const TAGS = ["Projects"];
@@ -77,10 +79,40 @@ export const getProjectRoute = createRoute({
   },
 });
 
+export const updateProjectRoute = createRoute({
+  method: "patch",
+  path: "/v1/projects/{projectId}",
+  summary: "Change a Project's Retention Period. Telemetry older than it is removed within the " +
+    "services' next cycle. Takes the Project's `admin` or an Instance admin.",
+  tags: TAGS,
+  security: accessTokenSecurity,
+  request: { params: projectPathParameters, body: jsonBody(updateProjectRequestSchema) },
+  responses: {
+    200: jsonResponse("The changed Project with the user's Role in it.", accessibleProjectSchema),
+    ...adminErrorResponses,
+    404: projectNotFound,
+  },
+});
+
+export const listDeletedProjectsRoute = createRoute({
+  method: "get",
+  path: "/v1/deleted-projects",
+  summary: "List deleted Projects, newest first, with how far each service has got with " +
+    "removing their data. Takes an Instance admin.",
+  tags: TAGS,
+  security: accessTokenSecurity,
+  request: { query: z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }) },
+  responses: {
+    200: jsonResponse("The deleted Projects.", listDeletedProjectsResponseSchema),
+    ...adminErrorResponses,
+  },
+});
+
 export const deleteProjectRoute = createRoute({
   method: "delete",
   path: "/v1/projects/{projectId}",
-  summary: "Delete a Project. Its API keys stop working within a minute. Takes an Instance admin.",
+  summary: "Delete a Project. Its API keys stop working within a minute, and every service then " +
+    "removes its data; `GET /v1/deleted-projects` shows how far they are. Takes an Instance admin.",
   tags: TAGS,
   security: accessTokenSecurity,
   request: { params: projectPathParameters },
@@ -143,7 +175,9 @@ export const identityPublicRoutes = [
   createProjectRoute,
   listProjectsRoute,
   getProjectRoute,
+  updateProjectRoute,
   deleteProjectRoute,
+  listDeletedProjectsRoute,
   createApiKeyRoute,
   listApiKeysRoute,
   revokeApiKeyRoute,
