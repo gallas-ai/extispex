@@ -1,5 +1,6 @@
 /** Stand-ins for Identity in services' tests. */
-import { ACCESS_TOKEN_ALGORITHM, type Role } from "@extispex/contracts";
+import { ACCESS_TOKEN_ALGORITHM, type ProjectLifecycle, type Role } from "@extispex/contracts";
+import type { ProjectLifecycleSource } from "./project-lifecycle-client.ts";
 import {
   type AccessTokenVerifier,
   createAccessTokenVerifier,
@@ -50,4 +51,27 @@ export async function createTestAccessTokens(): Promise<TestAccessTokens> {
       });
     },
   };
+}
+
+/** A stand-in for Identity's project lifecycle endpoints, which the test changes as it goes. */
+export interface TestProjectLifecycle extends ProjectLifecycleSource {
+  /** What Identity answers; change it to delete a Project or set a Retention Period. */
+  lifecycle: ProjectLifecycle;
+  /** The Project IDs the service reported as removed, in order. */
+  recordedRemovals: string[];
+}
+
+export function createTestProjectLifecycle(
+  lifecycle: ProjectLifecycle = { projects: [], projectsToRemove: [] },
+): TestProjectLifecycle {
+  const testLifecycle: TestProjectLifecycle = {
+    lifecycle,
+    recordedRemovals: [],
+    readProjectLifecycle: () => Promise.resolve(structuredClone(testLifecycle.lifecycle)),
+    recordDataRemoval: (projectId) => {
+      testLifecycle.recordedRemovals.push(projectId);
+      return Promise.resolve();
+    },
+  };
+  return testLifecycle;
 }

@@ -4,7 +4,10 @@ import {
   createStructuredLogger,
   type ProjectResolver,
 } from "@extispex/service-runtime";
-import { createTestAccessTokens } from "@extispex/service-runtime/testing";
+import {
+  createTestAccessTokens,
+  createTestProjectLifecycle,
+} from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import type { ListLogsResponse, RejectedTelemetry } from "@extispex/contracts";
 import protobuf from "protobufjs";
@@ -41,6 +44,7 @@ function createService(database: TelemetryDatabase, readCurrentTime = () => NOW)
   return createTelemetryService({
     database,
     requestAuthenticator: testRequestAuthenticator,
+    projectLifecycle: createTestProjectLifecycle(),
     logger: createStructuredLogger("telemetry-test"),
     readCurrentTime,
   });
