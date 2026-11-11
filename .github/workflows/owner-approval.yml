@@ -1,0 +1,52 @@
+name: Owner approval
+
+# A pull request opened by the owner needs no review; anyone else's needs the owner's approval of
+# its latest commit. The `Protect main` ruleset requires this job instead of a code owner review,
+# because nobody can approve their own pull request and auto-merge would otherwise wait forever.
+# See docs/repository-settings.md.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  pull-requests: read
+
+concurrency:
+  group: owner-approval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  owner-approval:
+    # The name is a required status check in the `Protect main` ruleset.
+    name: Owner approval
+    runs-on: ubuntu-24.04
+    steps:
+      # Nothing is checked out: pull_request_target runs with the base branch's permissions, so
+      # this job must never run code from the pull request.
+      - name: Check the author or the owner's approval of the latest commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: GALLLASMILAN
+          REPOSITORY: ${{ github.repository }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$AUTHOR" = "$OWNER" ]; then
+            echo "Opened by the owner, $OWNER."
+            exit 0
+          fi
+          # Reviews come oldest first; comments neither approve nor withdraw an approval.
+          latest_review=$(
+            gh api --paginate "repos/$REPOSITORY/pulls/$PULL_REQUEST_NUMBER/reviews" \
+              --jq ".[] | select(.user.login == \"$OWNER\" and .state != \"COMMENTED\" and .state != \"PENDING\") | \"\(.state) \(.commit_id)\"" |
+              tail -n 1
+          )
+          if [ "$latest_review" = "APPROVED $HEAD_SHA" ]; then
+            echo "$OWNER approved the latest commit, $HEAD_SHA."
+            exit 0
+          fi
+          echo "::error::Needs $OWNER's approval of the latest commit $HEAD_SHA. Latest review by $OWNER: ${latest_review:-none}."
+          exit 1
