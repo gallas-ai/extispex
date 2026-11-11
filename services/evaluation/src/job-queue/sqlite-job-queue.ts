@@ -1,10 +1,10 @@
 import type { StructuredLogger } from "@extispex/service-runtime";
 import { type EvaluationDatabase, QueuedJobRecord } from "../storage/mod.ts";
 import {
-  type AttemptJob,
-  type AttemptJobHandler,
+  type EvaluationJob,
   JOB_CONCURRENCY,
   JOB_RETRY_LIMIT,
+  type JobHandler,
   type JobQueue,
 } from "./job-queue.ts";
 
@@ -55,7 +55,7 @@ export function createSqliteJobQueue(options: SqliteJobQueueOptions): JobQueue {
     });
   };
 
-  const runWorkerLoop = async (handler: AttemptJobHandler) => {
+  const runWorkerLoop = async (handler: JobHandler) => {
     while (isWorking) {
       let claimedJob;
       try {
@@ -69,7 +69,7 @@ export function createSqliteJobQueue(options: SqliteJobQueueOptions): JobQueue {
         continue;
       }
       try {
-        await handler(claimedJob.payload as unknown as AttemptJob);
+        await handler(claimedJob.payload as unknown as EvaluationJob);
         await database.orm.em.fork().nativeDelete(QueuedJobRecord, { id: claimedJob.id });
       } catch (error) {
         logger.error("A job failed", { error, deliveryCount: claimedJob.deliveryCount });

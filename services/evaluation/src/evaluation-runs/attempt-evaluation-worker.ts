@@ -9,11 +9,12 @@ import {
   type TraceCompletionTiming,
 } from "../iterations/mod.ts";
 import type {
-  AttemptJob,
   EvaluateAttemptJob,
+  EvaluationJob,
   ExecuteAttemptJob,
   JobQueue,
 } from "../job-queue/mod.ts";
+import type { ReportDeliverer } from "../reports/mod.ts";
 import type {
   AttemptToEvaluate,
   AttemptToExecute,
@@ -38,6 +39,7 @@ export interface EvaluationWorkerDependencies {
   targetRepository: TargetRepository;
   targetClient: TargetClient;
   jobQueue: JobQueue;
+  reportDeliverer: ReportDeliverer;
   telemetryClient: TelemetryClient;
   traceCompletionTiming: TraceCompletionTiming;
   logger: StructuredLogger;
@@ -52,8 +54,11 @@ export interface EvaluationWorker {
   /** Calls the Target for one attempt and stores what it returned. Safe to repeat. */
   executeAttempt(job: ExecuteAttemptJob): Promise<void>;
   /** Handles a job from the queue, whichever kind it is. */
-  handleJob(job: AttemptJob): Promise<void>;
-  /** Queues stalled evaluations again and ends inactive runs. Safe to run on every replica. */
+  handleJob(job: EvaluationJob): Promise<void>;
+  /**
+   * Queues stalled evaluations and Report deliveries again and ends inactive runs. Safe to run on
+   * every replica.
+   */
   runMaintenance(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -192,8 +197,10 @@ export function createAttemptEvaluationWorker(
       }
     },
 
-    handleJob: (job) =>
-      job.kind === "execute" ? worker.executeAttempt(job) : worker.evaluateAttempt(job),
+    handleJob: (job) => {
+      if (job.kind === "deliver-report") return dependencies.reportDeliverer.deliverReport(job);
+      return job.kind === "execute" ? worker.executeAttempt(job) : worker.evaluateAttempt(job);
+    },
 
     async runMaintenance() {
       const now = readCurrentTime();
@@ -202,14 +209,17 @@ export function createAttemptEvaluationWorker(
         now,
       );
       await jobQueue.enqueue(stalledJobs);
-      const endedRunCount = await evaluationRunRepository.endInactiveRuns(
+      const { endedRunCount, jobs: reportJobs } = await evaluationRunRepository.endInactiveRuns(
         new Date(now.getTime() - dependencies.inactiveRunTimeoutMilliseconds),
         now,
       );
-      if (stalledJobs.length > 0 || endedRunCount > 0) {
+      await jobQueue.enqueue(reportJobs);
+      const requeuedDeliveries = await dependencies.reportDeliverer.requeueStalledDeliveries();
+      if (stalledJobs.length > 0 || endedRunCount > 0 || requeuedDeliveries > 0) {
         logger.info("Maintenance changed runs", {
           requeuedEvaluations: stalledJobs.length,
           endedRuns: endedRunCount,
+          requeuedReportDeliveries: requeuedDeliveries,
         });
       }
     },

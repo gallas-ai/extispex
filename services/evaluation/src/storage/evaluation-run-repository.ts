@@ -20,7 +20,13 @@ import { type InferEntity, raw } from "@mikro-orm/core";
 import type { EntityManager } from "@mikro-orm/sql";
 import { decideRunVerdict, decideTestCaseOutcome } from "../evaluation-runs/mod.ts";
 import type { ExecutionResult } from "../iterations/mod.ts";
-import type { AttemptJob, EvaluateAttemptJob, ExecuteAttemptJob } from "../job-queue/mod.ts";
+import type {
+  AttemptJob,
+  DeliverReportJob,
+  EvaluateAttemptJob,
+  EvaluationJob,
+  ExecuteAttemptJob,
+} from "../job-queue/mod.ts";
 import type { EvaluationDatabase } from "./evaluation-database.ts";
 import {
   EvaluationRunRecord,
@@ -30,6 +36,7 @@ import {
   RunTestCaseRecord,
   TestCaseRecord,
 } from "./evaluation-entities.ts";
+import { scheduleReportDeliveries } from "./report-delivery-repository.ts";
 
 type RunRow = InferEntity<typeof EvaluationRunRecord>;
 type IterationRow = InferEntity<typeof IterationRecord>;
@@ -68,8 +75,8 @@ export type StartRunResult =
 
 export interface ReportResult {
   rejected: RejectedReport[];
-  /** Attempts with an Output, to be queued after the reports were stored. */
-  jobs: EvaluateAttemptJob[];
+  /** Attempts with an Output, and the Reports of a run that ended, to queue after commit. */
+  jobs: EvaluationJob[];
 }
 
 export interface ResultPage {
@@ -125,6 +132,12 @@ export interface EvaluationRunRepository {
     page: ResultPage,
   ): Promise<ListTestCaseResultsResponse | null>;
   /** Null when the run or the Test Case does not exist. */
+  readTestCaseResult(
+    projectId: string,
+    runId: string,
+    testCaseName: string,
+  ): Promise<TestCaseResult | null>;
+  /** Null when the run or the Test Case does not exist. */
   listIterationResults(
     projectId: string,
     runId: string,
@@ -139,8 +152,14 @@ export interface EvaluationRunRepository {
     reports: IterationReport[],
     reportedAt: Date,
   ): Promise<ReportResult | null>;
-  /** False when the run does not exist. */
-  requestFinish(projectId: string, runId: string, requestedAt: Date): Promise<boolean>;
+  /**
+   * Null when the run does not exist; otherwise the Reports to queue, if this ended the run.
+   */
+  requestFinish(
+    projectId: string,
+    runId: string,
+    requestedAt: Date,
+  ): Promise<EvaluationJob[] | null>;
   /** Null unless the attempt is still waiting for its evaluation. */
   findAttemptToEvaluate(job: EvaluateAttemptJob): Promise<AttemptToEvaluate | null>;
   /** Does nothing when the attempt was already judged, so a repeated job is harmless. */
@@ -151,7 +170,7 @@ export interface EvaluationRunRepository {
     evaluatedAt: Date,
     /** Why the attempt ended as Error, when no Evaluator could say so. */
     errorMessage?: string,
-  ): Promise<ExecuteAttemptJob[]>;
+  ): Promise<EvaluationJob[]>;
   /**
    * Takes the attempt for this worker. Null when it is no longer waiting to be executed, or when
    * another worker is calling the Target, so that a repeated job does not call it twice.
@@ -161,13 +180,14 @@ export interface EvaluationRunRepository {
   renewAttemptExecution(job: ExecuteAttemptJob, renewedAt: Date): Promise<void>;
   /**
    * Stores what the Target returned. Does nothing when the attempt is no longer being executed.
-   * The result is the job to queue next: its evaluation, or another attempt after an Error.
+   * The result is the jobs to queue next: its evaluation, or another attempt after an Error, and
+   * the Reports when this ended the run.
    */
   recordExecution(
     job: ExecuteAttemptJob,
     result: ExecutionResult,
     recordedAt: Date,
-  ): Promise<AttemptJob[]>;
+  ): Promise<EvaluationJob[]>;
   /** Finds another attempt of the run that used one of the attempt's IDs. */
   findTelemetryIdConflict(
     job: EvaluateAttemptJob,
@@ -177,8 +197,11 @@ export interface EvaluationRunRepository {
   keepEvaluationWaiting(job: EvaluateAttemptJob, requestedAt: Date): Promise<void>;
   /** Attempts whose job was queued before the cutoff; their request time is set to now. */
   claimStalledEvaluations(cutoff: Date, claimedAt: Date): Promise<AttemptJob[]>;
-  /** Ends runs without activity since the cutoff; resolves to how many ended. */
-  endInactiveRuns(cutoff: Date, endedAt: Date): Promise<number>;
+  /** Ends runs without activity since the cutoff, with the Reports of those runs to queue. */
+  endInactiveRuns(
+    cutoff: Date,
+    endedAt: Date,
+  ): Promise<{ endedRunCount: number; jobs: DeliverReportJob[] }>;
 }
 
 interface TelemetryIdConflictRow {
@@ -285,18 +308,21 @@ function findReportShapeProblem(
     : `A report on this Session Test Case needs all of its ${stepCount} steps.`;
 }
 
-/** Sets the verdicts once no Iteration is open. A finished run is never changed again. */
+/**
+ * Sets the verdicts once no Iteration is open. A finished run is never changed again. The result
+ * is the jobs of the run's Reports, to queue after commit.
+ */
 async function finalizeRunIfComplete(
   entityManager: EntityManager,
   run: RunRow,
   finishedAt: Date,
-): Promise<void> {
-  if (run.status === "finished") return;
+): Promise<DeliverReportJob[]> {
+  if (run.status === "finished") return [];
   const openCount = await entityManager.count(IterationRecord, {
     runId: run.id,
     status: { $in: UNFINISHED_STATUSES },
   });
-  if (openCount > 0) return;
+  if (openCount > 0) return [];
   const testCaseRows = await entityManager.find(RunTestCaseRecord, { runId: run.id });
   const iterationRows = await entityManager.find(
     IterationRecord,
@@ -318,11 +344,13 @@ async function finalizeRunIfComplete(
       await entityManager.nativeUpdate(RunTestCaseRecord, { id: { $in: idChunk } }, { outcome });
     }
   }
+  const verdict = decideRunVerdict([...idsByOutcome.keys()]);
   await entityManager.nativeUpdate(EvaluationRunRecord, { id: run.id }, {
     status: "finished",
-    verdict: decideRunVerdict([...idsByOutcome.keys()]),
+    verdict,
     finishedAt,
   });
+  return await scheduleReportDeliveries(entityManager, run, verdict, finishedAt);
 }
 
 /** Ends every Iteration that is still waiting for its report, and optionally for its evaluation. */
@@ -539,6 +567,24 @@ export function createEvaluationRunRepository(
       };
     },
 
+    async readTestCaseResult(projectId, runId, testCaseName) {
+      const entityManager = database.orm.em.fork();
+      if (await entityManager.count(EvaluationRunRecord, { id: runId, projectId }) === 0) {
+        return null;
+      }
+      const testCaseRow = await entityManager.findOne(RunTestCaseRecord, {
+        runId,
+        name: testCaseName,
+      });
+      if (testCaseRow === null) return null;
+      const iterationRows = await entityManager.find(
+        IterationRecord,
+        { runTestCaseId: testCaseRow.id },
+        { fields: ["runTestCaseId", "status"] },
+      );
+      return toTestCaseResult(testCaseRow, iterationRows);
+    },
+
     async listIterationResults(projectId, runId, testCaseName, { cursor, limit }) {
       const entityManager = database.orm.em.fork();
       if (await entityManager.count(EvaluationRunRecord, { id: runId, projectId }) === 0) {
@@ -647,7 +693,7 @@ export function createEvaluationRunRepository(
         );
         const hasRunEnded = runRow.status === "finished" || runRow.finishRequestedAt != null;
         const rejected: RejectedReport[] = [];
-        const jobs: EvaluateAttemptJob[] = [];
+        const jobs: EvaluationJob[] = [];
         for (const report of reports) {
           const reject = (code: RejectedReport["code"], message: string) =>
             rejected.push({
@@ -732,7 +778,7 @@ export function createEvaluationRunRepository(
             jobs.push({ iterationId: report.iterationId, attemptNumber: report.attempt });
           }
         }
-        await finalizeRunIfComplete(entityManager, runRow, reportedAt);
+        jobs.push(...await finalizeRunIfComplete(entityManager, runRow, reportedAt));
         return { rejected, jobs };
       });
     },
@@ -740,8 +786,8 @@ export function createEvaluationRunRepository(
     async requestFinish(projectId, runId, requestedAt) {
       return await database.orm.em.fork().transactional(async (entityManager) => {
         const runRow = await lockRun(entityManager, { id: runId, projectId });
-        if (runRow === null) return false;
-        if (runRow.status === "finished") return true;
+        if (runRow === null) return null;
+        if (runRow.status === "finished") return [];
         await entityManager.nativeUpdate(EvaluationRunRecord, { id: runId }, {
           finishRequestedAt: runRow.finishRequestedAt ?? requestedAt,
         });
@@ -751,8 +797,7 @@ export function createEvaluationRunRepository(
           ["awaiting_report", "executing"],
           requestedAt,
         );
-        await finalizeRunIfComplete(entityManager, runRow, requestedAt);
-        return true;
+        return await finalizeRunIfComplete(entityManager, runRow, requestedAt);
       });
     },
 
@@ -877,7 +922,7 @@ export function createEvaluationRunRepository(
           evaluatedAt,
           ...(errorMessage === undefined ? {} : { error: errorMessage }),
         });
-        let nextJobs: ExecuteAttemptJob[] = [];
+        let nextJobs: EvaluationJob[] = [];
         if (outcome === "error") {
           nextJobs = await applyAttemptError(
             entityManager,
@@ -892,8 +937,10 @@ export function createEvaluationRunRepository(
             evaluationRequestedAt: null,
           });
         }
-        await finalizeRunIfComplete(entityManager, runRow, evaluatedAt);
-        return nextJobs;
+        return [
+          ...nextJobs,
+          ...await finalizeRunIfComplete(entityManager, runRow, evaluatedAt),
+        ];
       });
     },
 
@@ -971,7 +1018,7 @@ export function createEvaluationRunRepository(
           evaluatedAt: null,
         });
         await insertAttemptSteps(entityManager, job.iterationId, job.attemptNumber, steps);
-        let nextJobs: AttemptJob[];
+        let nextJobs: EvaluationJob[];
         if (result.status === "error") {
           nextJobs = await applyAttemptError(
             entityManager,
@@ -988,8 +1035,10 @@ export function createEvaluationRunRepository(
           });
           nextJobs = [{ iterationId: job.iterationId, attemptNumber: job.attemptNumber }];
         }
-        await finalizeRunIfComplete(entityManager, runRow, recordedAt);
-        return nextJobs;
+        return [
+          ...nextJobs,
+          ...await finalizeRunIfComplete(entityManager, runRow, recordedAt),
+        ];
       });
     },
 
@@ -1016,21 +1065,23 @@ export function createEvaluationRunRepository(
         status: "running",
         lastActivityAt: { $lt: cutoff },
       }, { limit: STATEMENT_CHUNK_SIZE });
-      let endedCount = 0;
+      let endedRunCount = 0;
+      const jobs: DeliverReportJob[] = [];
       for (const inactiveRow of inactiveRows) {
-        const hasEnded = await database.orm.em.fork().transactional(async (entityManager) => {
+        const reportJobs = await database.orm.em.fork().transactional(async (entityManager) => {
           const runRow = await lockRun(entityManager, { id: inactiveRow.id });
           // A report may have arrived since the search above.
           if (runRow === null || runRow.status === "finished" || runRow.lastActivityAt >= cutoff) {
-            return false;
+            return null;
           }
           await endOpenIterations(entityManager, runRow.id, UNFINISHED_STATUSES, endedAt);
-          await finalizeRunIfComplete(entityManager, runRow, endedAt);
-          return true;
+          return await finalizeRunIfComplete(entityManager, runRow, endedAt);
         });
-        if (hasEnded) endedCount++;
+        if (reportJobs === null) continue;
+        endedRunCount++;
+        jobs.push(...reportJobs);
       }
-      return endedCount;
+      return { endedRunCount, jobs };
     },
   };
 }

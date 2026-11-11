@@ -5,10 +5,12 @@
 import {
   createEvaluationApiService,
   createEvaluationWorker,
+  DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
   DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   DEFAULT_TRACE_COMPLETION_TIMING,
   openEvaluationDatabase,
   openJobQueue,
+  REPORT_CHANNEL_CIPHER_PURPOSE,
   TARGET_CREDENTIAL_CIPHER_PURPOSE,
 } from "@extispex/evaluation-service";
 import { createGatewayService } from "@extispex/gateway-service";
@@ -132,10 +134,13 @@ const targetCredentialCipher = await createSecretCipher(
   masterKey,
   TARGET_CREDENTIAL_CIPHER_PURPOSE,
 );
+const reportChannelCipher = await createSecretCipher(masterKey, REPORT_CHANNEL_CIPHER_PURPOSE);
+const gatewayPort = readPortEnvironmentVariable("GATEWAY_PORT", 8080);
 const evaluationApiService = createEvaluationApiService({
   database: evaluationDatabase,
   jobQueue: evaluationJobQueue,
   targetCredentialCipher,
+  reportChannelCipher,
   requestAuthenticator: createRequestAuthenticator("evaluation"),
   logger: evaluationLogger,
 });
@@ -150,6 +155,17 @@ const evaluationWorker = createEvaluationWorker({
   targetTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
     "EVALUATION_TARGET_TIMEOUT_MILLISECONDS",
     DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
+  ),
+  reportChannelCipher,
+  // Like Targets, the SMTP server and the webhook are the user's own choice on their machine.
+  reportAllowedDestinations: readOptionalEnvironmentVariable(
+    "EVALUATION_REPORT_ALLOWED_DESTINATIONS",
+  ) ?? "*",
+  publicUiUrl: readOptionalEnvironmentVariable("PUBLIC_UI_URL") ??
+    `http://localhost:${gatewayPort}`,
+  reportRetryDelayMilliseconds: readPositiveIntegerEnvironmentVariable(
+    "EVALUATION_REPORT_RETRY_DELAY_MILLISECONDS",
+    DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
   ),
   telemetryService: createInProcessServiceClient(telemetryService.handleRequest),
   serviceTokens: createServiceTokens("evaluation"),
@@ -218,7 +234,7 @@ logger.info("OTLP/gRPC listening", { port: grpcPort, tls: grpcTlsFiles !== null 
 
 const gatewayServer = Deno.serve(
   {
-    port: readPortEnvironmentVariable("GATEWAY_PORT", 8080),
+    port: gatewayPort,
     onListen: ({ port }) => logger.info("UI and REST API listening", { port }),
   },
   gatewayService.handleRequest,

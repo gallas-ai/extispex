@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./fake-smtp-server": "./src/fake-smtp-server.ts"
   },
   "imports": {
     "@hono/zod-openapi": "npm:@hono/zod-openapi@^1.1.0",

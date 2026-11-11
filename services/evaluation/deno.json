@@ -10,6 +10,7 @@
     "@mikro-orm/migrations": "npm:@mikro-orm/migrations@7.2.7",
     "@mikro-orm/sql": "npm:@mikro-orm/sql@7.2.7",
     "@std/assert": "jsr:@std/assert@^1.0.0",
+    "nodemailer": "npm:nodemailer@10.5.0",
     "pg-boss": "npm:pg-boss@12.38.1",
     "zod": "npm:zod@^4.1.0"
   },

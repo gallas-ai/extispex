@@ -1,6 +1,9 @@
 import { InvalidConfigurationError } from "@extispex/service-runtime";
 
-/** Which destinations the worker may call, from `EVALUATION_TARGET_ALLOWED_DESTINATIONS`. */
+/**
+ * Which destinations the worker may call, from `EVALUATION_TARGET_ALLOWED_DESTINATIONS` for
+ * Targets and `EVALUATION_REPORT_ALLOWED_DESTINATIONS` for Report channels.
+ */
 export interface DestinationAllowlist {
   /** Refuses a URL that the list cannot allow, whatever its host name resolves to. */
   isUrlAllowed(url: URL): boolean;
@@ -91,10 +94,10 @@ function isProtectedAddress(address: number[]): boolean {
   );
 }
 
-function parseEntry(entry: string): AllowedEntry {
+function parseEntry(entry: string, variableName: string): AllowedEntry {
   const invalid = () =>
     new InvalidConfigurationError(
-      `"${entry}" in EVALUATION_TARGET_ALLOWED_DESTINATIONS is not a host, a host:port, a ` +
+      `"${entry}" in ${variableName} is not a host, a host:port, a ` +
         "*.wildcard host or a CIDR range.",
     );
   if (entry.includes("/")) {
@@ -136,12 +139,15 @@ function readPort(url: URL): number {
  * usual case. It may not resolve to a protected address unless a CIDR range allows that address,
  * so a changed DNS record cannot point a listed name at the machine or at a metadata service.
  */
-export function parseDestinationAllowlist(configuredList: string): DestinationAllowlist {
+export function parseDestinationAllowlist(
+  configuredList: string,
+  variableName = "EVALUATION_TARGET_ALLOWED_DESTINATIONS",
+): DestinationAllowlist {
   const entries = configuredList.split(",").map((entry) => entry.trim()).filter(Boolean);
   if (entries.length === 1 && entries[0] === "*") {
     return { isUrlAllowed: () => true, areResolvedAddressesAllowed: () => true };
   }
-  const allowedEntries = entries.map(parseEntry);
+  const allowedEntries = entries.map((entry) => parseEntry(entry, variableName));
   const hostEntries = allowedEntries.filter((entry) => entry.kind === "host");
   const networkEntries = allowedEntries.filter((entry) => entry.kind === "network");
 

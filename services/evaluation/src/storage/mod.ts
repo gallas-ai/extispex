@@ -9,4 +9,15 @@ export {
   type EvaluationRunRepository,
 } from "./evaluation-run-repository.ts";
 export { removeEvaluationProjectData } from "./project-data-repository.ts";
+export {
+  type ClaimedDelivery,
+  createReportDeliveryRepository,
+  type ReportDeliveryRepository,
+  type ReportFacts,
+} from "./report-delivery-repository.ts";
+export {
+  createReportSettingsRepository,
+  type EmailChannelForSending,
+  type ReportSettingsRepository,
+} from "./report-settings-repository.ts";
 export { createTargetRepository, type TargetRepository } from "./target-repository.ts";

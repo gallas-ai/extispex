@@ -5,6 +5,7 @@ import type { EvaluationDatabase } from "./evaluation-database.ts";
  * removal does not depend on foreign keys being enforced.
  */
 const PROJECT_ROW_CONDITIONS: [tableName: string, condition: string][] = [
+  ["report_deliveries", "run_id in (select id from evaluation_runs where project_id = ?)"],
   [
     "iteration_attempt_steps",
     `iteration_id in (select id from iterations where run_id in
@@ -21,11 +22,12 @@ const PROJECT_ROW_CONDITIONS: [tableName: string, condition: string][] = [
   ["test_cases", "dataset_id in (select id from datasets where project_id = ?)"],
   ["datasets", "project_id = ?"],
   ["targets", "project_id = ?"],
+  ["report_settings", "project_id = ?"],
 ];
 
 /**
- * Deletes every Dataset, Evaluation Run with its results, and Target of a deleted Project, in one
- * transaction. Queued jobs of its runs find nothing and end.
+ * Deletes every Dataset, Evaluation Run with its results and Report Deliveries, Target and the
+ * Report settings of a deleted Project, in one transaction. Queued jobs of its runs find nothing and end.
  */
 export async function removeEvaluationProjectData(
   database: EvaluationDatabase,

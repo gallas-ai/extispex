@@ -6,6 +6,8 @@ import {
   IterationAttemptStepRecord,
   IterationRecord,
   QueuedJobRecord,
+  ReportDeliveryRecord,
+  ReportSettingsRecord,
   RunTestCaseRecord,
   TargetRecord,
   TestCaseRecord,
@@ -16,6 +18,8 @@ import { Migration0002IndexAttemptTelemetryIds as PostgresMigration0002 } from "
 import { Migration0002IndexAttemptTelemetryIds as SqliteMigration0002 } from "./migrations/sqlite/migration-0002-index-attempt-telemetry-ids.ts";
 import { Migration0003AddServerDrivenExecution as PostgresMigration0003 } from "./migrations/postgres/migration-0003-add-server-driven-execution.ts";
 import { Migration0003AddServerDrivenExecution as SqliteMigration0003 } from "./migrations/sqlite/migration-0003-add-server-driven-execution.ts";
+import { Migration0005AddReports as PostgresMigration0005 } from "./migrations/postgres/migration-0005-add-reports.ts";
+import { Migration0005AddReports as SqliteMigration0005 } from "./migrations/sqlite/migration-0005-add-reports.ts";
 import { Migration0006CreateBackgroundLeases as PostgresMigration0006 } from "./migrations/postgres/migration-0006-create-background-leases.ts";
 import { Migration0006CreateBackgroundLeases as SqliteMigration0006 } from "./migrations/sqlite/migration-0006-create-background-leases.ts";
 
@@ -39,6 +43,8 @@ export function openEvaluationDatabase(databaseUrl: string): Promise<EvaluationD
       IterationAttemptRecord,
       IterationAttemptStepRecord,
       TargetRecord,
+      ReportSettingsRecord,
+      ReportDeliveryRecord,
       QueuedJobRecord,
     ],
     migrationsByDialect: {
@@ -46,12 +52,14 @@ export function openEvaluationDatabase(databaseUrl: string): Promise<EvaluationD
         { name: "0001-create-evaluation", class: PostgresMigration0001 },
         { name: "0002-index-attempt-telemetry-ids", class: PostgresMigration0002 },
         { name: "0003-add-server-driven-execution", class: PostgresMigration0003 },
+        { name: "0005-add-reports", class: PostgresMigration0005 },
         { name: "0006-create-background-leases", class: PostgresMigration0006 },
       ],
       sqlite: [
         { name: "0001-create-evaluation", class: SqliteMigration0001 },
         { name: "0002-index-attempt-telemetry-ids", class: SqliteMigration0002 },
         { name: "0003-add-server-driven-execution", class: SqliteMigration0003 },
+        { name: "0005-add-reports", class: SqliteMigration0005 },
         { name: "0006-create-background-leases", class: SqliteMigration0006 },
       ],
     },

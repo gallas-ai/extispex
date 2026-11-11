@@ -1,7 +1,13 @@
 import { PgBoss } from "pg-boss";
 import type { StructuredLogger } from "@extispex/service-runtime";
-import { type AttemptJob, JOB_CONCURRENCY, JOB_RETRY_LIMIT, type JobQueue } from "./job-queue.ts";
+import {
+  type EvaluationJob,
+  JOB_CONCURRENCY,
+  JOB_RETRY_LIMIT,
+  type JobQueue,
+} from "./job-queue.ts";
 
+/** Named before it carried Report deliveries too; renaming it would strand queued jobs. */
 const QUEUE_NAME = "evaluate-attempt";
 const RETRY_DELAY_SECONDS = 1;
 const POLLING_INTERVAL_SECONDS = 0.5;
@@ -29,7 +35,7 @@ export async function openPgBossJobQueue(
       await boss.insert(QUEUE_NAME, jobs.map((job) => ({ data: job, startAfter })));
     },
     async startWorking(handler) {
-      await boss.work<AttemptJob>(
+      await boss.work<EvaluationJob>(
         QUEUE_NAME,
         { localConcurrency: JOB_CONCURRENCY, pollingIntervalSeconds: POLLING_INTERVAL_SECONDS },
         async ([job]) => await handler(job.data),
