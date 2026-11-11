@@ -24,6 +24,10 @@ Correlation ID. _Avoid_: Orphan log
 **Metric**: A named measurement that an application reports over OTLP, such as token usage or
 request duration. It is a sum, a gauge or a histogram. _Avoid_: KPI, stat
 
+**Retention Period**: How long a Project's traces, Log Records and metric points are kept, counted
+from each record's own time: 30 days unless the Project's admins choose otherwise. _Avoid_: TTL,
+expiry
+
 **Time Series**: The values of one Metric with one combination of attributes from one application,
 in time order. A Metric has as many Time Series as it has such combinations. _Avoid_: Stream, line
 

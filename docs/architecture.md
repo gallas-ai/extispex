@@ -83,9 +83,35 @@ flowchart LR
 
 ### Deleting a Project
 
-1. Identity marks the Project as deleted, so access stops at once.
+Built in roadmap step 13. See [ADR 0018](adr/0018-data-lifecycle-through-leased-periodic-runs.md).
+
+1. Identity marks the Project as deleted, so access stops at once: API keys within a minute, access
+   tokens within five minutes.
 2. Each service periodically asks Identity for deleted Projects and removes their data.
 3. The UI shows deletion progress for each service.
+
+```mermaid
+sequenceDiagram
+  participant service as Telemetry, Prompt or Evaluation worker
+  participant identity as Identity
+  service->>service: take the lease in its own database, or skip this run
+  service->>identity: GET /internal/v1/project-lifecycle (service token)
+  identity-->>service: Retention Periods, deleted Projects still to remove
+  service->>service: delete the Project's rows, and expired telemetry
+  service->>identity: PUT /internal/v1/deleted-projects/{id}/data-removal
+```
+
+- **Data lifecycle:** every service runs it every `DATA_LIFECYCLE_INTERVAL_MILLISECONDS`, ten
+  minutes by default; Evaluation in its worker. A lease row (`background_leases`) taken by
+  compare-and-set lets one replica at a time run it, on SQLite and PostgreSQL alike. It lasts two
+  intervals and its holder renews it on each run.
+- **Final removal:** a token issued before the deletion can still write for five minutes, so
+  Identity lists a deleted Project to a service until that service removed its data at least five
+  minutes after the deletion. `GET /v1/deleted-projects` shows each service as waiting, removing or
+  removed, and the Projects page shows it to Instance admins.
+- **What goes:** Identity removes the Project's API keys and Role assignments and keeps the Project
+  row; Telemetry its spans, Log Records, Time Series, points and rejected counts; Prompt its
+  prompts; Evaluation its Datasets, Evaluation Runs with their results, and Targets.
 
 ## 3. Technology
 
@@ -202,7 +228,14 @@ storage and the query.
   `GET /v1/metrics/attributes` a Metric's attribute keys, and `GET /v1/metrics/query` answers one
   value per step for each group. Filters and grouping read an attribute of the data point, or else
   of the application that sent it, such as `service.name`.
-- **Retention:** configurable per Project, 30 days by default.
+- **Retention:** each Project has a Retention Period, 30 days by default and from 1 to 400, which
+  its `admin` sets on the Project's page (`PATCH /v1/projects/{projectId}`). Telemetry's data
+  lifecycle deletes spans by their start time and Log Records and metric points by their time once
+  they are older than it, Time Series last seen before it, and rejected counts after 24 hours. On
+  PostgreSQL a whole day is dropped once it is past the longest Retention Period of any Project and
+  the 30-day ingestion window; Projects with a shorter period lose rows. Results of Evaluation Runs
+  keep their own copy, and the UI says that their traces are no longer available once the Retention
+  Period has passed. See [ADR 0018](adr/0018-data-lifecycle-through-leased-periodic-runs.md).
 
 Telemetry storage sits behind its own interface, so another store such as ClickHouse can be added if
 measurements show a need for it.
@@ -675,7 +708,10 @@ Content-Type: application/scim+json
   Company groups of the ID token and of the directory together, so a token without groups does not
   undo SCIM.
 - **Removed users:** `active: false` and `DELETE` both deactivate. Memberships from Company groups
-  and sign-ins end at once and access tokens within five minutes; the record stays. `DELETE` also
+  and sign-ins end at once and access tokens within five minutes; the record stays. Thirty days
+  after deactivation, by any route, Identity's data lifecycle deletes the user's email, name,
+  password, sign-in identities and memberships for good. The row keeps only its ID, shown as
+  "Deleted user", and cannot be reactivated; the same person returns as a new user. `DELETE` also
   hides the user from SCIM, and creating them again reactivates the same record. The Instance keeps
   at least one active Instance admin, so the directory cannot deactivate the last one.
 - **Files** for a company without SCIM go to `POST /v1/directory/imports` as `application/json` or
@@ -729,7 +765,7 @@ which Project a key belongs to.
   Project; an Instance admin creates one in the UI. Several replicas starting at once create one
   Project, because the name is unique among Projects that are not deleted.
 - **Deleting a Project** sets its deletion time. Its keys stop resolving at once and it disappears
-  from the list; purging its data in every service is step 13.
+  from the list; every service then removes its data, see [Deleting a Project](#deleting-a-project).
 
 ### Secrets
 
@@ -899,6 +935,18 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The Retention and Project deletion step added these checks on 2026-11-11.
+
+| Tested                                              | Result                                                                                                                                                                             |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Retention through the Gateway                       | Two-day-old spans, Log Records and metric points disappear after the Retention Period is set to one day, recent ones stay, in all-in-one and in separate services                  |
+| A deleted Project through the Gateway               | Identity, Telemetry, Prompt and Evaluation report its data removed within seconds, and a token issued before the deletion then reads no traces, logs, metrics, prompts or Datasets |
+| Telemetry retention on SQLite and PostgreSQL        | Each Project loses records older than its own period, a deleted Project loses everything, rejected counts go after 24 hours, and the search index follows                          |
+| Dropping days on PostgreSQL                         | A day is dropped only past the longest Retention Period and the 30-day window, for logs and metric points                                                                          |
+| The lease on both databases                         | One replica runs at a time, another takes over after two intervals, and of eight replicas asking at once exactly one gets it                                                       |
+| Final removal and personal data on both databases   | A removal before the tokens expired is asked again; a deactivated user's personal data goes after 30 days, the ID stays, and the address is free again                             |
+| Retention and deleted Projects in headless Chromium | Setting the period, a refused value, a viewer who only reads it, every service removing a deleted Project, and nothing scrolls sideways from 360px to 2,040px                      |
+
 The Metrics step added these checks on 2026-11-10.
 
 | Tested                                                     | Result                                                                                                                                                              |
@@ -1066,6 +1114,12 @@ The Prompt service step added these checks on 2026-11-07.
 - Metrics from SDKs other than OpenTelemetry JS, and from the OpenTelemetry Collector
 - The rule that modules inside a service import each other only through their public entry points;
   no automated check enforces it yet
+- Retention and Project removal at the capacity target: each is one delete per table and Project,
+  and spans, which have no partitions, are deleted row by row
+- Dropping a partition under load: it briefly locks the whole table, like creating one
+- The default ten-minute data lifecycle end to end; the e2e tests run it every second
+- "Trace no longer available" in the UI, which needs a result older than a day; it follows from the
+  Retention Period, and a unit test covers the rule
 - The web UI's colours, spacing and typography, and browsers other than Chromium
 
 ### First implementation step
@@ -1094,3 +1148,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0013: Secrets sealed with keys derived from one master key](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md)
 - [ADR 0014: A user from the directory is linked to their first OIDC sign-in by email, once](adr/0014-directory-users-linked-to-oidc-by-email-once.md)
 - [ADR 0015: Metric Time Series stored once, cumulative values resolved at query time](adr/0015-metric-time-series-stored-once-and-cumulative-values-at-query-time.md)
+- [ADR 0018: Data removed in leased periodic runs, shared days dropped only past every Project](adr/0018-data-lifecycle-through-leased-periodic-runs.md)
