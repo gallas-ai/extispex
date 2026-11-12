@@ -956,17 +956,21 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
-The Nightly performance test and module boundaries step added these checks on 2026-11-11. The
-numbers come from one local run on macOS against PostgreSQL 17 in Docker; they are not benchmarks.
+The Nightly performance test and module boundaries step added these checks on 2026-11-12. The
+numbers come from the nightly workflow on `ubuntu-latest` runners, run on its branch before merging;
+they are not benchmarks.
 
-| Tested                                        | Result                                                                                                                                          |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| The performance run against separate services | 60,000 spans at about 6,000 per second, 60,000 log records at about 12,600 and 40,000 metric data points at about 5,600, from 8 senders at once |
-| Query latency after that ingestion            | p95 from 8 ms for one trace to about 240 ms for a histogram's p95 over 13 minutes of 160 Time Series                                            |
-| pg-boss under sustained load                  | 1,200 evaluation jobs from 4 scripts at once over 2.5 minutes, every run reaching the verdict `passed`, at 7.9 jobs per second                  |
-| pg-boss's ceiling for one worker process      | About 8 jobs per second: each of the 4 slots waits the 0.5 s polling interval after every job while jobs are waiting                            |
-| A deliberate delay of 100 ms before requests  | The comparison fails the run; unit tests cover the 25% rule both ways and the first run without a previous one                                  |
-| Module boundaries                             | 26 modules in 4 services import each other only through `mod.ts`; an import of an internal file fails `tests/architecture`                      |
+| Tested                                             | Result                                                                                                                                       |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| The performance run against separate services      | Best of 3 rounds from 8 senders: about 21,000 spans, 47,000 log records and 31,000 metric data points per second, on an AMD EPYC 9V45 runner |
+| Query latency after that ingestion                 | p95 from 1.3 ms for one trace or a word in the logs to about 195 ms for the newest 50 traces                                                 |
+| pg-boss under sustained load                       | 1,200 evaluation jobs from 4 scripts at once over 2.5 minutes, every run reaching the verdict `passed`, at 8.0 jobs per second               |
+| pg-boss's ceiling for one worker process           | About 8 jobs per second: each of the 4 slots waits the 0.5 s polling interval after every job while jobs are waiting                         |
+| The same commit on two runners                     | 30 to 80% apart in every measurement, one run taking 6 minutes and the other 11                                                              |
+| Two commits on one runner, one after the other     | Within 20% of each other, except one metric query 36% faster in the second measurement                                                       |
+| A deliberate delay of 100 ms before requests       | The comparison fails the run; unit tests cover the 25% rule both ways and a first run without a previous one                                 |
+| Two replicas creating the migrations table at once | PostgreSQL's `duplicate_table` from the migrator counts as a lost race, and the loser tries again                                            |
+| Module boundaries                                  | 26 modules in 4 services import each other only through `mod.ts`; an import of an internal file fails `tests/architecture`                   |
 
 The Retention and Project deletion step added these checks on 2026-11-11.
 
@@ -1115,7 +1119,8 @@ The Prompt service step added these checks on 2026-11-07.
 - Browsers other than Chromium with the sign-in cookie
 - pg-boss on a managed PostgreSQL service, and the SQLite queue of the all-in-one deployment under
   load: the nightly run measures only the separate services
-- Whether the nightly run's 25% tolerance is wider than the variation between two GitHub runners
+- Whether the nightly run's 25% tolerance holds over many nights. The previous commit is always
+  measured first, on a colder runner, which favours the current commit
 - Mixed-telemetry protection with clock differences between Evaluation and Telemetry: it compares
   the start of an attempt on Evaluation's clock with receive times on Telemetry's. Servers are
   assumed to be synchronized, so a difference larger than the time a script needs to start could
