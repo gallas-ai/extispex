@@ -915,8 +915,9 @@ Performance tests follow one rule: they run only where GitHub Actions is free.
 - **Nightly regression test:** `tests/performance/` runs every night on a standard runner, which is
   free because the repository is public, against the separate services on PostgreSQL. It measures
   OTLP ingestion of spans, log records and metric data points, the p95 latency of six queries
-  through the Gateway, and evaluation jobs through pg-boss. A throughput more than 25% lower or a
-  p95 more than 25% higher than the previous successful run on `main` fails it; see
+  through the Gateway, and evaluation jobs through pg-boss. It measures the previous successful
+  run's commit again on the same runner, because runners differ in speed, and fails when a
+  throughput is more than 25% lower or a p95 more than 25% higher; see
   [ADR 0021](adr/0021-nightly-performance-compared-with-the-previous-run.md). Locally:
   `E2E_POSTGRES_URL=... deno task test:performance results.json`, then
   `deno task compare:performance previous.json results.json`.
@@ -965,7 +966,7 @@ numbers come from one local run on macOS against PostgreSQL 17 in Docker; they a
 | pg-boss under sustained load                  | 1,200 evaluation jobs from 4 scripts at once over 2.5 minutes, every run reaching the verdict `passed`, at 7.9 jobs per second                  |
 | pg-boss's ceiling for one worker process      | About 8 jobs per second: each of the 4 slots waits the 0.5 s polling interval after every job while jobs are waiting                            |
 | A deliberate delay of 100 ms before requests  | The comparison fails the run; unit tests cover the 25% rule both ways and the first run without a previous one                                  |
-| Module boundaries                             | 24 modules in 4 services import each other only through `mod.ts`; an import of an internal file fails `tests/architecture`                      |
+| Module boundaries                             | 26 modules in 4 services import each other only through `mod.ts`; an import of an internal file fails `tests/architecture`                      |
 
 The Retention and Project deletion step added these checks on 2026-11-11.
 
