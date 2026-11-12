@@ -51,8 +51,8 @@ export function registerEvaluationRunRoutes(
   } = dependencies;
 
   /**
-   * A failure here is not the script's problem: the worker queues stalled attempts and Report
-   * deliveries again.
+   * A failure here is not the script's problem: the worker queues stalled attempts, Report
+   * deliveries and LLM Summaries again.
    */
   const enqueueAfterCommit = async (jobs: EvaluationJob[]) => {
     try {
@@ -200,13 +200,13 @@ export function registerEvaluationRunRoutes(
   app.openapi(finishEvaluationRunRoute, async (context) => {
     const { runId } = context.req.valid("param");
     const { projectId } = context.get("projectAccess");
-    const reportJobs = await evaluationRunRepository.requestFinish(
+    const finishJobs = await evaluationRunRepository.requestFinish(
       projectId,
       runId,
       readCurrentTime(),
     );
-    if (reportJobs === null) return context.json(runNotFoundError(runId), 404);
-    await enqueueAfterCommit(reportJobs);
+    if (finishJobs === null) return context.json(runNotFoundError(runId), 404);
+    await enqueueAfterCommit(finishJobs);
     return context.json((await evaluationRunRepository.readWork(projectId, runId))!, 200);
   });
 }

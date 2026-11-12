@@ -1,23 +1,29 @@
 import type {
   CreateDatasetRequest,
   CreateEvaluationRunRequest,
+  CreateLlmProviderRequest,
   CreateTargetRequest,
   CreateTestCaseRequest,
   Dataset,
-  EvaluationRunSummary,
+  EvaluationRun,
   EvaluationRunWork,
   ListDatasetsResponse,
   ListEvaluationRunsResponse,
   ListIterationResultsResponse,
+  ListLlmProvidersResponse,
   ListReportDeliveriesResponse,
   ListTargetsResponse,
   ListTestCaseResultsResponse,
   ListTestCasesResponse,
+  LlmProvider,
+  LlmSummarySettings,
   ReportSettings,
   Target,
   TestCase,
   TestCaseDefinitionInput,
   TestCaseResult,
+  UpdateLlmProviderRequest,
+  UpdateLlmSummarySettingsRequest,
   UpdateReportSettingsRequest,
   UpdateTargetRequest,
 } from "@extispex/contracts";
@@ -105,7 +111,7 @@ export function listEvaluationRuns(
 export function getEvaluationRun(
   credentials: ApiCredentials,
   runId: string,
-): Promise<EvaluationRunSummary> {
+): Promise<EvaluationRun> {
   return requestJson(credentials, evaluationRunPath(runId));
 }
 
@@ -203,4 +209,52 @@ export function updateReportSettings(
   request: UpdateReportSettingsRequest,
 ): Promise<ReportSettings> {
   return requestJson(credentials, "/v1/report-settings", { method: "PUT", body: request });
+}
+
+function llmProviderPath(providerName: string): string {
+  return `/v1/llm-providers/${encodeURIComponent(providerName)}`;
+}
+
+export function listLlmProviders(credentials: ApiCredentials): Promise<ListLlmProvidersResponse> {
+  return requestJson(credentials, "/v1/llm-providers");
+}
+
+export function getLlmProvider(
+  credentials: ApiCredentials,
+  providerName: string,
+): Promise<LlmProvider> {
+  return requestJson(credentials, llmProviderPath(providerName));
+}
+
+export function createLlmProvider(
+  credentials: ApiCredentials,
+  request: CreateLlmProviderRequest,
+): Promise<LlmProvider> {
+  return requestJson(credentials, "/v1/llm-providers", { method: "POST", body: request });
+}
+
+export function updateLlmProvider(
+  credentials: ApiCredentials,
+  providerName: string,
+  request: UpdateLlmProviderRequest,
+): Promise<LlmProvider> {
+  return requestJson(credentials, llmProviderPath(providerName), { method: "PUT", body: request });
+}
+
+export function deleteLlmProvider(
+  credentials: ApiCredentials,
+  providerName: string,
+): Promise<null> {
+  return requestJson(credentials, llmProviderPath(providerName), { method: "DELETE" });
+}
+
+export function getLlmSummarySettings(credentials: ApiCredentials): Promise<LlmSummarySettings> {
+  return requestJson(credentials, "/v1/llm-summary-settings");
+}
+
+export function updateLlmSummarySettings(
+  credentials: ApiCredentials,
+  request: UpdateLlmSummarySettingsRequest,
+): Promise<LlmSummarySettings> {
+  return requestJson(credentials, "/v1/llm-summary-settings", { method: "PUT", body: request });
 }

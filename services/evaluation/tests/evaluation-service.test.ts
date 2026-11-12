@@ -788,7 +788,7 @@ defineEvaluationTest("refuses an invalid Telemetry Evaluator", async (harness) =
 });
 
 defineEvaluationTest(
-  "removes a deleted Project's Datasets, runs and Targets, and keeps other Projects'",
+  "removes a deleted Project's Datasets, runs, Targets and LLM providers, and keeps other Projects'",
   async (harness) => {
     await createDatasetWithTestCases(harness, [refundTestCase()]);
     const work = await startRun(harness);
@@ -799,6 +799,16 @@ defineEvaluationTest(
         body: { name: "support-bot", url: harness.target.url },
       }),
       201,
+    );
+    await expectJson(
+      sendRequest(harness, "POST", "/v1/llm-providers", {
+        body: { name: "judge", kind: "openai_compatible", defaultModel: "gpt-test" },
+      }),
+      201,
+    );
+    await expectJson(
+      sendRequest(harness, "PUT", "/v1/llm-summary-settings", { body: { providerName: "judge" } }),
+      200,
     );
     await expectJson(
       sendRequest(harness, "POST", "/v1/datasets", {
@@ -829,6 +839,8 @@ defineEvaluationTest(
         "evaluation_runs",
         "test_cases",
         "targets",
+        "llm_providers",
+        "llm_summary_settings",
       ]
     ) {
       const rows = await harness.database.orm.em.fork().execute<{ row_count: number | string }[]>(

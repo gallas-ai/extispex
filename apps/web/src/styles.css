@@ -3098,11 +3098,11 @@ textarea {
 
 /* On narrow screens the top bar keeps only icons; the names stay available to screen readers. */
 /*
- * Below this width the nine section names no longer fit beside the Project switcher. It leaves about
+ * Below this width the ten section names no longer fit beside the Project switcher. It leaves about
  * 150px for Linux fonts, which are wider than macOS ones: CI caught names overlapping that fitted
  * locally.
  */
-@media (max-width: 1360px) {
+@media (max-width: 1520px) {
   .top-bar-start {
     gap: 12px;
   }
@@ -4499,101 +4499,175 @@ textarea {
 
 .trace-unavailable {
   color: var(--color-text-muted);
+}
 
-  /* Reports */
-  .report-deliveries-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--color-border);
+/* Reports */
+.report-deliveries-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.report-deliveries-header .panel-title {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.report-deliveries-settings {
+  color: var(--color-accent);
+  font-size: 13px;
+}
+
+.report-deliveries-note {
+  margin: 0;
+  padding: 12px 16px;
+}
+
+.report-delivery-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 16px;
+  list-style: none;
+}
+
+.report-delivery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.report-delivery-channel {
+  min-width: 48px;
+  font-weight: 600;
+}
+
+.report-delivery-detail {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.linked-test-case {
+  border-radius: var(--radius-large);
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.report-settings-form {
+  max-width: 820px;
+}
+
+.report-settings-form .report-channel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.report-channel-switch {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.report-condition-control {
+  justify-self: start;
+  flex-wrap: wrap;
+  height: auto;
+  max-width: 100%;
+}
+
+.report-condition-control .segmented-control-option {
+  height: auto;
+  min-height: 28px;
+  white-space: normal;
+}
+
+@media (max-width: 560px) {
+  .report-smtp-row {
+    grid-template-columns: minmax(0, 1fr);
   }
+}
 
-  .report-deliveries-header .panel-title {
-    margin: 0;
-    padding: 0;
-    border: 0;
-  }
+/* LLM providers, Grading Evaluators and LLM Summaries */
 
-  .report-deliveries-settings {
-    color: var(--color-accent);
-    font-size: 13px;
-  }
+.llm-provider-form,
+.llm-summary-form {
+  display: grid;
+  gap: 12px;
+}
 
-  .report-deliveries-note {
-    margin: 0;
-    padding: 12px 16px;
-  }
+.llm-summary-form {
+  margin-top: 12px;
+}
 
-  .report-delivery-list {
-    display: grid;
-    gap: 10px;
-    margin: 0;
-    padding: 12px 16px;
-    list-style: none;
-  }
+/* Setting names such as EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS are wider than a phone. */
+.llm-provider-form .field-hint {
+  overflow-wrap: anywhere;
+}
 
-  .report-delivery {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px 10px;
-    min-width: 0;
-  }
+/* "Delete LLM provider" and "Save LLM provider" do not fit side by side on a phone. */
+.llm-provider-form .form-actions,
+.llm-summary-form .form-actions {
+  flex-wrap: wrap;
+}
 
-  .report-delivery-channel {
-    min-width: 48px;
-    font-weight: 600;
-  }
+.llm-provider-form .form-field,
+.llm-summary-form .form-field,
+.llm-provider-form .select-input,
+.llm-summary-form .select-input,
+.evaluator-editor .form-field,
+.evaluator-editor .select-input {
+  min-width: 0;
+  max-width: 100%;
+}
 
-  .report-delivery-detail {
-    flex: 1 1 240px;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
+.llm-summary {
+  display: grid;
+  gap: 8px;
+}
 
-  .linked-test-case {
-    border-radius: var(--radius-large);
-    box-shadow: 0 0 0 2px var(--color-accent);
-  }
+.llm-summary-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
 
-  .report-settings-form {
-    max-width: 820px;
-  }
+.judgment-criteria-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 
-  .report-settings-form .report-channel {
-    display: grid;
-    gap: 12px;
-    min-width: 0;
-    margin: 0;
-    padding: 14px 0 0;
-    border: 0;
-    border-top: 1px solid var(--color-border);
-  }
+.judgment-criterion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
 
-  .report-channel-switch {
-    color: var(--color-text);
-    font-weight: 600;
-  }
+.judgment-criterion .text-input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
 
-  .report-condition-control {
-    justify-self: start;
-    flex-wrap: wrap;
-    height: auto;
-    max-width: 100%;
-  }
+.evaluator-result-score {
+  font-variant-numeric: tabular-nums;
+}
 
-  .report-condition-control .segmented-control-option {
-    height: auto;
-    min-height: 28px;
-    white-space: normal;
-  }
-
-  @media (max-width: 560px) {
-    .report-smtp-row {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-
+.evaluator-result-model {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

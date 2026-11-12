@@ -1,6 +1,12 @@
-import type { Evaluator, EvaluatorResult, Span } from "@extispex/contracts";
+import { type Evaluator, type EvaluatorResult, needsSpans, type Span } from "@extispex/contracts";
 import type { StructuredLogger } from "@extispex/service-runtime";
-import { runRegexEvaluator, runTelemetryEvaluator } from "../evaluators/mod.ts";
+import {
+  type GradedStep,
+  type GradingDependencies,
+  runGradingEvaluator,
+  runRegexEvaluator,
+  runTelemetryEvaluator,
+} from "../evaluators/mod.ts";
 import {
   executeIterationAgainstTarget,
   type ExecutionResult,
@@ -13,15 +19,18 @@ import type {
   EvaluationJob,
   ExecuteAttemptJob,
   JobQueue,
+  SummarizeRunJob,
 } from "../job-queue/mod.ts";
 import type { ReportDeliverer } from "../reports/mod.ts";
-import type {
-  AttemptToEvaluate,
-  AttemptToExecute,
-  EvaluationRunRepository,
-  TargetRepository,
+import {
+  type AttemptToEvaluate,
+  type AttemptToExecute,
+  type EvaluationRunRepository,
+  MAXIMUM_SUMMARY_ATTEMPTS,
+  type TargetRepository,
 } from "../storage/mod.ts";
 import type { TargetClient } from "../targets/mod.ts";
+import { writeLlmSummary } from "./llm-summary.ts";
 import { decideIterationOutcome } from "./run-verdicts.ts";
 
 export const DEFAULT_REGEX_TIMEOUT_MILLISECONDS = 1_000;
@@ -33,8 +42,10 @@ const STALLED_EVALUATION_MILLISECONDS = 120_000;
 const MAINTENANCE_INTERVAL_MILLISECONDS = 30_000;
 /** Well within the two minutes after which an attempt counts as stalled. */
 const EXECUTION_RENEWAL_INTERVAL_MILLISECONDS = 30_000;
+/** An LLM Summary whose provider failed is tried again after this long. */
+const SUMMARY_RETRY_DELAY_MILLISECONDS = 30_000;
 
-export interface EvaluationWorkerDependencies {
+export interface EvaluationWorkerDependencies extends GradingDependencies {
   evaluationRunRepository: EvaluationRunRepository;
   targetRepository: TargetRepository;
   targetClient: TargetClient;
@@ -53,11 +64,13 @@ export interface EvaluationWorker {
   evaluateAttempt(job: EvaluateAttemptJob): Promise<void>;
   /** Calls the Target for one attempt and stores what it returned. Safe to repeat. */
   executeAttempt(job: ExecuteAttemptJob): Promise<void>;
+  /** Writes a finished run's LLM Summary. Safe to repeat. */
+  summarizeRun(job: SummarizeRunJob): Promise<void>;
   /** Handles a job from the queue, whichever kind it is. */
   handleJob(job: EvaluationJob): Promise<void>;
   /**
-   * Queues stalled evaluations and Report deliveries again and ends inactive runs. Safe to run on
-   * every replica.
+   * Queues stalled evaluations, LLM Summaries and Report deliveries again and ends inactive runs.
+   * Safe to run on every replica.
    */
   runMaintenance(): Promise<void>;
   start(): Promise<void>;
@@ -70,12 +83,34 @@ export function createAttemptEvaluationWorker(
   const { evaluationRunRepository, jobQueue, logger, readCurrentTime } = dependencies;
   let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
 
+  /** The Transcript: every step of a Session Test Case, or the one input and its Output. */
+  const readTranscript = (attempt: AttemptToEvaluate): GradedStep[] => {
+    const { definition } = attempt;
+    if (definition.scope === "trace") {
+      return [{ stepNumber: 1, input: definition.input, output: attempt.output }];
+    }
+    return attempt.stepOutputs.map((output, stepIndex) => ({
+      stepNumber: stepIndex + 1,
+      input: definition.steps?.[stepIndex]?.input ?? null,
+      output,
+    }));
+  };
+
   const runEvaluator = async (
     evaluator: Evaluator,
     attempt: AttemptToEvaluate,
     spans: Span[],
   ) => {
     if (evaluator.type === "telemetry") return runTelemetryEvaluator(evaluator, spans);
+    if (evaluator.type === "grading") {
+      return await runGradingEvaluator(evaluator, {
+        projectId: attempt.projectId,
+        testCaseName: attempt.testCaseName,
+        expectedOutput: attempt.definition.expectedOutput,
+        transcript: readTranscript(attempt),
+        spans,
+      }, dependencies);
+    }
     const output = evaluator.step === undefined
       ? attempt.output
       : attempt.stepOutputs[evaluator.step - 1];
@@ -87,19 +122,29 @@ export function createAttemptEvaluationWorker(
     attempt: AttemptToEvaluate,
     spans: Span[],
   ) => {
+    // An LLM may take long; renewing the request keeps maintenance from queuing the job again.
+    const renewalTimer = setInterval(() => {
+      evaluationRunRepository.keepEvaluationWaiting(job, readCurrentTime()).catch((error) =>
+        logger.error("A running evaluation could not be renewed", { error, ...job })
+      );
+    }, EXECUTION_RENEWAL_INTERVAL_MILLISECONDS);
     const results: EvaluatorResult[] = [];
-    for (const evaluator of attempt.definition.evaluators) {
-      try {
-        results.push(await runEvaluator(evaluator, attempt, spans));
-      } catch (error) {
-        logger.error("An Evaluator could not run", { error, ...job });
-        results.push({
-          name: evaluator.name,
-          type: evaluator.type,
-          outcome: "error",
-          reason: "The Evaluator could not run.",
-        });
+    try {
+      for (const evaluator of attempt.definition.evaluators) {
+        try {
+          results.push(await runEvaluator(evaluator, attempt, spans));
+        } catch (error) {
+          logger.error("An Evaluator could not run", { error, ...job });
+          results.push({
+            name: evaluator.name,
+            type: evaluator.type,
+            outcome: "error",
+            reason: "The Evaluator could not run.",
+          });
+        }
       }
+    } finally {
+      clearInterval(renewalTimer);
     }
     return results;
   };
@@ -143,7 +188,7 @@ export function createAttemptEvaluationWorker(
       const attempt = await evaluationRunRepository.findAttemptToEvaluate(job);
       if (attempt === null) return;
       // Only spans can be mixed up or incomplete, so an Output alone is judged at once.
-      if (!attempt.definition.evaluators.some((evaluator) => evaluator.type === "telemetry")) {
+      if (!needsSpans(attempt.definition.evaluators)) {
         await recordResults(job, await runEvaluators(job, attempt, []));
         return;
       }
@@ -197,9 +242,49 @@ export function createAttemptEvaluationWorker(
       }
     },
 
+    async summarizeRun(job) {
+      const claim = await evaluationRunRepository.claimSummary(job, readCurrentTime());
+      if (claim === null) return;
+      if (claim.attempt > MAXIMUM_SUMMARY_ATTEMPTS) {
+        await evaluationRunRepository.recordSummary(job, {
+          status: "failed",
+          error: `The LLM Summary could not be written in ${MAXIMUM_SUMMARY_ATTEMPTS} attempts.`,
+        }, readCurrentTime());
+        return;
+      }
+      const run = await evaluationRunRepository.readRunForSummary(job.runId);
+      if (run === null) return;
+      const renewalTimer = setInterval(() => {
+        evaluationRunRepository.renewSummary(job, readCurrentTime()).catch((error) =>
+          logger.error("The claim on an LLM Summary could not be renewed", { error, ...job })
+        );
+      }, EXECUTION_RENEWAL_INTERVAL_MILLISECONDS);
+      try {
+        const result = await writeLlmSummary(claim, run, dependencies);
+        if (result.status === "completed") {
+          await evaluationRunRepository.recordSummary(job, result, readCurrentTime());
+          return;
+        }
+        if (result.isRetryable && claim.attempt < MAXIMUM_SUMMARY_ATTEMPTS) {
+          logger.info("An LLM Summary will be tried again", { reason: result.error, ...job });
+          await evaluationRunRepository.releaseSummary(job, readCurrentTime());
+          await jobQueue.enqueue([job], { delayMilliseconds: SUMMARY_RETRY_DELAY_MILLISECONDS });
+          return;
+        }
+        await evaluationRunRepository.recordSummary(job, {
+          status: "failed",
+          error: result.error,
+        }, readCurrentTime());
+      } finally {
+        clearInterval(renewalTimer);
+      }
+    },
+
     handleJob: (job) => {
       if (job.kind === "deliver-report") return dependencies.reportDeliverer.deliverReport(job);
-      return job.kind === "execute" ? worker.executeAttempt(job) : worker.evaluateAttempt(job);
+      if (job.kind === "execute") return worker.executeAttempt(job);
+      if (job.kind === "summarize") return worker.summarizeRun(job);
+      return worker.evaluateAttempt(job);
     },
 
     async runMaintenance() {
@@ -209,15 +294,24 @@ export function createAttemptEvaluationWorker(
         now,
       );
       await jobQueue.enqueue(stalledJobs);
-      const { endedRunCount, jobs: reportJobs } = await evaluationRunRepository.endInactiveRuns(
+      const stalledSummaries = await evaluationRunRepository.claimStalledSummaries(
+        new Date(now.getTime() - STALLED_EVALUATION_MILLISECONDS),
+        now,
+      );
+      await jobQueue.enqueue(stalledSummaries);
+      const { endedRunCount, jobs: endedRunJobs } = await evaluationRunRepository.endInactiveRuns(
         new Date(now.getTime() - dependencies.inactiveRunTimeoutMilliseconds),
         now,
       );
-      await jobQueue.enqueue(reportJobs);
+      await jobQueue.enqueue(endedRunJobs);
       const requeuedDeliveries = await dependencies.reportDeliverer.requeueStalledDeliveries();
-      if (stalledJobs.length > 0 || endedRunCount > 0 || requeuedDeliveries > 0) {
+      if (
+        stalledJobs.length > 0 || stalledSummaries.length > 0 || endedRunCount > 0 ||
+        requeuedDeliveries > 0
+      ) {
         logger.info("Maintenance changed runs", {
           requeuedEvaluations: stalledJobs.length,
+          requeuedSummaries: stalledSummaries.length,
           endedRuns: endedRunCount,
           requeuedReportDeliveries: requeuedDeliveries,
         });

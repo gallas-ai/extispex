@@ -12,6 +12,7 @@ import {
   startFakeSmtpServer,
 } from "@extispex/service-runtime/fake-smtp-server";
 import { REPORT_DELIVERY_ATTEMPTS } from "../src/create-service.ts";
+import { FAKE_SUMMARY_TEXT } from "./fixtures/fake-llm-provider.ts";
 import {
   createDatasetWithTestCases,
   defineEvaluationTest,
@@ -304,6 +305,71 @@ defineEvaluationTest("delivers a finished run's Report by email and to Teams", a
         bearerToken: "other-project-api-key",
       }),
       404,
+    );
+  });
+});
+
+defineEvaluationTest("waits for the LLM Summary and puts it in the Report", async (harness) => {
+  await withChannels(async (smtpServer, webhook) => {
+    await createDatasetWithTestCases(harness, TWO_TEST_CASES);
+    await saveSettings(harness, reportSettings(smtpServer, webhook));
+    await expectJson(
+      sendRequest(harness, "POST", "/v1/llm-providers", {
+        body: {
+          name: "judge",
+          kind: "openai_compatible",
+          baseUrl: `${harness.llmProvider.url}/v1`,
+          defaultModel: "gpt-test",
+        },
+      }),
+      201,
+    );
+    await expectJson(
+      sendRequest(harness, "PUT", "/v1/llm-summary-settings", { body: { providerName: "judge" } }),
+      200,
+    );
+    await finishRunWithOneFailure(harness);
+    const jobs = harness.queuedJobs.splice(0);
+    harness.queuedDelays.splice(0);
+    assertEquals(jobs.map((job) => job.kind), ["summarize", "deliver-report", "deliver-report"]);
+
+    // While the LLM Summary is pending, the Reports wait and look again shortly.
+    for (const job of jobs.filter((job) => job.kind === "deliver-report")) {
+      await harness.worker.handleJob(job);
+    }
+    assertEquals(smtpServer.receivedEmails.length, 0);
+    assertEquals(harness.queuedDelays, [5_000, 5_000]);
+    await harness.worker.runMaintenance();
+    assertEquals(harness.queuedJobs.length, 2, "A waiting Report is not stalled.");
+
+    await harness.worker.handleJob(jobs[0]);
+    await harness.drainJobs();
+    const [text, html] = readEmail(smtpServer.receivedEmails[0].rawMessage).parts.map((part) =>
+      part.body
+    );
+    assertStringIncludes(text.replaceAll("\r\n", "\n"), `LLM Summary:\n${FAKE_SUMMARY_TEXT}`);
+    assertStringIncludes(html, FAKE_SUMMARY_TEXT);
+    const [message] = webhook.messages as { attachments: { content: { body: unknown } }[] }[];
+    // The card escapes Markdown, so the sentence's full stop arrives as `\.`.
+    assertStringIncludes(
+      JSON.stringify(message.attachments[0].content.body),
+      "every Test Case met its expectations",
+    );
+
+    // A Report does not wait forever: after five minutes it goes out without the LLM Summary.
+    await expectJson(
+      sendRequest(harness, "PUT", "/v1/llm-summary-settings", { body: { providerName: "judge" } }),
+      200,
+    );
+    await finishRunWithOneFailure(harness);
+    const laterJobs = harness.queuedJobs.splice(0);
+    harness.advanceClock(301_000);
+    for (const job of laterJobs.filter((job) => job.kind === "deliver-report")) {
+      await harness.worker.handleJob(job);
+    }
+    assertEquals(smtpServer.receivedEmails.length, 2);
+    assert(
+      !readEmail(smtpServer.receivedEmails[1].rawMessage).parts[0].body.includes("LLM Summary"),
     );
   });
 });

@@ -1,18 +1,26 @@
 import { type FormEvent, type ReactNode, useCallback, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { ApiCredentials } from "../api/api-request.ts";
-import { createTestCase, getTestCase, updateTestCase } from "../api/evaluation-api.ts";
+import {
+  createTestCase,
+  getTestCase,
+  listLlmProviders,
+  updateTestCase,
+} from "../api/evaluation-api.ts";
+import { listPrompts } from "../api/prompt-api.ts";
 import { Breadcrumbs } from "../prompts/prompt-parts.tsx";
 import { useCanEditProject } from "../sign-in/access-context.ts";
 import { AlertIcon, PlusIcon, TrashIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
 import { datasetPagePath } from "./dataset-paths.ts";
+import { GradingEvaluatorFields, type GradingOptions } from "./grading-evaluator-fields.tsx";
 import {
   checkDraft,
   createDraftFromTestCase,
   type EvaluatorDraft,
   MAXIMUM_SESSION_STEPS,
+  NEW_GRADING_EVALUATOR_DRAFT,
   NEW_REGEX_EVALUATOR_DRAFT,
   NEW_TELEMETRY_EVALUATOR_DRAFT,
   NEW_TEST_CASE_DRAFT,
@@ -38,6 +46,7 @@ export function NewTestCasePage({ credentials }: TestCaseEditorPageProps) {
         </div>
       </div>
       <TestCaseForm
+        credentials={credentials}
         initialDraft={NEW_TEST_CASE_DRAFT}
         isNameEditable
         canSave
@@ -97,6 +106,7 @@ export function EditTestCasePage({ credentials, onSignInRequired }: TestCaseEdit
       )}
       {testCaseState.status === "loaded" && (
         <TestCaseForm
+          credentials={credentials}
           initialDraft={createDraftFromTestCase(testCaseState.resource)}
           isNameEditable={false}
           canSave={canEdit}
@@ -125,6 +135,7 @@ function EditorBreadcrumbs({ datasetName, label }: { datasetName: string; label:
 }
 
 interface TestCaseFormProps {
+  credentials: ApiCredentials;
   initialDraft: TestCaseDraft;
   isNameEditable: boolean;
   canSave: boolean;
@@ -137,9 +148,22 @@ interface TestCaseFormProps {
 }
 
 function TestCaseForm(
-  { initialDraft, isNameEditable, canSave, submitLabel, cancelPath, onSubmit }: TestCaseFormProps,
+  { credentials, initialDraft, isNameEditable, canSave, submitLabel, cancelPath, onSubmit }:
+    TestCaseFormProps,
 ) {
   const [draft, setDraft] = useState(initialDraft);
+  // What a Grading Evaluator can choose from; without them it still shows what it has.
+  const loadGradingOptions = useCallback(async (): Promise<GradingOptions> => {
+    const [{ llmProviders }, { prompts }] = await Promise.all([
+      listLlmProviders(credentials),
+      listPrompts(credentials),
+    ]);
+    return { providers: llmProviders, prompts };
+  }, [credentials]);
+  const [gradingOptionsState] = useApiResource(loadGradingOptions);
+  const gradingOptions: GradingOptions = gradingOptionsState.status === "loaded"
+    ? gradingOptionsState.resource
+    : { providers: [], prompts: [] };
   const [problem, setProblem] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const updateDraft = (changes: Partial<TestCaseDraft>) => setDraft({ ...draft, ...changes });
@@ -271,6 +295,14 @@ function TestCaseForm(
                 <PlusIcon size={13} />
                 Add Telemetry Evaluator
               </button>
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => addEvaluator(NEW_GRADING_EVALUATOR_DRAFT)}
+              >
+                <PlusIcon size={13} />
+                Add Grading Evaluator
+              </button>
             </div>
           </div>
           <ol className="evaluator-editor-list">
@@ -279,6 +311,7 @@ function TestCaseForm(
                 key={evaluatorIndex}
                 evaluator={evaluator}
                 stepCount={draft.scope === "session" ? draft.steps.length : 0}
+                gradingOptions={gradingOptions}
                 evaluatorNumber={evaluatorIndex + 1}
                 canRemove={draft.evaluators.length > 1}
                 onChange={(replacement) => updateEvaluator(evaluatorIndex, replacement)}
@@ -400,6 +433,7 @@ interface EvaluatorFieldsProps {
   evaluator: EvaluatorDraft;
   /** The steps a Regex Evaluator can choose from; 0 outside a Session Test Case. */
   stepCount: number;
+  gradingOptions: GradingOptions;
   evaluatorNumber: number;
   canRemove: boolean;
   onChange: (replacement: EvaluatorDraft) => void;
@@ -407,7 +441,8 @@ interface EvaluatorFieldsProps {
 }
 
 function EvaluatorFields(
-  { evaluator, stepCount, evaluatorNumber, canRemove, onChange, onRemove }: EvaluatorFieldsProps,
+  { evaluator, stepCount, gradingOptions, evaluatorNumber, canRemove, onChange, onRemove }:
+    EvaluatorFieldsProps,
 ) {
   const removeButton = (
     <button
@@ -421,6 +456,17 @@ function EvaluatorFields(
       <TrashIcon size={14} />
     </button>
   );
+  if (evaluator.type === "grading") {
+    return (
+      <GradingEvaluatorFields
+        evaluator={evaluator}
+        options={gradingOptions}
+        evaluatorNumber={evaluatorNumber}
+        removeButton={removeButton}
+        onChange={onChange}
+      />
+    );
+  }
   return evaluator.type === "regex"
     ? (
       <RegexEvaluatorFields

@@ -12,7 +12,7 @@ import {
   createTestCaseRequestSchema,
   datasetNameSchema,
   datasetSchema,
-  evaluationRunSummarySchema,
+  evaluationRunSchema,
   evaluationRunWorkSchema,
   listDatasetsResponseSchema,
   listEvaluationRunsQuerySchema,
@@ -37,16 +37,27 @@ import {
   reportSettingsSchema,
   updateReportSettingsRequestSchema,
 } from "./report-contracts.ts";
+import {
+  createLlmProviderRequestSchema,
+  listLlmProvidersResponseSchema,
+  llmProviderNameSchema,
+  llmProviderSchema,
+  llmSummarySettingsSchema,
+  updateLlmProviderRequestSchema,
+  updateLlmSummarySettingsRequestSchema,
+} from "./llm-provider-contracts.ts";
 
 const DATASET_TAGS = ["Datasets"];
 const RUN_TAGS = ["Evaluation Runs"];
 const TARGET_TAGS = ["Targets"];
 const REPORT_TAGS = ["Reports"];
+const LLM_PROVIDER_TAGS = ["LLM providers"];
 
 const datasetPathParameters = z.object({ datasetName: datasetNameSchema });
 const testCasePathParameters = datasetPathParameters.extend({ testCaseName: testCaseNameSchema });
 const runPathParameters = z.object({ runId: z.string().min(1).max(64) });
 const targetPathParameters = z.object({ targetName: targetNameSchema });
+const llmProviderPathParameters = z.object({ providerName: llmProviderNameSchema });
 
 function jsonBody<Schema extends z.ZodType>(schema: Schema) {
   return { content: { "application/json": { schema } }, required: true };
@@ -60,6 +71,9 @@ const datasetNotFound = describeErrorResponse("No Dataset with this name exists 
 const testCaseNotFound = describeErrorResponse("The Dataset or the Test Case does not exist.");
 const runNotFound = describeErrorResponse("No Evaluation Run with this ID exists in the Project.");
 const targetNotFound = describeErrorResponse("No Target with this name exists in the Project.");
+const llmProviderNotFound = describeErrorResponse(
+  "No LLM provider with this name exists in the Project.",
+);
 
 export const createDatasetRoute = createRoute({
   method: "post",
@@ -222,7 +236,7 @@ export const getEvaluationRunRoute = createRoute({
   security: projectDataSecurity,
   request: { params: runPathParameters },
   responses: {
-    200: jsonResponse("The Evaluation Run.", evaluationRunSummarySchema),
+    200: jsonResponse("The Evaluation Run with its LLM Summary.", evaluationRunSchema),
     ...commonErrorResponses,
     404: runNotFound,
   },
@@ -418,6 +432,32 @@ export const getReportSettingsRoute = createRoute({
   },
 });
 
+export const createLlmProviderRoute = createRoute({
+  method: "post",
+  path: "/v1/llm-providers",
+  summary: "Add an LLM provider for Grading Evaluators and LLM Summaries.",
+  tags: LLM_PROVIDER_TAGS,
+  security: projectDataSecurity,
+  request: { body: jsonBody(createLlmProviderRequestSchema) },
+  responses: {
+    201: jsonResponse("The LLM provider, without its API key.", llmProviderSchema),
+    ...commonErrorResponses,
+    409: describeErrorResponse("An LLM provider with this name already exists in the Project."),
+  },
+});
+
+export const listLlmProvidersRoute = createRoute({
+  method: "get",
+  path: "/v1/llm-providers",
+  summary: "List the Project's LLM providers by name, with their capabilities.",
+  tags: LLM_PROVIDER_TAGS,
+  security: projectDataSecurity,
+  responses: {
+    200: jsonResponse("The LLM providers, without their API keys.", listLlmProvidersResponseSchema),
+    ...commonErrorResponses,
+  },
+});
+
 export const updateReportSettingsRoute = createRoute({
   method: "put",
   path: "/v1/report-settings",
@@ -429,6 +469,76 @@ export const updateReportSettingsRoute = createRoute({
   request: { body: jsonBody(updateReportSettingsRequestSchema) },
   responses: {
     200: jsonResponse("The Report settings, without their secrets.", reportSettingsSchema),
+    ...commonErrorResponses,
+  },
+});
+
+export const getLlmProviderRoute = createRoute({
+  method: "get",
+  path: "/v1/llm-providers/{providerName}",
+  summary: "Get an LLM provider, without its API key.",
+  tags: LLM_PROVIDER_TAGS,
+  security: projectDataSecurity,
+  request: { params: llmProviderPathParameters },
+  responses: {
+    200: jsonResponse("The LLM provider.", llmProviderSchema),
+    ...commonErrorResponses,
+    404: llmProviderNotFound,
+  },
+});
+
+export const updateLlmProviderRoute = createRoute({
+  method: "put",
+  path: "/v1/llm-providers/{providerName}",
+  summary: "Change an LLM provider. Its kind and name stay as they are.",
+  tags: LLM_PROVIDER_TAGS,
+  security: projectDataSecurity,
+  request: { params: llmProviderPathParameters, body: jsonBody(updateLlmProviderRequestSchema) },
+  responses: {
+    200: jsonResponse("The LLM provider, without its API key.", llmProviderSchema),
+    ...commonErrorResponses,
+    404: llmProviderNotFound,
+  },
+});
+
+export const deleteLlmProviderRoute = createRoute({
+  method: "delete",
+  path: "/v1/llm-providers/{providerName}",
+  summary: "Delete an LLM provider and its API key. Grading Evaluators using it end as Error.",
+  tags: LLM_PROVIDER_TAGS,
+  security: projectDataSecurity,
+  request: { params: llmProviderPathParameters },
+  responses: {
+    204: { description: "The LLM provider was deleted." },
+    ...commonErrorResponses,
+    404: llmProviderNotFound,
+  },
+});
+
+export const getLlmSummarySettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/llm-summary-settings",
+  summary: "Get which LLM provider and prompt write the Project's LLM Summaries.",
+  tags: LLM_PROVIDER_TAGS,
+  security: projectDataSecurity,
+  responses: {
+    200: jsonResponse("The LLM Summary settings.", llmSummarySettingsSchema),
+    ...commonErrorResponses,
+  },
+});
+
+export const updateLlmSummarySettingsRoute = createRoute({
+  method: "put",
+  path: "/v1/llm-summary-settings",
+  summary: "Choose the LLM provider and prompt for LLM Summaries of runs that finish from now on.",
+  description:
+    "The provider needs Text Generation. Without a prompt, the default prompt is used; " +
+    "with `providerName: null`, runs get no LLM Summary.",
+  tags: LLM_PROVIDER_TAGS,
+  security: projectDataSecurity,
+  request: { body: jsonBody(updateLlmSummarySettingsRequestSchema) },
+  responses: {
+    200: jsonResponse("The LLM Summary settings.", llmSummarySettingsSchema),
     ...commonErrorResponses,
   },
 });
@@ -460,4 +570,11 @@ export const evaluationPublicRoutes: RouteConfig[] = [
   deleteTargetRoute,
   getReportSettingsRoute,
   updateReportSettingsRoute,
+  createLlmProviderRoute,
+  listLlmProvidersRoute,
+  getLlmProviderRoute,
+  updateLlmProviderRoute,
+  deleteLlmProviderRoute,
+  getLlmSummarySettingsRoute,
+  updateLlmSummarySettingsRoute,
 ];

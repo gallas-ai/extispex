@@ -15,11 +15,14 @@ import {
 import {
   createEvaluationWorker,
   DEFAULT_INACTIVE_RUN_TIMEOUT_MILLISECONDS,
+  DEFAULT_LLM_PROVIDER_ALLOWED_DESTINATIONS,
+  DEFAULT_LLM_TIMEOUT_MILLISECONDS,
   DEFAULT_REGEX_TIMEOUT_MILLISECONDS,
   DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
   DEFAULT_REPORT_TIMEOUT_MILLISECONDS,
   DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   DEFAULT_TRACE_COMPLETION_TIMING,
+  LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
   openEvaluationDatabase,
   openJobQueue,
   REPORT_CHANNEL_CIPHER_PURPOSE,
@@ -57,6 +60,18 @@ const evaluationWorker = createEvaluationWorker({
     "EVALUATION_REPORT_TIMEOUT_MILLISECONDS",
     DEFAULT_REPORT_TIMEOUT_MILLISECONDS,
   ),
+  llmProviderApiKeyCipher: await createSecretCipher(
+    masterKey,
+    LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
+  ),
+  // The public providers by default; Azure OpenAI and local models need an operator's entry.
+  llmProviderAllowedDestinations: readOptionalEnvironmentVariable(
+    "EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS",
+  ) ?? DEFAULT_LLM_PROVIDER_ALLOWED_DESTINATIONS,
+  llmTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
+    "EVALUATION_LLM_TIMEOUT_MILLISECONDS",
+    DEFAULT_LLM_TIMEOUT_MILLISECONDS,
+  ),
   // Nothing is allowed unless an operator says so: Targets are URLs that users supply.
   targetAllowedDestinations: readOptionalEnvironmentVariable(
     "EVALUATION_TARGET_ALLOWED_DESTINATIONS",
@@ -66,6 +81,7 @@ const evaluationWorker = createEvaluationWorker({
     DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   ),
   telemetryService: createHttpServiceClient(readRequiredEnvironmentVariable("TELEMETRY_URL")),
+  promptService: createHttpServiceClient(readRequiredEnvironmentVariable("PROMPT_URL")),
   serviceTokens,
   projectLifecycle: createIdentityProjectLifecycleSource(
     createServiceTokenClient(identityClient, serviceTokens),

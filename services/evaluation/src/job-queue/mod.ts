@@ -7,5 +7,6 @@ export type {
   ExecuteAttemptJob,
   JobHandler,
   JobQueue,
+  SummarizeRunJob,
 } from "./job-queue.ts";
 export { openJobQueue } from "./open-job-queue.ts";

@@ -4,6 +4,7 @@ export * from "./public-api.ts";
 export * from "./evaluation/evaluation-contracts.ts";
 export * from "./evaluation/evaluation-routes.ts";
 export * from "./evaluation/report-contracts.ts";
+export * from "./evaluation/llm-provider-contracts.ts";
 export * from "./identity/access-contracts.ts";
 export * from "./identity/access-routes.ts";
 export * from "./identity/access-tokens.ts";

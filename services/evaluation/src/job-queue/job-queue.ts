@@ -12,6 +12,12 @@ export interface ExecuteAttemptJob {
   attemptNumber: number;
 }
 
+/** Asks the worker to write a finished run's LLM Summary. */
+export interface SummarizeRunJob {
+  kind: "summarize";
+  runId: string;
+}
+
 export type AttemptJob = EvaluateAttemptJob | ExecuteAttemptJob;
 
 /** Asks the worker to send one channel's Report of a finished run. */
@@ -20,7 +26,7 @@ export interface DeliverReportJob {
   deliveryId: string;
 }
 
-export type EvaluationJob = AttemptJob | DeliverReportJob;
+export type EvaluationJob = AttemptJob | DeliverReportJob | SummarizeRunJob;
 
 export interface EnqueueOptions {
   delayMilliseconds?: number;

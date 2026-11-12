@@ -28,6 +28,12 @@ import {
 } from "./iterations/mod.ts";
 import type { JobQueue } from "./job-queue/mod.ts";
 import {
+  createLlmProviderClient,
+  DEFAULT_LLM_TIMEOUT_MILLISECONDS,
+  registerLlmProviderRoutes,
+} from "./llm-providers/mod.ts";
+import { createPromptClient } from "./prompts/mod.ts";
+import {
   createReportDeliverer,
   createReportSender,
   DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
@@ -37,6 +43,7 @@ import {
 import {
   createDatasetRepository,
   createEvaluationRunRepository,
+  createLlmProviderRepository,
   createReportDeliveryRepository,
   createReportSettingsRepository,
   createTargetRepository,
@@ -71,6 +78,7 @@ export {
   DEFAULT_REPORT_TIMEOUT_MILLISECONDS,
   REPORT_DELIVERY_ATTEMPTS,
 } from "./reports/mod.ts";
+export { DEFAULT_LLM_TIMEOUT_MILLISECONDS } from "./llm-providers/mod.ts";
 export { type EvaluationDatabase, openEvaluationDatabase } from "./storage/mod.ts";
 export { DEFAULT_TARGET_TIMEOUT_MILLISECONDS } from "./targets/mod.ts";
 
@@ -79,6 +87,16 @@ export const TARGET_CREDENTIAL_CIPHER_PURPOSE = "evaluation-target-credential";
 
 /** The purpose that a Report channel's SMTP password and Teams webhook URL are encrypted for. */
 export const REPORT_CHANNEL_CIPHER_PURPOSE = "evaluation-report-channel";
+/** The purpose that LLM provider API keys are encrypted for, see ADR 0013. */
+export const LLM_PROVIDER_API_KEY_CIPHER_PURPOSE = "evaluation-llm-provider-api-key";
+
+/**
+ * The public providers' addresses, which separate services may call unless an operator sets
+ * `EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS`. Azure OpenAI and local models need their own
+ * entries.
+ */
+export const DEFAULT_LLM_PROVIDER_ALLOWED_DESTINATIONS =
+  "api.openai.com:443,api.anthropic.com:443,api.typesafe.ai:443";
 
 export interface EvaluationApiDependencies {
   database: EvaluationDatabase;
@@ -87,6 +105,8 @@ export interface EvaluationApiDependencies {
   targetCredentialCipher: SecretCipher;
   /** Encrypts Report channel secrets, with the purpose {@link REPORT_CHANNEL_CIPHER_PURPOSE}. */
   reportChannelCipher: SecretCipher;
+  /** Encrypts LLM provider API keys, with the purpose {@link LLM_PROVIDER_API_KEY_CIPHER_PURPOSE}. */
+  llmProviderApiKeyCipher: SecretCipher;
   requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
   readCurrentTime?: () => Date;
@@ -121,6 +141,13 @@ export function createEvaluationApiService(
     ),
     readCurrentTime,
   });
+  registerLlmProviderRoutes(app, {
+    llmProviderRepository: createLlmProviderRepository(
+      dependencies.database,
+      dependencies.llmProviderApiKeyCipher,
+    ),
+    readCurrentTime,
+  });
   registerEvaluationRunRoutes(app, {
     datasetRepository,
     targetRepository,
@@ -151,8 +178,19 @@ export interface EvaluationWorkerServiceDependencies {
   publicUiUrl?: string | null;
   reportRetryDelayMilliseconds?: number;
   reportTimeoutMilliseconds?: number;
+  /** Opens LLM provider API keys, with the purpose {@link LLM_PROVIDER_API_KEY_CIPHER_PURPOSE}. */
+  llmProviderApiKeyCipher: SecretCipher;
+  /** `EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS`; an empty value allows no provider. */
+  llmProviderAllowedDestinations: string;
+  llmTimeoutMilliseconds?: number;
+  /** How a provider's host name is resolved; tests answer with fixed addresses. */
+  resolveLlmProviderHostAddresses?: ResolveHostAddresses;
+  /** The wait before retrying a busy provider; tests shorten it. */
+  llmRetryDelayMilliseconds?: number;
   /** Reaches Telemetry's internal API, with the service token that `serviceTokens` provides. */
   telemetryService: ServiceClient;
+  /** Reaches the Prompt service's API for Prompt Versions, with a service token as well. */
+  promptService: ServiceClient;
   serviceTokens: ServiceTokenSource;
   /** Identity's deleted Projects, asked with this service's token. */
   projectLifecycle: ProjectLifecycleSource;
@@ -230,6 +268,17 @@ export function createEvaluationWorker(
       resolveHostAddresses: dependencies.resolveTargetHostAddresses,
     }),
     jobQueue: dependencies.jobQueue,
+    llmProviderRepository: createLlmProviderRepository(
+      dependencies.database,
+      dependencies.llmProviderApiKeyCipher,
+    ),
+    llmProviderClient: createLlmProviderClient({
+      allowlist: parseDestinationAllowlist(dependencies.llmProviderAllowedDestinations),
+      timeoutMilliseconds: dependencies.llmTimeoutMilliseconds ?? DEFAULT_LLM_TIMEOUT_MILLISECONDS,
+      resolveHostAddresses: dependencies.resolveLlmProviderHostAddresses,
+      retryDelayMilliseconds: dependencies.llmRetryDelayMilliseconds,
+    }),
+    promptClient: createPromptClient(dependencies.promptService, dependencies.serviceTokens),
     telemetryClient: createTelemetryClient(
       dependencies.telemetryService,
       dependencies.serviceTokens,

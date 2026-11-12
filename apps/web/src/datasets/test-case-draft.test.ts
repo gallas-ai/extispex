@@ -3,6 +3,7 @@ import type { TestCase } from "@extispex/contracts";
 import {
   checkDraft,
   createDraftFromTestCase,
+  NEW_GRADING_EVALUATOR_DRAFT,
   NEW_TELEMETRY_EVALUATOR_DRAFT,
   NEW_TEST_CASE_DRAFT,
   type TestCaseDraft,
@@ -169,4 +170,74 @@ Deno.test("turns a Session draft into steps, and lets a Regex Evaluator pick one
     }).step,
     undefined,
   );
+});
+
+Deno.test("writes a Grading Evaluator with a prompt or a typed question", () => {
+  const withPrompt = {
+    ...NEW_GRADING_EVALUATOR_DRAFT,
+    name: "states-period",
+    providerName: "judge",
+    promptName: "grader",
+    promptVersion: "3",
+  };
+  const withChoice = {
+    ...NEW_GRADING_EVALUATOR_DRAFT,
+    name: "tone",
+    providerName: "jev",
+    mode: "question" as const,
+    questionType: "choice" as const,
+    instructions: "What is the tone?",
+    choices: [
+      { name: "polite", description: "Friendly", passes: true },
+      { name: "rude", description: "Hostile", passes: false },
+    ],
+  };
+  const definition = readDefinition({ ...VALID_DRAFT, evaluators: [withPrompt, withChoice] });
+  assertEquals(definition.evaluators, [
+    {
+      type: "grading",
+      name: "states-period",
+      providerName: "judge",
+      prompt: { name: "grader", version: 3 },
+      includeSpans: false,
+    },
+    {
+      type: "grading",
+      name: "tone",
+      providerName: "jev",
+      question: {
+        type: "choice",
+        instructions: "What is the tone?",
+        criteria: { polite: "Friendly", rude: "Hostile" },
+        passingChoices: ["polite"],
+      },
+      includeSpans: false,
+    },
+  ]);
+  const edited = createDraftFromTestCase({
+    ...VALID_DRAFT,
+    name: "refund",
+    datasetName: "support-bot",
+    scope: "trace",
+    input: "Hello",
+    steps: undefined,
+    expectedOutput: null,
+    iterations: 1,
+    passThreshold: 1,
+    evaluators: definition.evaluators as TestCase["evaluators"],
+    createdAt: "",
+    updatedAt: "",
+  });
+  assertEquals(edited.evaluators, [withPrompt, withChoice]);
+  for (
+    const invalid of [
+      { ...withPrompt, providerName: "" },
+      { ...withPrompt, promptName: "" },
+      { ...withChoice, choices: withChoice.choices.map((choice) => ({ ...choice, passes: true })) },
+      { ...withChoice, questionType: "score" as const, passScore: "5" },
+      { ...withChoice, questionType: "noul" as const, passProbability: "1" },
+    ]
+  ) {
+    assertEquals(checkDraft({ ...VALID_DRAFT, evaluators: [invalid] }).isValid, false);
+  }
 });

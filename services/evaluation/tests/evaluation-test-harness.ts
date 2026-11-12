@@ -2,11 +2,12 @@
 import { assertEquals } from "@std/assert";
 import type {
   CorrelationTelemetryResponse,
-  EvaluationRunSummary,
+  EvaluationRun,
   EvaluationRunWork,
   IterationReport,
   ListIterationResultsResponse,
   ListTestCaseResultsResponse,
+  PromptVersion,
   ReportIterationsResponse,
   Span,
 } from "@extispex/contracts";
@@ -31,10 +32,12 @@ import {
   type EvaluationJob,
   type EvaluationWorkerService,
   type JobQueue,
+  LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
   openEvaluationDatabase,
   REPORT_CHANNEL_CIPHER_PURPOSE,
   TARGET_CREDENTIAL_CIPHER_PURPOSE,
 } from "../src/create-service.ts";
+import { type FakeLlmProvider, startFakeLlmProvider } from "./fixtures/fake-llm-provider.ts";
 
 export const TEST_TARGET_CREDENTIAL_CIPHER = await createSecretCipher(
   generateMasterKey(),
@@ -48,6 +51,11 @@ export const TEST_REPORT_CHANNEL_CIPHER = await createSecretCipher(
 
 /** Where the UI is in tests, for the links in Reports. */
 export const TEST_PUBLIC_UI_URL = "https://extispex.example";
+
+export const TEST_LLM_PROVIDER_API_KEY_CIPHER = await createSecretCipher(
+  generateMasterKey(),
+  LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
+);
 
 export const API_KEY = "test-api-key";
 export const OTHER_PROJECT_API_KEY = "other-project-api-key";
@@ -87,6 +95,24 @@ export const FAKE_SERVICE_TOKENS = {
   readServiceToken: (projectId: string | null) => Promise.resolve(`token-for-${projectId}`),
   forgetServiceToken: () => {},
 };
+
+/** Stands in for the Prompt service: Prompt Versions by `name@version`. */
+export function createFakePromptService(promptVersions: Map<string, PromptVersion>) {
+  return (request: Request): Promise<Response> => {
+    assertEquals(request.headers.get("authorization"), "Bearer token-for-project-one");
+    const [, , , promptName, , versionNumber] = new URL(request.url).pathname.split("/").map(
+      decodeURIComponent,
+    );
+    const promptVersion = promptVersions.get(`${promptName}@${versionNumber}`);
+    return Promise.resolve(
+      promptVersion === undefined
+        ? Response.json({ error: { code: "not_found", message: "No such version." } }, {
+          status: 404,
+        })
+        : Response.json(promptVersion),
+    );
+  };
+}
 
 export function createFakeTelemetryService(fake: FakeTelemetry, readClock: () => Date) {
   return async (request: Request): Promise<Response> => {
@@ -147,6 +173,9 @@ export interface TestHarness {
   readClock(): Date;
   advanceClock(milliseconds: number): void;
   target: FakeTarget;
+  llmProvider: FakeLlmProvider;
+  /** The Prompt Versions that the fake Prompt service knows, by `name@version`. */
+  promptVersions: Map<string, PromptVersion>;
   /** Handles everything queued so far, as the worker would. */
   drainJobs(): Promise<void>;
   /** Handles jobs until none is left, including the ones that handling queues. */
@@ -160,6 +189,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
     Deno.test(`${testName} (${testDatabase.label})`, async () => {
       const database = await openEvaluationDatabase(testDatabase.url);
       let stopTargetServer = () => Promise.resolve();
+      const llmProvider = startFakeLlmProvider();
       try {
         const entityManager = database.orm.em.fork();
         await entityManager.execute("delete from evaluation_runs");
@@ -167,6 +197,8 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
         await entityManager.execute("delete from targets");
         await entityManager.execute("delete from background_leases");
         await entityManager.execute("delete from report_settings");
+        await entityManager.execute("delete from llm_providers");
+        await entityManager.execute("delete from llm_summary_settings");
         let clockMilliseconds = Date.parse("2026-11-08T10:00:00Z");
         const readCurrentTime = () => new Date(clockMilliseconds += 1_000);
         const queuedJobs: EvaluationJob[] = [];
@@ -207,6 +239,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
         );
         target.url = `http://127.0.0.1:${targetServer.addr.port}/evaluate`;
         stopTargetServer = () => targetServer.shutdown();
+        const promptVersions = new Map<string, PromptVersion>();
         const worker = createEvaluationWorker({
           database,
           jobQueue,
@@ -217,7 +250,12 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
           reportAllowedDestinations: "127.0.0.1",
           publicUiUrl: `${TEST_PUBLIC_UI_URL}/`,
           reportTimeoutMilliseconds: 5_000,
+          llmProviderApiKeyCipher: TEST_LLM_PROVIDER_API_KEY_CIPHER,
+          llmProviderAllowedDestinations: "127.0.0.1",
+          llmTimeoutMilliseconds: 2_000,
+          llmRetryDelayMilliseconds: 10,
           telemetryService: createFakeTelemetryService(telemetry, readClock),
+          promptService: createFakePromptService(promptVersions),
           serviceTokens: FAKE_SERVICE_TOKENS,
           projectLifecycle,
           logger,
@@ -232,6 +270,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
             jobQueue,
             targetCredentialCipher: TEST_TARGET_CREDENTIAL_CIPHER,
             reportChannelCipher: TEST_REPORT_CHANNEL_CIPHER,
+            llmProviderApiKeyCipher: TEST_LLM_PROVIDER_API_KEY_CIPHER,
             requestAuthenticator: testRequestAuthenticator,
             logger,
             readCurrentTime,
@@ -246,6 +285,8 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
             clockMilliseconds += milliseconds;
           },
           target,
+          llmProvider,
+          promptVersions,
           drainJobs: async () => {
             queuedDelays.splice(0);
             for (const job of queuedJobs.splice(0)) await worker.handleJob(job);
@@ -259,6 +300,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
         });
       } finally {
         await stopTargetServer();
+        await llmProvider.stop();
         await database.close();
       }
     });
@@ -336,7 +378,7 @@ export function report(harness: TestHarness, runId: string, reports: IterationRe
 /** A run with every result, read page by page like a client does. */
 export async function readRun(harness: TestHarness, runId: string) {
   const runPath = `/v1/evaluation-runs/${runId}`;
-  const summary = await expectJson<EvaluationRunSummary>(
+  const summary = await expectJson<EvaluationRun>(
     sendRequest(harness, "GET", runPath),
     200,
   );
