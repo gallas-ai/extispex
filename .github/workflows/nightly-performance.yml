@@ -7,9 +7,6 @@ name: Nightly performance
 # Not a required check: it never runs on a pull request.
 
 on:
-  # TEMPORARY: measures this branch before it merges; removed before the PR merges.
-  push:
-    branches: [feat/performance-test]
   schedule:
     - cron: "23 2 * * *"
   workflow_dispatch:

@@ -967,7 +967,7 @@ they are not benchmarks.
 | pg-boss under sustained load                       | 1,200 evaluation jobs from 4 scripts at once over 2.5 minutes, every run reaching the verdict `passed`, at 8.0 jobs per second               |
 | pg-boss's ceiling for one worker process           | About 8 jobs per second: each of the 4 slots waits the 0.5 s polling interval after every job while jobs are waiting                         |
 | The same commit on two runners                     | 30 to 80% apart in every measurement, one run taking 6 minutes and the other 11                                                              |
-| Two commits on one runner, one after the other     | Within 20% of each other, except one metric query 36% faster in the second measurement                                                       |
+| Two commits on one runner, one after the other     | In two runs within 20% of each other, except a metric query 25% and 36% faster in the second measurement                                     |
 | A deliberate delay of 100 ms before requests       | The comparison fails the run; unit tests cover the 25% rule both ways and a first run without a previous one                                 |
 | Two replicas creating the migrations table at once | PostgreSQL's `duplicate_table` from the migrator counts as a lost race, and the loser tries again                                            |
 | Module boundaries                                  | 26 modules in 4 services import each other only through `mod.ts`; an import of an internal file fails `tests/architecture`                   |
