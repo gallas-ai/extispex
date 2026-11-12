@@ -241,8 +241,8 @@ the UI, rebuild it with `deno task build:web` before relying on port 8080.
 Before you push:
 
 ```sh
-deno task check             # format, lint and type checks
-deno task test              # unit, service and architecture tests
+deno task check             # format, lint, type checks and import rules
+deno task test              # unit and service tests
 deno task build:web && deno task test:e2e  # end-to-end tests
 ```
 

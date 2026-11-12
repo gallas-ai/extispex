@@ -6,52 +6,55 @@ import {
   type SecretCipher,
   type StructuredLogger,
 } from "@extispex/service-runtime";
-import { DEFAULT_PASSWORD_HASH_ITERATIONS } from "./accounts/password-hashing.ts";
-import { registerInternalTokenRoutes } from "./access-tokens/internal-token-routes.ts";
-import { createAccessTokenSigner } from "./access-tokens/signing-keys.ts";
-import { registerAccessRoutes } from "./access/access-routes.ts";
-import { type IdentityEnvironment, requireSignedInUser } from "./access/user-authentication.ts";
-import { registerDirectoryRoutes } from "./directory/directory-routes.ts";
+import { DEFAULT_PASSWORD_HASH_ITERATIONS } from "./accounts/mod.ts";
+import { createAccessTokenSigner, registerInternalTokenRoutes } from "./access-tokens/mod.ts";
+import {
+  type IdentityEnvironment,
+  registerAccessRoutes,
+  requireSignedInUser,
+} from "./access/mod.ts";
+import { registerDirectoryRoutes } from "./directory/mod.ts";
 import {
   createIdentityDataLifecycle,
   type IdentityDataLifecycleOutcome,
-} from "./data-lifecycle/identity-data-lifecycle.ts";
-import { createOidcProvider } from "./oidc/oidc-provider.ts";
-import type { OidcSettings } from "./oidc/oidc-settings.ts";
-import { registerOidcSignInRoutes } from "./oidc/oidc-sign-in-routes.ts";
-import { registerProjectLifecycleRoutes } from "./projects/project-lifecycle-routes.ts";
-import { registerProjectRoutes } from "./projects/project-routes.ts";
-import { registerScimRoutes } from "./scim/scim-routes.ts";
-import { createBrowserSignIns } from "./sign-in/browser-sign-ins.ts";
-import { createPasswordAttemptThrottle } from "./sign-in/password-attempt-throttle.ts";
-import { registerSignInRoutes } from "./sign-in/sign-in-routes.ts";
-import { createAccessRepository } from "./storage/access-repository.ts";
-import { createDirectoryImportRepository } from "./storage/directory-import-repository.ts";
-import { createDirectoryTokenRepository } from "./storage/directory-token-repository.ts";
-import type { IdentityDatabase } from "./storage/identity-database.ts";
-import { createOidcRepository } from "./storage/oidc-repository.ts";
-import { createProjectRepository } from "./storage/project-repository.ts";
-import { createScimRepository } from "./storage/scim-repository.ts";
-import { createSignInRepository } from "./storage/sign-in-repository.ts";
-import { createSignInThrottleRepository } from "./storage/sign-in-throttle-repository.ts";
+} from "./data-lifecycle/mod.ts";
+import { createOidcProvider, type OidcSettings, registerOidcSignInRoutes } from "./oidc/mod.ts";
+import { registerProjectLifecycleRoutes, registerProjectRoutes } from "./projects/mod.ts";
+import { registerScimRoutes } from "./scim/mod.ts";
+import {
+  createBrowserSignIns,
+  createPasswordAttemptThrottle,
+  registerSignInRoutes,
+} from "./sign-in/mod.ts";
+import {
+  createAccessRepository,
+  createDirectoryImportRepository,
+  createDirectoryTokenRepository,
+  createOidcRepository,
+  createProjectRepository,
+  createScimRepository,
+  createSignInRepository,
+  createSignInThrottleRepository,
+  type IdentityDatabase,
+} from "./storage/mod.ts";
 
 export {
   createFirstAdministratorIfNone,
   DEFAULT_FIRST_ADMINISTRATOR_EMAIL,
   type FirstAdministrator,
-} from "./accounts/first-administrator.ts";
-export { createSigningKeyCipher, protectStoredSigningKeys } from "./access-tokens/signing-keys.ts";
-export { parseServiceClients } from "./accounts/service-clients.ts";
+  parseServiceClients,
+} from "./accounts/mod.ts";
+export { createSigningKeyCipher, protectStoredSigningKeys } from "./access-tokens/mod.ts";
 export {
   generateApiKey,
   generateRandomCharacters,
   generateServiceClientSecret,
   MINIMUM_CONFIGURED_KEY_LENGTH,
-} from "./api-keys/api-key-secrets.ts";
-export { type OidcSettings, readOidcSettings } from "./oidc/oidc-settings.ts";
-export { createFirstProjectIfNone, FIRST_PROJECT_NAME } from "./projects/first-project.ts";
-export { type IdentityDatabase, openIdentityDatabase } from "./storage/identity-database.ts";
-export type { IdentityDataLifecycleOutcome } from "./data-lifecycle/identity-data-lifecycle.ts";
+} from "./api-keys/mod.ts";
+export { type OidcSettings, readOidcSettings } from "./oidc/mod.ts";
+export { createFirstProjectIfNone, FIRST_PROJECT_NAME } from "./projects/mod.ts";
+export { type IdentityDatabase, openIdentityDatabase } from "./storage/mod.ts";
+export type { IdentityDataLifecycleOutcome } from "./data-lifecycle/mod.ts";
 
 export interface IdentityServiceDependencies {
   database: IdentityDatabase;

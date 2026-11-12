@@ -1,8 +1,8 @@
 import { SIGN_IN_COOKIE_NAME, SIGN_IN_COOKIE_PATH } from "@extispex/contracts";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
-import { generateRandomCharacters, hashRandomSecret } from "../api-keys/api-key-secrets.ts";
-import type { SignInRepository } from "../storage/sign-in-repository.ts";
+import { generateRandomCharacters, hashRandomSecret } from "../api-keys/mod.ts";
+import type { SignInRepository } from "../storage/mod.ts";
 
 /** A sign-in ends after this long without a new access token, which a working UI gets every few minutes. */
 export const SIGN_IN_IDLE_SECONDS = 12 * 60 * 60;

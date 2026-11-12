@@ -1,11 +1,11 @@
-import {
-  DriverException,
-  TableExistsException,
-  UniqueConstraintViolationException,
-} from "@mikro-orm/core";
+import { TableExistsException, UniqueConstraintViolationException } from "@mikro-orm/core";
 
-/** PostgreSQL's `duplicate_database`, which MikroORM has no exception class for. */
-const POSTGRES_DUPLICATE_DATABASE_CODE = "42P04";
+/**
+ * PostgreSQL's `duplicate_database`, `duplicate_table` and `unique_violation`. MikroORM has no
+ * exception class for the first, and its migrator creates its own table through the connection,
+ * which hands on the driver's error with only its code.
+ */
+const POSTGRES_LOST_RACE_CODES = new Set(["42P04", "42P07", "23505"]);
 
 /**
  * Replicas that start together race to create the database and apply the migrations. Migrations run
@@ -16,10 +16,15 @@ export function isLostInitializationRace(error: unknown): boolean {
     if (
       current instanceof UniqueConstraintViolationException ||
       current instanceof TableExistsException ||
-      (current instanceof DriverException && current.code === POSTGRES_DUPLICATE_DATABASE_CODE)
+      POSTGRES_LOST_RACE_CODES.has(readErrorCode(current))
     ) {
       return true;
     }
   }
   return false;
+}
+
+function readErrorCode(error: Error): string {
+  const errorCode = (error as Error & { code?: unknown }).code;
+  return typeof errorCode === "string" ? errorCode : "";
 }

@@ -1,8 +1,8 @@
 import { DEFAULT_RETENTION_DAYS } from "@extispex/contracts";
 import type { ProjectLifecycleSource, StructuredLogger } from "@extispex/service-runtime";
 import type { BackgroundLease } from "@extispex/service-storage";
-import { OLDEST_ACCEPTED_RECORD_AGE_DAYS } from "../ingestion/record-time-window.ts";
-import type { RetentionRepository } from "../storage/retention-repository.ts";
+import { OLDEST_ACCEPTED_RECORD_AGE_DAYS } from "../ingestion/mod.ts";
+import type { RetentionRepository } from "../storage/mod.ts";
 
 const NANOSECONDS_PER_DAY = 86_400_000_000_000n;
 const NANOSECONDS_PER_MILLISECOND = 1_000_000n;

@@ -9,11 +9,10 @@ import {
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import { createBackgroundLease } from "@extispex/service-storage";
-import { type PromptServiceEnvironment, registerPromptRoutes } from "./prompts/prompt-routes.ts";
-import type { PromptDatabase } from "./storage/prompt-database.ts";
-import { createPromptRepository } from "./storage/prompt-repository.ts";
+import { type PromptServiceEnvironment, registerPromptRoutes } from "./prompts/mod.ts";
+import { createPromptRepository, type PromptDatabase } from "./storage/mod.ts";
 
-export { openPromptDatabase, type PromptDatabase } from "./storage/prompt-database.ts";
+export { openPromptDatabase, type PromptDatabase } from "./storage/mod.ts";
 
 export interface PromptServiceDependencies {
   database: PromptDatabase;

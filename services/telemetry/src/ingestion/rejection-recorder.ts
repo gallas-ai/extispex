@@ -1,5 +1,5 @@
 import type { StructuredLogger } from "@extispex/service-runtime";
-import type { RecordedRejections, RejectionRepository } from "../storage/rejection-repository.ts";
+import type { RecordedRejections, RejectionRepository } from "../storage/mod.ts";
 
 /** Builds a message such as `2 log records rejected: missing required attribute correlation.id (2)`. */
 export function describeRejections(

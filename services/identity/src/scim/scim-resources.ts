@@ -5,7 +5,7 @@ import type {
   DirectoryCompanyGroup,
   DirectoryUser,
   DirectoryUserAttributes,
-} from "../storage/scim-repository.ts";
+} from "../storage/mod.ts";
 import {
   invalidSyntax,
   invalidValue,

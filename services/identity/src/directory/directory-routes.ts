@@ -9,16 +9,13 @@ import {
   revokeDirectoryTokenRoute,
 } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { generateApiKey, hashRandomSecret, readKeyPrefix } from "../api-keys/api-key-secrets.ts";
-import {
-  type IdentityEnvironment,
-  INSTANCE_ADMIN_REQUIRED,
-} from "../access/user-authentication.ts";
+import { generateApiKey, hashRandomSecret, readKeyPrefix } from "../api-keys/mod.ts";
+import { type IdentityEnvironment, INSTANCE_ADMIN_REQUIRED } from "../access/mod.ts";
 import type {
   DirectoryImportRepository,
   DirectoryImportRow,
-} from "../storage/directory-import-repository.ts";
-import type { DirectoryTokenRepository } from "../storage/directory-token-repository.ts";
+  DirectoryTokenRepository,
+} from "../storage/mod.ts";
 import { numberJsonRows, parseDirectoryCsv } from "./directory-import-parser.ts";
 
 export interface DirectoryRouteDependencies {

@@ -870,7 +870,9 @@ Approved on 2026-11-06. The repository is one Deno workspace.
 │   ├── typescript/
 │   └── python/
 ├── tests/
-│   └── e2e/
+│   ├── architecture/                # Import rules and the naming lint plugin
+│   ├── e2e/
+│   └── performance/                 # Nightly performance run
 ├── deploy/
 │   ├── docker/
 │   ├── compose/
@@ -885,7 +887,11 @@ Approved on 2026-11-06. The repository is one Deno workspace.
 Import rules, enforced in CI:
 
 - A service may import `packages/*`, but never another service.
-- Modules inside a service import each other only through their public entry points.
+- Modules inside a service import each other only through their public entry points. A module is a
+  directory directly below a service's `src/`, such as `services/telemetry/src/ingestion`, and its
+  public entry point is the `mod.ts` there, which re-exports what other modules may use. The files
+  directly in `src/`, such as `create-service.ts`, also import modules through `mod.ts`. A service's
+  `tests/` may import any of its files, so a unit test can reach an internal helper.
 - Only `apps/all-in-one` may import several services, and only their `create-service.ts`.
 - `packages/` holds contracts and technical helpers, never domain logic.
 
@@ -896,10 +902,25 @@ types and import rules, runs unit tests on SQLite and PostgreSQL, runs e2e tests
 deployments, and builds the container images and runs the e2e tests against the `all-in-one` image.
 The e2e tests include browser tests of the web UI's main flows and layout rules.
 
+The import rules from [10. Repository structure](#10-repository-structure) are two tests in
+`tests/architecture`, run by `deno task test:architecture`, as part of `deno task check` and as
+their own step of the `Static checks and unit tests` job:
+
+- `import-boundaries.test.ts`: a workspace member reaches another only by its package name, and only
+  `apps/all-in-one` imports services.
+- `module-boundaries.test.ts`: modules inside a service import each other only through `mod.ts`.
+
 Performance tests follow one rule: they run only where GitHub Actions is free.
 
-- **Nightly regression test:** planned, not yet implemented. It runs on a standard runner, which is
-  free because the repository is public. It will live in `tests/performance/`.
+- **Nightly regression test:** `tests/performance/` runs every night on a standard runner, which is
+  free because the repository is public, against the separate services on PostgreSQL. It measures
+  OTLP ingestion of spans, log records and metric data points, the p95 latency of six queries
+  through the Gateway, and evaluation jobs through pg-boss. It measures the previous successful
+  run's commit again on the same runner, because runners differ in speed, and fails when a
+  throughput is more than 25% lower or a p95 more than 25% higher; see
+  [ADR 0021](adr/0021-nightly-performance-compared-with-the-previous-run.md). Locally:
+  `E2E_POSTGRES_URL=... deno task test:performance results.json`, then
+  `deno task compare:performance previous.json results.json`.
 - **Capacity check on a dedicated machine:** deferred, because larger runners are never free.
 
 Code, tests, examples, documentation and operations are written in English. Names must state their
@@ -934,6 +955,22 @@ repository.
 | TypeScript and Python examples                                 | Both send a two-step conversation that appears under one Session ID                    |
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
+
+The Nightly performance test and module boundaries step added these checks on 2026-11-12. The
+numbers come from the nightly workflow on `ubuntu-latest` runners, run on its branch before merging;
+they are not benchmarks.
+
+| Tested                                             | Result                                                                                                                                       |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| The performance run against separate services      | Best of 3 rounds from 8 senders: about 21,000 spans, 47,000 log records and 31,000 metric data points per second, on an AMD EPYC 9V45 runner |
+| Query latency after that ingestion                 | p95 from 1.3 ms for one trace or a word in the logs to about 195 ms for the newest 50 traces                                                 |
+| pg-boss under sustained load                       | 1,200 evaluation jobs from 4 scripts at once over 2.5 minutes, every run reaching the verdict `passed`, at 8.0 jobs per second               |
+| pg-boss's ceiling for one worker process           | About 8 jobs per second: each of the 4 slots waits the 0.5 s polling interval after every job while jobs are waiting                         |
+| The same commit on two runners                     | 30 to 80% apart in every measurement, one run taking 6 minutes and the other 11                                                              |
+| Two commits on one runner, one after the other     | In two runs within 20% of each other, except a metric query 25% and 36% faster in the second measurement                                     |
+| A deliberate delay of 100 ms before requests       | The comparison fails the run; unit tests cover the 25% rule both ways and a first run without a previous one                                 |
+| Two replicas creating the migrations table at once | PostgreSQL's `duplicate_table` from the migrator counts as a lost race, and the loser tries again                                            |
+| Module boundaries                                  | 26 modules in 4 services import each other only through `mod.ts`; an import of an internal file fails `tests/architecture`                   |
 
 The Retention and Project deletion step added these checks on 2026-11-11.
 
@@ -1080,7 +1117,10 @@ The Prompt service step added these checks on 2026-11-07.
   affected
 - `GATEWAY_TRUSTED_PROXY_COUNT` behind a real load balancer
 - Browsers other than Chromium with the sign-in cookie
-- pg-boss under sustained load and on a managed PostgreSQL service
+- pg-boss on a managed PostgreSQL service, and the SQLite queue of the all-in-one deployment under
+  load: the nightly run measures only the separate services
+- Whether the nightly run's 25% tolerance holds over many nights. The previous commit is always
+  measured first, on a colder runner, which favours the current commit
 - Mixed-telemetry protection with clock differences between Evaluation and Telemetry: it compares
   the start of an attempt on Evaluation's clock with receive times on Telemetry's. Servers are
   assumed to be synchronized, so a difference larger than the time a script needs to start could
@@ -1112,8 +1152,6 @@ The Prompt service step added these checks on 2026-11-07.
   before the database is the bottleneck, and the limits were chosen, not measured
 - A histogram query's memory: up to 100,000 points with their bucket counts are held at once
 - Metrics from SDKs other than OpenTelemetry JS, and from the OpenTelemetry Collector
-- The rule that modules inside a service import each other only through their public entry points;
-  no automated check enforces it yet
 - Retention and Project removal at the capacity target: each is one delete per table and Project,
   and spans, which have no partitions, are deleted row by row
 - Dropping a partition under load: it briefly locks the whole table, like creating one
@@ -1149,3 +1187,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0014: A user from the directory is linked to their first OIDC sign-in by email, once](adr/0014-directory-users-linked-to-oidc-by-email-once.md)
 - [ADR 0015: Metric Time Series stored once, cumulative values resolved at query time](adr/0015-metric-time-series-stored-once-and-cumulative-values-at-query-time.md)
 - [ADR 0018: Data removed in leased periodic runs, shared days dropped only past every Project](adr/0018-data-lifecycle-through-leased-periodic-runs.md)
+- [ADR 0021: Nightly performance compared with the previous run, kept as a workflow artifact](adr/0021-nightly-performance-compared-with-the-previous-run.md)

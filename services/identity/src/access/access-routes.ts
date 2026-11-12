@@ -15,9 +15,13 @@ import {
   updateUserRoute,
 } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { hashPassword } from "../accounts/password-hashing.ts";
-import type { AccessRepository, StoredUser, UserChanges } from "../storage/access-repository.ts";
-import type { ProjectRepository } from "../storage/project-repository.ts";
+import { hashPassword } from "../accounts/mod.ts";
+import type {
+  AccessRepository,
+  ProjectRepository,
+  StoredUser,
+  UserChanges,
+} from "../storage/mod.ts";
 import {
   canManageProject,
   forbiddenError,

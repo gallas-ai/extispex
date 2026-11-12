@@ -1,10 +1,7 @@
 import type { Span } from "@extispex/contracts";
 import { IdentityUnavailableError, UnknownProjectError } from "@extispex/service-runtime";
-import type { EvaluateAttemptJob } from "../job-queue/job-queue.ts";
-import type {
-  AttemptToEvaluate,
-  EvaluationRunRepository,
-} from "../storage/evaluation-run-repository.ts";
+import type { EvaluateAttemptJob } from "../job-queue/mod.ts";
+import type { AttemptToEvaluate, EvaluationRunRepository } from "../storage/mod.ts";
 import { type TelemetryClient, TelemetryUnavailableError } from "./telemetry-client.ts";
 import { decideTraceCompletion, type TraceCompletionTiming } from "./trace-completion.ts";
 

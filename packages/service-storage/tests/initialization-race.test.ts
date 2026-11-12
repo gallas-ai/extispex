@@ -38,6 +38,25 @@ Deno.test({
         assertEquals(isLostInitializationRace(failure), true);
       });
 
+      await testContext.step(
+        "counts the migrations table that another replica just created",
+        async () => {
+          // MikroORM's migrator creates its table through the connection, which hands on the
+          // driver's error unconverted.
+          const connection = orm.em.getConnection();
+          const tableName = `race_probe_${crypto.randomUUID().replaceAll("-", "")}`;
+          await connection.execute(`create table "${tableName}" (id int)`, [], "run");
+          try {
+            const failure = await readFailure(() =>
+              connection.execute(`create table "${tableName}" (id int)`, [], "run")
+            );
+            assertEquals(isLostInitializationRace(failure), true);
+          } finally {
+            await connection.execute(`drop table "${tableName}"`, [], "run");
+          }
+        },
+      );
+
       await testContext.step("does not count any other failure", async () => {
         const failure = await readFailure(() => orm.schema.execute("select missing_column"));
         assertEquals(isLostInitializationRace(failure), false);

@@ -8,7 +8,7 @@ import {
 } from "@extispex/contracts";
 import type { ProjectAccessEnvironment } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { TargetRepository } from "../storage/target-repository.ts";
+import type { TargetRepository } from "../storage/mod.ts";
 
 export interface TargetRouteDependencies {
   targetRepository: TargetRepository;

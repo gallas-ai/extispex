@@ -12,6 +12,9 @@
  *   `BOOTSTRAP_PROJECT_API_KEY`), `E2E_ADMIN_EMAIL` and `E2E_ADMIN_PASSWORD` (the first
  *   administrator, set as `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`) and optionally
  *   `E2E_GRPC_ROOT_CERTIFICATE_FILE`.
+ *
+ * `E2E_SOURCE_DIRECTORY` runs the first two from another checkout, with its own dependencies
+ * installed; the nightly performance run measures the previous run's commit that way.
  */
 
 export interface RunningDeployment {
@@ -48,7 +51,9 @@ export interface IdentityInternalAccess {
   clientSecret: string;
 }
 
-const REPOSITORY_ROOT = new URL("../../", import.meta.url).pathname;
+const REPOSITORY_ROOT = withTrailingSlash(
+  Deno.env.get("E2E_SOURCE_DIRECTORY") || new URL("../../", import.meta.url).pathname,
+);
 /** Configured keys need at least 32 characters. */
 const E2E_API_KEY = "extispex_e2eProjectApiKey00000000000000000000000";
 const E2E_ADMIN: LocalAccount = {
@@ -419,4 +424,8 @@ async function createSelfSignedCertificate(
     throw new Error(`openssl failed: ${new TextDecoder().decode(opensslResult.stderr)}`);
   }
   return { certificateFile, privateKeyFile };
+}
+
+function withTrailingSlash(directory: string): string {
+  return directory.endsWith("/") ? directory : `${directory}/`;
 }

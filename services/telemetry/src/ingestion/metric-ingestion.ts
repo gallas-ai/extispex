@@ -1,4 +1,4 @@
-import type { MetricRepository } from "../storage/metric-repository.ts";
+import type { MetricRepository } from "../storage/mod.ts";
 import { normalizeMetricsRequest } from "./metric-normalization.ts";
 import type { MetricsExportOutcome, OtlpExportMetricsRequest } from "./otlp-metric-types.ts";
 import { describeRejections, type RejectionRecorder } from "./rejection-recorder.ts";

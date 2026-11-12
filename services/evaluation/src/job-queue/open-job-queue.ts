@@ -1,6 +1,6 @@
 import { isPostgresDatabaseUrl } from "@extispex/service-storage";
 import type { StructuredLogger } from "@extispex/service-runtime";
-import type { EvaluationDatabase } from "../storage/evaluation-database.ts";
+import type { EvaluationDatabase } from "../storage/mod.ts";
 import type { JobQueue } from "./job-queue.ts";
 import { createSqliteJobQueue } from "./sqlite-job-queue.ts";
 

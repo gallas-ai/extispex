@@ -1587,6 +1587,11 @@
           "npm:@opentelemetry/sdk-trace@3",
           "npm:playwright-core@1.64.1"
         ]
+      },
+      "tests/performance": {
+        "dependencies": [
+          "jsr:@std/assert@1"
+        ]
       }
     }
   }

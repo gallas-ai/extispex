@@ -42,7 +42,9 @@ jobs:
       - run: deno fmt --check
       - run: deno lint
       - run: deno check
-      - name: Unit, service and architecture tests on SQLite and PostgreSQL
+      - name: Import rules between services and between modules of a service
+        run: deno task test:architecture
+      - name: Unit and service tests on SQLite and PostgreSQL
         run: deno task test
         env:
           # Each service's tests create their own database <service>_test on this server.

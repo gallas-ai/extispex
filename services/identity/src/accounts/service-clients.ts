@@ -1,5 +1,5 @@
 import { InvalidConfigurationError } from "@extispex/service-runtime";
-import { MINIMUM_CONFIGURED_KEY_LENGTH } from "../api-keys/api-key-secrets.ts";
+import { MINIMUM_CONFIGURED_KEY_LENGTH } from "../api-keys/mod.ts";
 
 const CLIENT_ID_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 

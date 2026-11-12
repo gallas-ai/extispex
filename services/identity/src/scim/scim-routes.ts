@@ -19,18 +19,18 @@ import {
 import { extractBearerToken } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context, MiddlewareHandler } from "hono";
-import { hashRandomSecret } from "../api-keys/api-key-secrets.ts";
-import type { IdentityEnvironment } from "../access/user-authentication.ts";
-import type { DirectoryTokenRepository } from "../storage/directory-token-repository.ts";
+import { hashRandomSecret } from "../api-keys/mod.ts";
+import type { IdentityEnvironment } from "../access/mod.ts";
 import type {
   CompanyGroupFilter,
+  DirectoryTokenRepository,
   DirectoryUserFilter,
   ModifyCompanyGroupResult,
   ModifyUserResult,
   SaveCompanyGroupResult,
   SaveUserResult,
   ScimRepository,
-} from "../storage/scim-repository.ts";
+} from "../storage/mod.ts";
 import { applyGroupPatch, applyUserPatch, parsePatchOperations } from "./scim-patch.ts";
 import {
   invalidSyntax,

@@ -6,9 +6,9 @@ import {
   SERVICE_SUBJECT_PREFIX,
 } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { authenticateService, type IdentityEnvironment } from "../access/user-authentication.ts";
-import { areSecretsEqual, hashApiKey } from "../api-keys/api-key-secrets.ts";
-import type { ProjectRepository } from "../storage/project-repository.ts";
+import { authenticateService, type IdentityEnvironment } from "../access/mod.ts";
+import { areSecretsEqual, hashApiKey } from "../api-keys/mod.ts";
+import type { ProjectRepository } from "../storage/mod.ts";
 import type { AccessTokenSigner } from "./signing-keys.ts";
 
 export interface InternalTokenRouteDependencies {

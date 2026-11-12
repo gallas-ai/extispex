@@ -12,11 +12,11 @@ import type { StructuredLogger } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { IdentityEnvironment } from "../access/user-authentication.ts";
-import { generateRandomCharacters, hashRandomSecret } from "../api-keys/api-key-secrets.ts";
+import type { IdentityEnvironment } from "../access/mod.ts";
+import { generateRandomCharacters, hashRandomSecret } from "../api-keys/mod.ts";
 import type { OidcClaims, OidcProvider } from "./oidc-provider.ts";
-import type { OidcRepository, OidcUserIdentity } from "../storage/oidc-repository.ts";
-import { type BrowserSignIns, isHttpsRequest } from "../sign-in/browser-sign-ins.ts";
+import type { OidcRepository, OidcUserIdentity } from "../storage/mod.ts";
+import { type BrowserSignIns, isHttpsRequest } from "../sign-in/mod.ts";
 
 /** Long enough to type a password and pass multi-factor authentication at the provider. */
 const ATTEMPT_LIFETIME_SECONDS = 10 * 60;

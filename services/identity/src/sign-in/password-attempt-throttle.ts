@@ -1,5 +1,5 @@
-import { hashRandomSecret } from "../api-keys/api-key-secrets.ts";
-import type { SignInThrottleRepository } from "../storage/sign-in-throttle-repository.ts";
+import { hashRandomSecret } from "../api-keys/mod.ts";
+import type { SignInThrottleRepository } from "../storage/mod.ts";
 
 /** How long a window lasts, and so the longest wait for someone who was throttled. */
 export const THROTTLE_WINDOW_SECONDS = 15 * 60;

@@ -1,7 +1,7 @@
 import type { ListTracesQuery, Span, TraceSummary } from "@extispex/contracts";
 import type { InferEntity } from "@mikro-orm/core";
 import type { EntityManager } from "@mikro-orm/sql";
-import type { CorrelatedSpan } from "../ingestion/correlation-policy.ts";
+import type { CorrelatedSpan } from "../ingestion/mod.ts";
 import {
   CorrelationEvaluationRecord,
   formatUnixNanosecondsForStorage,

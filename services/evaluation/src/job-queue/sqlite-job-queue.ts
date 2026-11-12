@@ -1,6 +1,5 @@
 import type { StructuredLogger } from "@extispex/service-runtime";
-import type { EvaluationDatabase } from "../storage/evaluation-database.ts";
-import { QueuedJobRecord } from "../storage/evaluation-entities.ts";
+import { type EvaluationDatabase, QueuedJobRecord } from "../storage/mod.ts";
 import {
   type AttemptJob,
   type AttemptJobHandler,

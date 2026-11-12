@@ -5,7 +5,7 @@ import {
   parseAttributeFilters,
 } from "@extispex/contracts";
 import type { EntityManager } from "@mikro-orm/sql";
-import type { IncomingLogRecord } from "../ingestion/log-normalization.ts";
+import type { IncomingLogRecord } from "../ingestion/mod.ts";
 import { createDailyPartitions } from "./daily-partitions.ts";
 import {
   formatUnixNanosecondsForStorage,

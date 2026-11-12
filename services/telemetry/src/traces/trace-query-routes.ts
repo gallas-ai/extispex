@@ -5,7 +5,7 @@ import {
   requireProjectAccess,
 } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { SpanRepository } from "../storage/span-repository.ts";
+import type { SpanRepository } from "../storage/mod.ts";
 
 export interface TraceQueryRouteDependencies {
   spanRepository: SpanRepository;

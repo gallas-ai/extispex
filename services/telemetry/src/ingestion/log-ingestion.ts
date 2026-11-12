@@ -1,4 +1,4 @@
-import type { LogRepository } from "../storage/log-repository.ts";
+import type { LogRepository } from "../storage/mod.ts";
 import { describeRejections, type RejectionRecorder } from "./rejection-recorder.ts";
 import { normalizeLogsRequest } from "./log-normalization.ts";
 import type { LogsExportOutcome, OtlpExportLogsRequest } from "./otlp-log-types.ts";

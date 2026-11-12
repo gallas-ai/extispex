@@ -9,35 +9,33 @@ import {
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import type * as grpc from "@grpc/grpc-js";
-import { createLogIngestion } from "./ingestion/log-ingestion.ts";
-import { createMetricIngestion } from "./ingestion/metric-ingestion.ts";
-import { createOtlpGrpcServer } from "./ingestion/otlp-grpc-server.ts";
-import { registerOtlpHttpRoutes } from "./ingestion/otlp-http-routes.ts";
-import { createRejectionRecorder } from "./ingestion/rejection-recorder.ts";
-import { createTraceIngestion } from "./ingestion/trace-ingestion.ts";
-import { registerLogQueryRoutes } from "./logs/log-query-routes.ts";
-import { createMetricQueries } from "./metrics/metric-query.ts";
-import { registerMetricQueryRoutes } from "./metrics/metric-query-routes.ts";
-import { createLogRepository } from "./storage/log-repository.ts";
-import { createMetricRepository } from "./storage/metric-repository.ts";
-import { createRejectionRepository } from "./storage/rejection-repository.ts";
-import { createRetentionRepository } from "./storage/retention-repository.ts";
+import {
+  createLogIngestion,
+  createMetricIngestion,
+  createOtlpGrpcServer,
+  createRejectionRecorder,
+  createTraceIngestion,
+  registerOtlpHttpRoutes,
+} from "./ingestion/mod.ts";
+import { registerLogQueryRoutes } from "./logs/mod.ts";
+import { createMetricQueries, registerMetricQueryRoutes } from "./metrics/mod.ts";
+import {
+  createLogRepository,
+  createMetricRepository,
+  createRejectionRepository,
+  createRetentionRepository,
+  createSpanRepository,
+  type TelemetryDatabase,
+} from "./storage/mod.ts";
 import {
   createTelemetryDataLifecycle,
   type TelemetryDataLifecycleOutcome,
-} from "./retention/telemetry-data-lifecycle.ts";
-import { createSpanRepository } from "./storage/span-repository.ts";
-import type { TelemetryDatabase } from "./storage/telemetry-database.ts";
-import { registerIterationTelemetryRoutes } from "./traces/iteration-telemetry-routes.ts";
-import { registerTraceQueryRoutes } from "./traces/trace-query-routes.ts";
+} from "./retention/mod.ts";
+import { registerIterationTelemetryRoutes, registerTraceQueryRoutes } from "./traces/mod.ts";
 
-export {
-  bindOtlpGrpcServer,
-  type GrpcTlsFiles,
-  shutdownOtlpGrpcServer,
-} from "./ingestion/otlp-grpc-server.ts";
-export { openTelemetryDatabase, type TelemetryDatabase } from "./storage/telemetry-database.ts";
-export type { TelemetryDataLifecycleOutcome } from "./retention/telemetry-data-lifecycle.ts";
+export { bindOtlpGrpcServer, type GrpcTlsFiles, shutdownOtlpGrpcServer } from "./ingestion/mod.ts";
+export { openTelemetryDatabase, type TelemetryDatabase } from "./storage/mod.ts";
+export type { TelemetryDataLifecycleOutcome } from "./retention/mod.ts";
 
 export interface TelemetryServiceDependencies {
   database: TelemetryDatabase;
