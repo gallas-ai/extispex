@@ -1,5 +1,5 @@
 /**
- * Compares a run's results with the previous run's and exits with 1 on a regression:
+ * Compares a run's results with the previous run's commit and exits with 1 on a regression:
  *
  *     deno task compare:performance <previous results file> <current results file>
  *
@@ -39,9 +39,9 @@ const delayNote = currentRun.injectedDelayMilliseconds > 0
   : "";
 const previousNote = previousRun === null
   ? ""
-  : `Compared with the run of ${previousRun.recordedAt} (commit ${
+  : `Compared with commit ${
     previousRun.commit ?? "unknown"
-  }).\n\n`;
+  }, measured at ${previousRun.recordedAt}.\n\n`;
 const report = `## Nightly performance\n\n${previousNote}${delayNote}${
   formatComparison(runComparison)
 }`;
