@@ -8,15 +8,14 @@ import {
   openUi,
 } from "./browser.ts";
 import { startDeployment } from "./deployment.ts";
-import { SAMPLE_TARGET_TOKEN, startSampleTarget } from "./sample-target.ts";
+import { canRunSampleTarget, SAMPLE_TARGET_TOKEN, startSampleTarget } from "./sample-target.ts";
 import { callGateway } from "./sign-in.ts";
 
 const SWEPT_WIDTHS = Array.from({ length: 22 }, (_, widthIndex) => 360 + widthIndex * 80);
 
 Deno.test({
   name: "Target and Session web UI",
-  // A container has its own network, so it cannot call a Target on this machine.
-  ignore: Deno.env.get("E2E_DEPLOYMENT") === "external",
+  ignore: !canRunSampleTarget(),
   // Chromium runs in a child process whose pipes outlive individual steps.
   sanitizeResources: false,
   sanitizeOps: false,

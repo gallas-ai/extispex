@@ -5,6 +5,7 @@ import {
   createIdentityServiceTokenSource,
   createServiceTokenClient,
   createStructuredLogger,
+  readDatabaseMigrationMode,
   readDataLifecycleIntervalMilliseconds,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
@@ -15,7 +16,10 @@ import { createPromptService, openPromptDatabase } from "./create-service.ts";
 
 const logger = createStructuredLogger("prompt");
 
-const database = await openPromptDatabase(readRequiredEnvironmentVariable("PROMPT_DATABASE_URL"));
+const database = await openPromptDatabase(
+  readRequiredEnvironmentVariable("PROMPT_DATABASE_URL"),
+  readDatabaseMigrationMode(),
+);
 const identityClient = createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL"));
 const identityCredentials = {
   identityClient,

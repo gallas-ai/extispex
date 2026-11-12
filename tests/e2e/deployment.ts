@@ -6,12 +6,16 @@
  *
  * - `all-in-one` (default): the local image's process, with SQLite.
  * - `services`: every service as a separate process on PostgreSQL; needs `E2E_POSTGRES_URL`, a
- *   server on which each service uses its own database `<service>_e2e`, created on first start.
+ *   server on which each service uses its own database `<service>_e2e`. As in the Helm chart, each
+ *   service's migrate command creates and migrates it first, and the services start with
+ *   `DATABASE_MIGRATIONS=check`.
  * - `external`: an already running deployment described by `E2E_GATEWAY_URL`,
  *   `E2E_OTLP_HTTP_URL`, `E2E_OTLP_GRPC_ADDRESS`, `E2E_API_KEY` (the first Project's key, set as
  *   `BOOTSTRAP_PROJECT_API_KEY`), `E2E_ADMIN_EMAIL` and `E2E_ADMIN_PASSWORD` (the first
  *   administrator, set as `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`) and optionally
- *   `E2E_GRPC_ROOT_CERTIFICATE_FILE`.
+ *   `E2E_GRPC_ROOT_CERTIFICATE_FILE` and `E2E_SAMPLE_TARGET_URL`, a sample Target that the
+ *   deployment's worker reaches, used by the Server-Driven Execution tests. The Helm chart in kind
+ *   is tested this way, see `deploy/helm/kind/install.sh`.
  *
  * `E2E_SOURCE_DIRECTORY` runs the first two from another checkout, with its own dependencies
  * installed; the nightly performance run measures the previous run's commit that way.
@@ -37,6 +41,11 @@ export interface RunningDeployment {
    * deployment, such as a container, has its own network.
    */
   canCallLocalTargets: boolean;
+  /**
+   * A sample Target that already runs where the worker reaches it, from `E2E_SAMPLE_TARGET_URL`, or
+   * null. The Helm chart's test runs one in the cluster, behind an HTTP proxy.
+   */
+  sampleTargetUrl: string | null;
   stop(): Promise<void>;
 }
 
@@ -139,6 +148,7 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
   });
   const deployment = {
     canCallLocalTargets: true,
+    sampleTargetUrl: null,
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
     otlpHttpUrl: `http://127.0.0.1:${otlpHttpPort}`,
     otlpGrpcAddress: `localhost:${otlpGrpcPort}`,
@@ -165,8 +175,20 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   const [otlpHttpPort, otlpGrpcPort, promptPort, identityPort, evaluationPort, gatewayPort] =
     await reserveFreePorts(6);
   const identityUrl = `http://127.0.0.1:${identityPort}`;
-  const identityProcess = startDenoProcess("identity", "services/identity/src/main.ts", {
+  const databaseUrls = {
     IDENTITY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "identity_e2e"),
+    TELEMETRY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "telemetry_e2e"),
+    PROMPT_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "prompt_e2e"),
+    EVALUATION_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "evaluation_e2e"),
+  };
+  await Promise.all(
+    ["identity", "telemetry", "prompt", "evaluation"].map((serviceName) =>
+      runMigrateCommand(serviceName, databaseUrls)
+    ),
+  );
+  const identityProcess = startDenoProcess("identity", "services/identity/src/main.ts", {
+    DATABASE_MIGRATIONS: "check",
+    IDENTITY_DATABASE_URL: databaseUrls.IDENTITY_DATABASE_URL,
     MASTER_KEY: E2E_MASTER_KEY,
     LOCAL_ACCOUNTS: "enabled",
     SERVICE_CLIENTS: Object.entries(SERVICE_CLIENT_SECRETS)
@@ -180,7 +202,8 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     ...createOidcEnvironment(gatewayPort),
   });
   const telemetryProcess = startDenoProcess("telemetry", "services/telemetry/src/main.ts", {
-    TELEMETRY_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "telemetry_e2e"),
+    DATABASE_MIGRATIONS: "check",
+    TELEMETRY_DATABASE_URL: databaseUrls.TELEMETRY_DATABASE_URL,
     IDENTITY_URL: identityUrl,
     IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.telemetry,
     TELEMETRY_HTTP_PORT: String(otlpHttpPort),
@@ -190,17 +213,19 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     ...DATA_LIFECYCLE_ENVIRONMENT,
   });
   const promptProcess = startDenoProcess("prompt", "services/prompt/src/main.ts", {
-    PROMPT_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "prompt_e2e"),
+    DATABASE_MIGRATIONS: "check",
+    PROMPT_DATABASE_URL: databaseUrls.PROMPT_DATABASE_URL,
     IDENTITY_URL: identityUrl,
     IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.prompt,
     PROMPT_PORT: String(promptPort),
     ...DATA_LIFECYCLE_ENVIRONMENT,
   });
-  const evaluationDatabaseUrl = replaceDatabaseName(postgresServerUrl, "evaluation_e2e");
+  const evaluationDatabaseUrl = databaseUrls.EVALUATION_DATABASE_URL;
   const evaluationApiProcess = startDenoProcess(
     "evaluation-api",
     "services/evaluation/src/main-api.ts",
     {
+      DATABASE_MIGRATIONS: "check",
       EVALUATION_DATABASE_URL: evaluationDatabaseUrl,
       MASTER_KEY: E2E_MASTER_KEY,
       IDENTITY_URL: identityUrl,
@@ -212,6 +237,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     "evaluation-worker",
     "services/evaluation/src/main-worker.ts",
     {
+      DATABASE_MIGRATIONS: "check",
       EVALUATION_DATABASE_URL: evaluationDatabaseUrl,
       MASTER_KEY: E2E_MASTER_KEY,
       TELEMETRY_URL: `http://127.0.0.1:${otlpHttpPort}`,
@@ -239,6 +265,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   });
   const deployment = {
     canCallLocalTargets: true,
+    sampleTargetUrl: null,
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
     otlpHttpUrl: `http://127.0.0.1:${otlpHttpPort}`,
     otlpGrpcAddress: `localhost:${otlpGrpcPort}`,
@@ -282,6 +309,35 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
   return deployment;
 }
 
+/** Runs a service's migrate command, as the Helm chart's migration Job does, and waits for it. */
+async function runMigrateCommand(
+  serviceName: string,
+  environmentVariables: Record<string, string>,
+): Promise<void> {
+  const entryPoint = `services/${serviceName}/src/migrate.ts`;
+  // A checkout from before the migrate command, as the nightly run may use, migrates at start.
+  try {
+    await Deno.stat(`${REPOSITORY_ROOT}${entryPoint}`);
+  } catch {
+    return;
+  }
+  const migrateResult = await new Deno.Command(Deno.execPath(), {
+    args: ["run", ...SERVICE_PERMISSIONS, entryPoint],
+    cwd: REPOSITORY_ROOT,
+    env: { ...environmentVariables, NO_COLOR: "1" },
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!migrateResult.success) {
+    const decoder = new TextDecoder();
+    throw new Error(
+      `The ${serviceName} migrate command failed:\n${decoder.decode(migrateResult.stdout)}${
+        decoder.decode(migrateResult.stderr)
+      }`,
+    );
+  }
+}
+
 /** The same PostgreSQL server and credentials with another database. */
 function replaceDatabaseName(serverUrl: string, databaseName: string): string {
   const databaseUrl = new URL(serverUrl);
@@ -307,6 +363,7 @@ function readExternalDeployment(): RunningDeployment {
     admin: { email: readRequired("E2E_ADMIN_EMAIL"), password: readRequired("E2E_ADMIN_PASSWORD") },
     identityInternalAccess: null,
     canCallLocalTargets: false,
+    sampleTargetUrl: Deno.env.get("E2E_SAMPLE_TARGET_URL") || null,
     stop: () => Promise.resolve(),
   };
 }

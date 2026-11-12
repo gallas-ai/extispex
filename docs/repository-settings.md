@@ -26,7 +26,7 @@ default branch:
 | Pull request           | required, no approving review; the `Owner approval` check stands in for it     |
 | Review threads         | must be resolved                                                               |
 | Merge methods          | merge, squash and rebase                                                       |
-| Required status checks | the five jobs below, reported by GitHub Actions                                |
+| Required status checks | the six jobs below, reported by GitHub Actions                                 |
 | Up to date with `main` | required, so CI runs the exact combination that merges                         |
 | Bypass                 | the `Organization admin` role, always: direct pushes and merges without review |
 
@@ -41,6 +41,7 @@ The ruleset requires these check names, which are the `name:` of jobs in
 - `Static checks and unit tests`
 - `End-to-end tests (all-in-one)`
 - `End-to-end tests (services)`
+- `End-to-end tests (Helm)`
 - `Container images`
 - `Owner approval`
 

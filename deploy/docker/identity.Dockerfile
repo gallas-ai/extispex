@@ -11,7 +11,7 @@ ENV DENO_DIR=/deno-dir \
 
 COPY . .
 RUN deno install --frozen \
-    && deno cache --frozen services/identity/src/main.ts \
+    && deno cache --frozen services/identity/src/main.ts services/identity/src/migrate.ts \
     # OpenShift runs containers with an arbitrary user ID in the root group.
     && chgrp -R 0 /app /deno-dir \
     && chmod -R g=u /app /deno-dir

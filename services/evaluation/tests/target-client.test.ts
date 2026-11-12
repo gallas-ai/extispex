@@ -1,10 +1,12 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { parseDestinationAllowlist } from "../src/targets/destination-allowlist.ts";
+import { parseProxyRouting } from "../src/targets/proxy-settings.ts";
 import {
   createTargetClient,
   type ResolvedAddress,
   type TargetCallResult,
 } from "../src/targets/target-client.ts";
+import { startTestProxy } from "./fixtures/test-proxy.ts";
 
 interface ReceivedCall {
   host: string | null;
@@ -190,7 +192,12 @@ Deno.test("checks an HTTPS Target's certificate against its host name", async ()
     key: await Deno.readTextFile(keyFile),
     onListen: () => {},
   }, () => Response.json(ANSWER));
-  const callInProcess = async (hostName: string, trustedCertificates?: string) => {
+  const proxy = startTestProxy();
+  const callInProcess = async (
+    hostName: string,
+    trustedCertificates?: string,
+    proxyUrl?: string,
+  ) => {
     const { stdout } = await new Deno.Command(Deno.execPath(), {
       args: [
         "run",
@@ -202,6 +209,7 @@ Deno.test("checks an HTTPS Target's certificate against its host name", async ()
         new URL("./fixtures/call-https-target.ts", import.meta.url).pathname,
         String(server.addr.port),
         hostName,
+        ...(proxyUrl === undefined ? [] : [proxyUrl]),
       ],
       env: trustedCertificates === undefined ? {} : { NODE_EXTRA_CA_CERTS: trustedCertificates },
       stderr: "inherit",
@@ -218,8 +226,108 @@ Deno.test("checks an HTTPS Target's certificate against its host name", async ()
     assertStringIncludes((wrongName as { reason: string }).reason, "altnames");
     const untrusted = await callInProcess("agent.example.test");
     assertStringIncludes((untrusted as { reason: string }).reason, "certificate");
+
+    // Through a CONNECT tunnel, the worker still checks the certificate against the host name.
+    assertEquals(await callInProcess("agent.example.test", certificateFile, proxy.url), {
+      status: "answered",
+      ...ANSWER,
+    });
+    assertEquals(proxy.requests.map((request) => request.requestLine), [
+      `CONNECT agent.example.test:${server.addr.port}`,
+    ]);
+    const wrongNameThroughProxy = await callInProcess(
+      "other.example.test",
+      certificateFile,
+      proxy.url,
+    );
+    assertStringIncludes((wrongNameThroughProxy as { reason: string }).reason, "altnames");
   } finally {
+    await proxy.stop();
     await server.shutdown();
     await Deno.remove(certificateDirectory, { recursive: true });
+  }
+});
+
+function callThroughProxy(
+  targetUrl: string,
+  proxyEnvironment: { httpProxy?: string; noProxy?: string },
+  allowedDestinations: string,
+): Promise<TargetCallResult> {
+  const client = createTargetClient({
+    allowlist: parseDestinationAllowlist(allowedDestinations),
+    timeoutMilliseconds: 2_000,
+    // The proxy resolves the name; the worker must not need to.
+    resolveHostAddresses: (hostName) =>
+      hostName === "127.0.0.1"
+        ? Promise.resolve([{ address: "127.0.0.1", family: 4 }])
+        : Promise.reject(new Error(`resolved ${hostName}`)),
+    proxyRouting: parseProxyRouting(proxyEnvironment),
+  });
+  return client.callTarget(
+    {
+      url: targetUrl,
+      credential: { headerName: "Authorization", headerValue: "Bearer target-secret" },
+    },
+    { input: { message: "Where is my order?" }, sessionId: null },
+  );
+}
+
+Deno.test("calls an http Target through HTTP_PROXY, which resolves the name", async () => {
+  const proxy = startTestProxy();
+  try {
+    await withTarget(() => Response.json(ANSWER), async (port, receivedCalls) => {
+      const proxyUrl = new URL(proxy.url);
+      proxyUrl.username = "worker";
+      proxyUrl.password = "proxy secret";
+      const result = await callThroughProxy(
+        `http://agent.example.test:${port}/evaluate`,
+        { httpProxy: proxyUrl.href },
+        "agent.example.test",
+      );
+      assertEquals(result, { status: "answered", ...ANSWER });
+      assertEquals(proxy.requests.map((request) => request.requestLine), [
+        `POST http://agent.example.test:${port}/evaluate`,
+      ]);
+      assertEquals(
+        proxy.requests[0].headers.get("proxy-authorization"),
+        `Basic ${btoa("worker:proxy secret")}`,
+      );
+      assertEquals(receivedCalls[0].host, `agent.example.test:${port}`);
+      assertEquals(receivedCalls[0].authorization, "Bearer target-secret");
+    });
+  } finally {
+    await proxy.stop();
+  }
+});
+
+Deno.test("calls a Target in NO_PROXY directly", async () => {
+  const proxy = startTestProxy();
+  try {
+    await withTarget(() => Response.json(ANSWER), async (port) => {
+      const result = await callThroughProxy(
+        `http://127.0.0.1:${port}/evaluate`,
+        { httpProxy: proxy.url, noProxy: "localhost,127.0.0.0/8" },
+        "127.0.0.1",
+      );
+      assertEquals(result, { status: "answered", ...ANSWER });
+      assertEquals(proxy.requests, []);
+    });
+  } finally {
+    await proxy.stop();
+  }
+});
+
+Deno.test("through a proxy, a Target's name must be listed, not only a CIDR range", async () => {
+  const proxy = startTestProxy();
+  try {
+    const result = await callThroughProxy(
+      "http://agent.example.test:8080/evaluate",
+      { httpProxy: proxy.url },
+      "127.0.0.0/8",
+    );
+    assertStringIncludes((result as { reason: string }).reason, "through a proxy");
+    assertEquals(proxy.requests, []);
+  } finally {
+    await proxy.stop();
   }
 });

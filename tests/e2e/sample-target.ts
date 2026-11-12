@@ -10,10 +10,28 @@ export interface RunningSampleTarget {
   stop(): Promise<void>;
 }
 
-/** The sample Target, sending its spans to the deployment under test. */
+/**
+ * Whether the Server-Driven Execution tests can run: an external deployment, such as a container,
+ * has its own network and cannot call a Target on this machine, unless it names its own.
+ */
+export function canRunSampleTarget(): boolean {
+  return Deno.env.get("E2E_DEPLOYMENT") !== "external" ||
+    Boolean(Deno.env.get("E2E_SAMPLE_TARGET_URL"));
+}
+
+/**
+ * The sample Target, sending its spans to the deployment under test: the deployment's own when it
+ * has one, otherwise started here.
+ */
 export async function startSampleTarget(
   deployment: RunningDeployment,
 ): Promise<RunningSampleTarget> {
+  if (deployment.sampleTargetUrl !== null) {
+    return { url: deployment.sampleTargetUrl, stop: () => Promise.resolve() };
+  }
+  if (!deployment.canCallLocalTargets) {
+    throw new Error("This deployment cannot call a Target on this machine.");
+  }
   const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
   const port = (listener.addr as Deno.NetAddr).port;
   listener.close();

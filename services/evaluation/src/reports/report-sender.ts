@@ -4,6 +4,7 @@ import {
   type DestinationAllowlist,
   DestinationNotAllowedError,
   postToAllowedDestination,
+  type ProxyRouting,
   resolveAllowedAddresses,
   type ResolveHostAddresses,
   resolveWithSystem,
@@ -30,6 +31,8 @@ export interface ReportSenderOptions {
   timeoutMilliseconds: number;
   /** The system's resolver by default. */
   resolveHostAddresses?: ResolveHostAddresses;
+  /** For webhooks: `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. SMTP is always direct. */
+  proxyRouting?: ProxyRouting;
 }
 
 function describeError(error: unknown): string {
@@ -122,7 +125,11 @@ export function createReportSender(options: ReportSenderOptions): ReportSender {
           url,
           { "content-type": "application/json" },
           JSON.stringify(message),
-          { ...destinationOptions, maximumResponseBytes: MAXIMUM_WEBHOOK_RESPONSE_BYTES },
+          {
+            ...destinationOptions,
+            maximumResponseBytes: MAXIMUM_WEBHOOK_RESPONSE_BYTES,
+            proxyRouting: options.proxyRouting,
+          },
           signal,
         );
         // A long answer is still an answer: the webhook took the message.

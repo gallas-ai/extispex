@@ -219,20 +219,31 @@ webhook URL are stored encrypted. Separate services send only to the addresses i
 `EVALUATION_REPORT_ALLOWED_DESTINATIONS`, such as `smtp.company.example:587,*.logic.azure.com`, and
 link to the UI at `PUBLIC_UI_URL`; the local image allows any and links to `localhost`.
 
+## Kubernetes and OpenShift
+
+The Helm chart in [deploy/helm/extispex](deploy/helm/extispex/README.md) runs every service from its
+own image on your PostgreSQL, as non-root containers with whatever UID the cluster assigns. It reads
+the master key and the database URLs from Secrets you create first, runs each service's database
+migrations in a Job before every install and upgrade, and exposes the UI, OTLP/HTTP and OTLP/gRPC
+through an Ingress or an OpenShift Route. The worker can reach Targets, LLM providers and Report
+webhooks through an HTTP proxy.
+
 ## Container images
 
 Images are published to the GitHub Container Registry as `ghcr.io/gallas-ai/extispex-<service>`. The
-all-in-one image takes the bare name because it is the one to try first.
+all-in-one image takes the bare name because it is the one to try first. Every push to `main`
+publishes them as `main` and `sha-<commit>`, and a release tag `v1.2.3` as `1.2.3`, together with
+the Helm chart `oci://ghcr.io/gallas-ai/charts/extispex` of the same version.
 
-| Image                                          | Runs                                       | Status |
-| ---------------------------------------------- | ------------------------------------------ | ------ |
-| `ghcr.io/gallas-ai/extispex`                   | Every service in one process, with SQLite  | Built  |
-| `ghcr.io/gallas-ai/extispex-gateway`           | Gateway and web UI                         | Built  |
-| `ghcr.io/gallas-ai/extispex-telemetry`         | Telemetry service: OTLP ingestion, queries | Built  |
-| `ghcr.io/gallas-ai/extispex-evaluation`        | Evaluation service API                     | Built  |
-| `ghcr.io/gallas-ai/extispex-evaluation-worker` | Evaluation worker                          | Built  |
-| `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Built  |
-| `ghcr.io/gallas-ai/extispex-identity`          | Identity service: users, Roles, API keys   | Built  |
+| Image                                          | Runs                                       | Status    |
+| ---------------------------------------------- | ------------------------------------------ | --------- |
+| `ghcr.io/gallas-ai/extispex`                   | Every service in one process, with SQLite  | Published |
+| `ghcr.io/gallas-ai/extispex-gateway`           | Gateway and web UI                         | Published |
+| `ghcr.io/gallas-ai/extispex-telemetry`         | Telemetry service: OTLP ingestion, queries | Published |
+| `ghcr.io/gallas-ai/extispex-evaluation`        | Evaluation service API                     | Published |
+| `ghcr.io/gallas-ai/extispex-evaluation-worker` | Evaluation worker                          | Published |
+| `ghcr.io/gallas-ai/extispex-prompt`            | Prompt service                             | Published |
+| `ghcr.io/gallas-ai/extispex-identity`          | Identity service: users, Roles, API keys   | Published |
 
 ## Development
 

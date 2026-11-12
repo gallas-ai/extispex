@@ -1,0 +1,19 @@
+{{- $env := include "extispex.gatewayEnv" . }}
+{{ include "extispex.deployment" (dict "root" . "component" "gateway" "image" "gateway" "entryPoint" "services/gateway/src/main.ts" "values" .Values.gateway "env" $env "ports" (list (dict "name" "http" "port" 8080)) "healthPort" "http") }}
+---
+{{ include "extispex.service" (dict "root" . "component" "gateway" "ports" (list (dict "name" "http" "port" 8080))) }}
+
+{{- define "extispex.gatewayEnv" -}}
+- name: TELEMETRY_URL
+  value: {{ include "extispex.serviceUrl" (dict "root" . "component" "telemetry" "port" 4318) }}
+- name: PROMPT_URL
+  value: {{ include "extispex.serviceUrl" (dict "root" . "component" "prompt" "port" 8081) }}
+- name: IDENTITY_URL
+  value: {{ include "extispex.serviceUrl" (dict "root" . "component" "identity" "port" 8082) }}
+- name: EVALUATION_URL
+  value: {{ include "extispex.serviceUrl" (dict "root" . "component" "evaluation" "port" 8083) }}
+- name: WEB_ASSETS_DIRECTORY
+  value: /app/apps/web/dist
+- name: GATEWAY_TRUSTED_PROXY_COUNT
+  value: {{ .Values.gateway.trustedProxyCount | quote }}
+{{- end -}}

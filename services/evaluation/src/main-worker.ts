@@ -5,6 +5,7 @@ import {
   createSecretCipher,
   createServiceTokenClient,
   createStructuredLogger,
+  readDatabaseMigrationMode,
   readDataLifecycleIntervalMilliseconds,
   readOptionalEnvironmentVariable,
   readPositiveIntegerEnvironmentVariable,
@@ -32,7 +33,10 @@ import {
 const logger = createStructuredLogger("evaluation-worker");
 
 const databaseUrl = readRequiredEnvironmentVariable("EVALUATION_DATABASE_URL");
-const database = await openEvaluationDatabase(databaseUrl);
+const database = await openEvaluationDatabase(
+  databaseUrl,
+  readDatabaseMigrationMode(),
+);
 const jobQueue = await openJobQueue(databaseUrl, database, logger);
 const identityClient = createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL"));
 const serviceTokens = createIdentityServiceTokenSource({
@@ -45,6 +49,15 @@ const masterKey = readRequiredEnvironmentVariable("MASTER_KEY");
 const evaluationWorker = createEvaluationWorker({
   database,
   jobQueue,
+  // The standard proxy variables, in either case, as curl reads them.
+  proxy: {
+    httpsProxy: readOptionalEnvironmentVariable("HTTPS_PROXY") ??
+      readOptionalEnvironmentVariable("https_proxy"),
+    httpProxy: readOptionalEnvironmentVariable("HTTP_PROXY") ??
+      readOptionalEnvironmentVariable("http_proxy"),
+    noProxy: readOptionalEnvironmentVariable("NO_PROXY") ??
+      readOptionalEnvironmentVariable("no_proxy"),
+  },
   targetCredentialCipher: await createSecretCipher(masterKey, TARGET_CREDENTIAL_CIPHER_PURPOSE),
   reportChannelCipher: await createSecretCipher(masterKey, REPORT_CHANNEL_CIPHER_PURPOSE),
   // Report channels are addresses that users supply too, so nothing is allowed by default.

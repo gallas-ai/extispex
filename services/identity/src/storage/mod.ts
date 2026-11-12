@@ -14,7 +14,11 @@ export {
   createDirectoryTokenRepository,
   type DirectoryTokenRepository,
 } from "./directory-token-repository.ts";
-export { type IdentityDatabase, openIdentityDatabase } from "./identity-database.ts";
+export {
+  type IdentityDatabase,
+  migrateIdentityDatabase,
+  openIdentityDatabase,
+} from "./identity-database.ts";
 export { SigningKeyRecord } from "./identity-entities.ts";
 export {
   createOidcRepository,

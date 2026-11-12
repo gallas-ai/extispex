@@ -1,0 +1,42 @@
+{{- $type := .Values.exposure.type }}
+{{- if not (has $type (list "ingress" "route" "none")) }}
+{{- fail (printf "exposure.type must be ingress, route or none, got %q." $type) }}
+{{- end }}
+{{- if eq $type "ingress" }}
+{{- range (include "extispex.exposedEndpoints" . | fromYamlArray) }}
+{{- if .host }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "extispex.fullname" $ }}-{{ .name }}
+  labels:
+    {{- include "extispex.labels" $ | nindent 4 }}
+  {{- $annotations := merge (deepCopy .annotations) $.Values.exposure.ingress.annotations }}
+  {{- with $annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $.Values.exposure.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .tlsSecretName }}
+  tls:
+    - hosts: [{{ .host | quote }}]
+      secretName: {{ .tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "extispex.fullname" $ }}-{{ .component }}
+                port:
+                  name: {{ .port }}
+{{- end }}
+{{- end }}
+{{- end }}

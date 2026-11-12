@@ -3,6 +3,7 @@ import {
   type DestinationAllowlist,
   DestinationNotAllowedError,
   postToAllowedDestination,
+  type ProxyRouting,
   type ResolveHostAddresses,
   resolveWithSystem,
 } from "../targets/mod.ts";
@@ -62,6 +63,8 @@ export interface LlmProviderClientOptions {
   allowlist: DestinationAllowlist;
   timeoutMilliseconds: number;
   resolveHostAddresses?: ResolveHostAddresses;
+  /** From `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`; direct connections when not given. */
+  proxyRouting?: ProxyRouting;
   /** The wait before the first retry, doubled for the second; tests shorten it. */
   retryDelayMilliseconds?: number;
 }
@@ -104,6 +107,7 @@ export function createLlmProviderClient(options: LlmProviderClientOptions): LlmP
           resolveHostAddresses,
           maximumResponseBytes: MAXIMUM_RESPONSE_BYTES,
           notAllowedReason: NOT_ALLOWED_REASON,
+          proxyRouting: options.proxyRouting,
         },
         signal,
       );

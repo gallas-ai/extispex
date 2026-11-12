@@ -1,0 +1,74 @@
+{{- include "extispex.requiredSecrets" . }}
+{{- $fullname := include "extispex.fullname" . }}
+{{- $env := include "extispex.identityEnv" . }}
+{{ include "extispex.deployment" (dict "root" . "component" "identity" "image" "identity" "entryPoint" "services/identity/src/main.ts" "values" .Values.identity "env" $env "ports" (list (dict "name" "http" "port" 8082)) "healthPort" "http") }}
+---
+{{ include "extispex.service" (dict "root" . "component" "identity" "ports" (list (dict "name" "http" "port" 8082))) }}
+
+{{- define "extispex.identityEnv" -}}
+{{- $serviceClients := include "extispex.serviceClientsSecretName" . -}}
+- name: DATABASE_MIGRATIONS
+  value: check
+{{ include "extispex.databaseUrlEnv" (dict "root" . "service" "identity") }}
+{{ include "extispex.dataLifecycleEnv" . }}
+{{ include "extispex.masterKeyEnv" . }}
+- name: LOCAL_ACCOUNTS
+  value: {{ .Values.identity.localAccounts | quote }}
+{{- range list "telemetry" "prompt" "evaluation" }}
+- name: {{ upper . }}_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ $serviceClients }}
+      key: {{ . }}
+{{- end }}
+- name: SERVICE_CLIENTS
+  value: "telemetry:$(TELEMETRY_CLIENT_SECRET),prompt:$(PROMPT_CLIENT_SECRET),evaluation:$(EVALUATION_CLIENT_SECRET)"
+{{- with .Values.bootstrap.existingSecret }}
+- name: BOOTSTRAP_PROJECT_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ . }}
+      key: {{ $.Values.bootstrap.secretKeys.projectApiKey }}
+      optional: true
+- name: BOOTSTRAP_ADMIN_EMAIL
+  valueFrom:
+    secretKeyRef:
+      name: {{ . }}
+      key: {{ $.Values.bootstrap.secretKeys.adminEmail }}
+      optional: true
+- name: BOOTSTRAP_ADMIN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ . }}
+      key: {{ $.Values.bootstrap.secretKeys.adminPassword }}
+      optional: true
+{{- end }}
+{{- with .Values.identity.oidc }}
+{{- if .issuerUrl }}
+- name: OIDC_ISSUER_URL
+  value: {{ .issuerUrl | quote }}
+- name: OIDC_CLIENT_ID
+  value: {{ .clientId | quote }}
+- name: OIDC_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "identity.oidc.clientSecret.existingSecret is required with identity.oidc.issuerUrl" .clientSecret.existingSecret }}
+      key: {{ .clientSecret.secretKey }}
+- name: OIDC_REDIRECT_URL
+  value: {{ .redirectUrl | default (printf "https://%s/v1/sign-in/oidc/callback" (required "identity.oidc.redirectUrl or exposure.gateway.host is required with identity.oidc.issuerUrl" $.Values.exposure.gateway.host)) | quote }}
+{{- if .providerName }}
+- name: OIDC_PROVIDER_NAME
+  value: {{ .providerName | quote }}
+{{- end }}
+{{- if .groupsClaim }}
+- name: OIDC_GROUPS_CLAIM
+  value: {{ .groupsClaim | quote }}
+{{- end }}
+{{- if .scopes }}
+- name: OIDC_SCOPES
+  value: {{ .scopes | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{ include "extispex.proxyEnv" . }}
+{{- end -}}

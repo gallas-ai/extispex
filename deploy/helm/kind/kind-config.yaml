@@ -1,0 +1,21 @@
+# One node for the chart's end-to-end tests. ingress-nginx listens on the node's ports 80 and 443,
+# which this machine reaches on 127.0.0.1:18080 and 127.0.0.1:18443.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+          kind: InitConfiguration
+          nodeRegistration:
+            kubeletExtraArgs:
+              node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 18080
+        listenAddress: 127.0.0.1
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 18443
+        listenAddress: 127.0.0.1
+        protocol: TCP

@@ -34,7 +34,11 @@ import {
 import { registerIterationTelemetryRoutes, registerTraceQueryRoutes } from "./traces/mod.ts";
 
 export { bindOtlpGrpcServer, type GrpcTlsFiles, shutdownOtlpGrpcServer } from "./ingestion/mod.ts";
-export { openTelemetryDatabase, type TelemetryDatabase } from "./storage/mod.ts";
+export {
+  migrateTelemetryDatabase,
+  openTelemetryDatabase,
+  type TelemetryDatabase,
+} from "./storage/mod.ts";
 export type { TelemetryDataLifecycleOutcome } from "./retention/mod.ts";
 
 export interface TelemetryServiceDependencies {
