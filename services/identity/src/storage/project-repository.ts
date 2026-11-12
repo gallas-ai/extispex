@@ -1,7 +1,19 @@
-import type { ApiKey, Project } from "@extispex/contracts";
+import {
+  type ApiKey,
+  DEFAULT_RETENTION_DAYS,
+  type DeletedProject,
+  type Project,
+  PROJECT_DATA_SERVICES,
+  type ProjectLifecycle,
+} from "@extispex/contracts";
 import { type InferEntity, UniqueConstraintViolationException } from "@mikro-orm/core";
 import type { IdentityDatabase } from "./identity-database.ts";
-import { ApiKeyRecord, ProjectRecord } from "./identity-entities.ts";
+import {
+  ApiKeyRecord,
+  ProjectDataRemovalRecord,
+  ProjectRecord,
+  RoleAssignmentRecord,
+} from "./identity-entities.ts";
 import { generateTimeOrderedId } from "./time-ordered-id.ts";
 
 /** An API key as stored: its hash and readable prefix, never the key itself. */
@@ -36,8 +48,27 @@ export interface ProjectRepository {
   listProjects(): Promise<Project[]>;
   /** Null for an unknown or deleted Project. */
   findProject(projectId: string): Promise<Project | null>;
+  /** Null for an unknown or deleted Project. */
+  setRetentionDays(projectId: string, retentionDays: number): Promise<Project | null>;
   /** False for an unknown or already deleted Project. */
   deleteProject(projectId: string, deletedAt: Date): Promise<boolean>;
+  /**
+   * Every Project's Retention Period, and the deleted Projects whose data the service has not yet
+   * removed after `finalRemovalAfter`: a removal only counts once no access token issued before
+   * the deletion can still write more, which is the deletion time plus the tokens' lifetime.
+   */
+  readProjectLifecycle(service: string, accessTokenLifetimeMilliseconds: number): Promise<
+    ProjectLifecycle
+  >;
+  /** False when no deleted Project has this ID. */
+  recordDataRemoval(projectId: string, service: string, removedAt: Date): Promise<boolean>;
+  /** Newest first. */
+  listDeletedProjects(
+    limit: number,
+    accessTokenLifetimeMilliseconds: number,
+  ): Promise<DeletedProject[]>;
+  /** Removes Identity's own data of a deleted Project: its API keys and Role assignments. */
+  removeOwnProjectData(projectId: string): Promise<void>;
   createApiKey(projectId: string, apiKey: NewApiKey, createdAt: Date): Promise<ApiKey>;
   /** Newest first, revoked keys included. */
   listApiKeys(projectId: string): Promise<ApiKey[]>;
@@ -52,7 +83,7 @@ type ApiKeyRow = InferEntity<typeof ApiKeyRecord>;
 export function createProjectRepository(database: IdentityDatabase): ProjectRepository {
   return {
     async createProject(name, createdAt) {
-      const projectRow = { id: generateTimeOrderedId(createdAt), name, createdAt, deletedAt: null };
+      const projectRow = createProjectRow(name, createdAt);
       try {
         await database.orm.em.fork().insert(ProjectRecord, projectRow);
       } catch (error) {
@@ -63,7 +94,7 @@ export function createProjectRepository(database: IdentityDatabase): ProjectRepo
     },
 
     async createFirstProject(name, apiKey, createdAt) {
-      const projectRow = { id: generateTimeOrderedId(createdAt), name, createdAt, deletedAt: null };
+      const projectRow = createProjectRow(name, createdAt);
       try {
         return await database.orm.em.fork().transactional(async (entityManager) => {
           if (await entityManager.count(ProjectRecord, {}) > 0) {
@@ -103,6 +134,103 @@ export function createProjectRepository(database: IdentityDatabase): ProjectRepo
         deletedAt: null,
       });
       return projectRow === null ? null : toProject(projectRow);
+    },
+
+    async setRetentionDays(projectId, retentionDays) {
+      const entityManager = database.orm.em.fork();
+      const updatedCount = await entityManager.nativeUpdate(
+        ProjectRecord,
+        { id: projectId, deletedAt: null },
+        { retentionDays },
+      );
+      if (updatedCount === 0) return null;
+      const projectRow = await entityManager.findOne(ProjectRecord, { id: projectId });
+      return projectRow === null ? null : toProject(projectRow);
+    },
+
+    async readProjectLifecycle(service, accessTokenLifetimeMilliseconds) {
+      const entityManager = database.orm.em.fork();
+      const [projectRows, deletedRows, removalRows] = await Promise.all([
+        entityManager.fork().find(ProjectRecord, { deletedAt: null }, { orderBy: { id: "asc" } }),
+        entityManager.fork().find(
+          ProjectRecord,
+          { deletedAt: { $ne: null } },
+          { orderBy: { deletedAt: "asc" } },
+        ),
+        entityManager.fork().find(ProjectDataRemovalRecord, { service }),
+      ]);
+      const removedAtByProject = new Map(
+        removalRows.map((removalRow) => [removalRow.projectId, removalRow.removedAt]),
+      );
+      return {
+        projects: projectRows.map((projectRow) => ({
+          projectId: projectRow.id,
+          retentionDays: projectRow.retentionDays,
+        })),
+        projectsToRemove: deletedRows
+          .filter((projectRow) =>
+            !isRemovalFinal(
+              projectRow.deletedAt!,
+              removedAtByProject.get(projectRow.id),
+              accessTokenLifetimeMilliseconds,
+            )
+          )
+          .map((projectRow) => ({
+            projectId: projectRow.id,
+            deletedAt: projectRow.deletedAt!.toISOString(),
+          })),
+      };
+    },
+
+    async recordDataRemoval(projectId, service, removedAt) {
+      return await database.orm.em.fork().transactional(async (entityManager) => {
+        const isDeleted = await entityManager.count(ProjectRecord, {
+          id: projectId,
+          deletedAt: { $ne: null },
+        }) > 0;
+        if (!isDeleted) return false;
+        await entityManager.upsert(ProjectDataRemovalRecord, { projectId, service, removedAt });
+        return true;
+      });
+    },
+
+    async listDeletedProjects(limit, accessTokenLifetimeMilliseconds) {
+      const entityManager = database.orm.em.fork();
+      const deletedRows = await entityManager.find(
+        ProjectRecord,
+        { deletedAt: { $ne: null } },
+        { orderBy: { deletedAt: "desc", id: "desc" }, limit },
+      );
+      const removalRows = deletedRows.length === 0 ? [] : await entityManager.find(
+        ProjectDataRemovalRecord,
+        { projectId: { $in: deletedRows.map((projectRow) => projectRow.id) } },
+      );
+      return deletedRows.map((projectRow) => ({
+        id: projectRow.id,
+        name: projectRow.name,
+        deletedAt: projectRow.deletedAt!.toISOString(),
+        dataRemovals: PROJECT_DATA_SERVICES.map((service) => {
+          const removedAt = removalRows.find((removalRow) =>
+            removalRow.projectId === projectRow.id && removalRow.service === service
+          )?.removedAt;
+          return {
+            service,
+            removedAt: removedAt?.toISOString() ?? null,
+            isComplete: isRemovalFinal(
+              projectRow.deletedAt!,
+              removedAt,
+              accessTokenLifetimeMilliseconds,
+            ),
+          };
+        }),
+      }));
+    },
+
+    async removeOwnProjectData(projectId) {
+      await database.orm.em.fork().transactional(async (entityManager) => {
+        await entityManager.nativeDelete(ApiKeyRecord, { projectId });
+        await entityManager.nativeDelete(RoleAssignmentRecord, { projectId });
+      });
     },
 
     async deleteProject(projectId, deletedAt) {
@@ -158,11 +286,37 @@ export function createProjectRepository(database: IdentityDatabase): ProjectRepo
   };
 }
 
-function toProject(projectRow: Pick<ProjectRow, "id" | "name" | "createdAt">): Project {
+function createProjectRow(name: string, createdAt: Date): ProjectRow {
+  return {
+    id: generateTimeOrderedId(createdAt),
+    name,
+    createdAt,
+    deletedAt: null,
+    retentionDays: DEFAULT_RETENTION_DAYS,
+  };
+}
+
+/**
+ * A removal is final when it happened after every access token issued before the deletion
+ * expired, since such a token still lets its holder write to the Project in other services.
+ */
+function isRemovalFinal(
+  deletedAt: Date,
+  removedAt: Date | undefined,
+  accessTokenLifetimeMilliseconds: number,
+): boolean {
+  return removedAt !== undefined &&
+    removedAt.getTime() >= deletedAt.getTime() + accessTokenLifetimeMilliseconds;
+}
+
+function toProject(
+  projectRow: Pick<ProjectRow, "id" | "name" | "createdAt" | "retentionDays">,
+): Project {
   return {
     id: projectRow.id,
     name: projectRow.name,
     createdAt: projectRow.createdAt.toISOString(),
+    retentionDays: projectRow.retentionDays,
   };
 }
 

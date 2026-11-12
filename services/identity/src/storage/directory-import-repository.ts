@@ -236,6 +236,7 @@ async function applyRow(
       isInstanceAdmin: false,
       createdAt: now,
       deactivatedAt: row.active === false ? now : null,
+      personalDataDeletedAt: null,
     };
     await entityManager.insert(UserRecord, userRow);
     outcome = "created";

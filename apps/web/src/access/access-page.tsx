@@ -456,7 +456,16 @@ function UsersPanel({ users, onChange }: { users: User[]; onChange: () => void }
               <tr key={user.id} className={user.deactivatedAt === null ? "" : "user-deactivated"}>
                 <td>
                   <span className="user-name">{user.displayName}</span>
-                  <span className="user-email">{user.email}</span>
+                  {user.personalDataDeletedAt === null
+                    ? <span className="user-email">{user.email}</span>
+                    : (
+                      <span
+                        className="user-email"
+                        title="The user's personal data was deleted 30 days after deactivation."
+                      >
+                        ID <code className="cell-breaks-anywhere">{user.id}</code>
+                      </span>
+                    )}
                 </td>
                 <td className="column-user-status">
                   {user.isInstanceAdmin && (
@@ -470,10 +479,12 @@ function UsersPanel({ users, onChange }: { users: User[]; onChange: () => void }
                       {user.directorySource === "scim" ? "SCIM" : "Imported"}
                     </span>
                   )}
-                  {user.deactivatedAt !== null && <span className="status-text">Deactivated</span>}
+                  {user.deactivatedAt !== null && user.personalDataDeletedAt === null && (
+                    <span className="status-text">Deactivated</span>
+                  )}
                 </td>
                 <td className="column-actions">
-                  {user.id !== currentUser.id && (
+                  {user.id !== currentUser.id && user.personalDataDeletedAt === null && (
                     <button
                       type="button"
                       className={user.deactivatedAt === null

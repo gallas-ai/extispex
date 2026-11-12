@@ -13,7 +13,10 @@ import {
   IdentityUnavailableError,
   type ProjectResolver,
 } from "@extispex/service-runtime";
-import { createTestAccessTokens } from "@extispex/service-runtime/testing";
+import {
+  createTestAccessTokens,
+  createTestProjectLifecycle,
+} from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import {
   createPromptService,
@@ -75,6 +78,7 @@ async function withPromptService(databaseUrl: string, testBody: PromptTestBody):
     await testBody(createPromptService({
       database,
       requestAuthenticator: testRequestAuthenticator,
+      projectLifecycle: createTestProjectLifecycle(),
       logger: createStructuredLogger("prompt-test"),
       // Each request is one second later, so that ordering by time is deterministic.
       readCurrentTime: () => new Date(clockMilliseconds += 1_000),
@@ -485,6 +489,7 @@ Deno.test("asks clients to retry while API keys cannot be checked", async () => 
         },
         accessTokenVerifier: testAccessTokens.accessTokenVerifier,
       }),
+      projectLifecycle: createTestProjectLifecycle(),
       logger: { ...createStructuredLogger("prompt-test"), warn: () => {} },
     });
     const response = await sendRequest(promptService, "GET", "/v1/prompts");
@@ -504,3 +509,56 @@ definePromptTest("publishes an OpenAPI 3.1 document", async (promptService) => {
   assertEquals(openApiDocument.openapi, "3.1.0");
   assert(Object.keys(openApiDocument.paths).includes("/v1/prompts/{promptName}/compare"));
 });
+
+for (const testDatabase of listTestDatabases("prompt")) {
+  Deno.test(
+    `removes a deleted Project's prompts, on one replica at a time (${testDatabase.label})`,
+    async () => {
+      const database = await openPromptDatabase(testDatabase.url);
+      try {
+        await database.orm.em.fork().execute("delete from prompts");
+        await database.orm.em.fork().execute("delete from background_leases");
+        const projectLifecycle = createTestProjectLifecycle();
+        const createReplica = (leaseHolder: string) =>
+          createPromptService({
+            database,
+            requestAuthenticator: testRequestAuthenticator,
+            projectLifecycle,
+            logger: createStructuredLogger("prompt-test"),
+            leaseHolder,
+          });
+        const promptService = createReplica("replica-one");
+        for (const apiKey of [API_KEY, OTHER_PROJECT_API_KEY]) {
+          const response = await sendRequest(promptService, "POST", "/v1/prompts", {
+            apiKey,
+            body: SUPPORT_AGENT_PROMPT,
+          });
+          assertEquals(response.status, 201, await response.text());
+        }
+        projectLifecycle.lifecycle = {
+          projects: [{ projectId: "project-one", retentionDays: 30 }],
+          projectsToRemove: [{ projectId: "project-two", deletedAt: new Date().toISOString() }],
+        };
+        assertEquals(await promptService.runDataLifecycle(), {
+          status: "ran",
+          removedProjectIds: ["project-two"],
+        });
+        assertEquals(await createReplica("replica-two").runDataLifecycle(), { status: "skipped" });
+        assertEquals(projectLifecycle.recordedRemovals, ["project-two"]);
+        const countRows = async (tableName: string) =>
+          Number(
+            (await database.orm.em.fork().execute<{ row_count: number | string }[]>(
+              `select count(*) as row_count from ${tableName}`,
+            ))[0].row_count,
+          );
+        assertEquals(await countRows("prompts"), 1);
+        assertEquals(await countRows("prompt_versions"), 1);
+        assertEquals(await countRows("prompt_labels"), 1);
+        const remaining = await sendRequest(promptService, "GET", "/v1/prompts");
+        assertEquals((await remaining.json() as ListPromptsResponse).prompts.length, 1);
+      } finally {
+        await database.close();
+      }
+    },
+  );
+}

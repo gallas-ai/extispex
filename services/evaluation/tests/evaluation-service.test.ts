@@ -786,3 +786,62 @@ defineEvaluationTest("refuses an invalid Telemetry Evaluator", async (harness) =
   // The default asks for at least one matching span.
   assertEquals(stored.evaluators[0], { ...CALLED_TOOL_EVALUATOR, count: { min: 1 } } as Evaluator);
 });
+
+defineEvaluationTest(
+  "removes a deleted Project's Datasets, runs and Targets, and keeps other Projects'",
+  async (harness) => {
+    await createDatasetWithTestCases(harness, [refundTestCase()]);
+    const work = await startRun(harness);
+    await report(harness, work.runId, [outputReport(work.items[0], "Within 30 days.")]);
+    await harness.drainJobs();
+    await expectJson(
+      sendRequest(harness, "POST", "/v1/targets", {
+        body: { name: "support-bot", url: harness.target.url },
+      }),
+      201,
+    );
+    await expectJson(
+      sendRequest(harness, "POST", "/v1/datasets", {
+        bearerToken: OTHER_PROJECT_API_KEY,
+        body: { name: "kept" },
+      }),
+      201,
+    );
+
+    harness.projectLifecycle.lifecycle = {
+      projects: [{ projectId: "project-two", retentionDays: 30 }],
+      projectsToRemove: [{
+        projectId: "project-one",
+        deletedAt: harness.readClock().toISOString(),
+      }],
+    };
+    assertEquals(await harness.worker.runDataLifecycle(), {
+      status: "ran",
+      removedProjectIds: ["project-one"],
+    });
+    assertEquals(harness.projectLifecycle.recordedRemovals, ["project-one"]);
+    for (
+      const tableName of [
+        "iteration_attempt_steps",
+        "iteration_attempts",
+        "iterations",
+        "run_test_cases",
+        "evaluation_runs",
+        "test_cases",
+        "targets",
+      ]
+    ) {
+      const rows = await harness.database.orm.em.fork().execute<{ row_count: number | string }[]>(
+        `select count(*) as row_count from ${tableName}`,
+      );
+      assertEquals(Number(rows[0].row_count), 0, tableName);
+    }
+    const { datasets } = await expectJson<ListDatasetsResponse>(
+      sendRequest(harness, "GET", "/v1/datasets", { bearerToken: OTHER_PROJECT_API_KEY }),
+      200,
+    );
+    assertEquals(datasets.map((dataset) => dataset.name), ["kept"]);
+    // A job of the removed run that is still queued finds nothing and ends.
+    await harness.worker.handleJob({ iterationId: work.items[0].iterationId, attemptNumber: 1 });
+  },
+);

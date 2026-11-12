@@ -1,7 +1,10 @@
 import type { ServiceRequestHandler } from "@extispex/service-client";
+import { createBackgroundLease } from "@extispex/service-storage";
 import {
   createServiceHttpApp,
+  DEFAULT_DATA_LIFECYCLE_INTERVAL_MILLISECONDS,
   type ProjectAccessEnvironment,
+  type ProjectLifecycleSource,
   type RequestAuthenticator,
   type StructuredLogger,
 } from "@extispex/service-runtime";
@@ -18,6 +21,11 @@ import { registerMetricQueryRoutes } from "./metrics/metric-query-routes.ts";
 import { createLogRepository } from "./storage/log-repository.ts";
 import { createMetricRepository } from "./storage/metric-repository.ts";
 import { createRejectionRepository } from "./storage/rejection-repository.ts";
+import { createRetentionRepository } from "./storage/retention-repository.ts";
+import {
+  createTelemetryDataLifecycle,
+  type TelemetryDataLifecycleOutcome,
+} from "./retention/telemetry-data-lifecycle.ts";
 import { createSpanRepository } from "./storage/span-repository.ts";
 import type { TelemetryDatabase } from "./storage/telemetry-database.ts";
 import { registerIterationTelemetryRoutes } from "./traces/iteration-telemetry-routes.ts";
@@ -29,12 +37,19 @@ export {
   shutdownOtlpGrpcServer,
 } from "./ingestion/otlp-grpc-server.ts";
 export { openTelemetryDatabase, type TelemetryDatabase } from "./storage/telemetry-database.ts";
+export type { TelemetryDataLifecycleOutcome } from "./retention/telemetry-data-lifecycle.ts";
 
 export interface TelemetryServiceDependencies {
   database: TelemetryDatabase;
   requestAuthenticator: RequestAuthenticator;
+  /** Identity's Retention Periods and deleted Projects, asked with this service's token. */
+  projectLifecycle: ProjectLifecycleSource;
   logger: StructuredLogger;
   readCurrentTime?: () => Date;
+  /** How often `runDataLifecycle` runs; its lease lasts two intervals. */
+  dataLifecycleIntervalMilliseconds?: number;
+  /** Who holds the data lifecycle's lease; one ID per process by default. */
+  leaseHolder?: string;
 }
 
 export interface TelemetryService {
@@ -42,6 +57,12 @@ export interface TelemetryService {
   handleRequest: ServiceRequestHandler;
   /** Creates an unbound gRPC server for OTLP/gRPC ingestion. */
   createGrpcServer(): grpc.Server;
+  /**
+   * One run of the periodic data work, if this replica gets the lease: removes deleted Projects'
+   * telemetry, expired records and old rejected counts. `main.ts` runs it every
+   * `DATA_LIFECYCLE_INTERVAL_MILLISECONDS`.
+   */
+  runDataLifecycle(): Promise<TelemetryDataLifecycleOutcome>;
 }
 
 export function createTelemetryService(
@@ -93,7 +114,23 @@ export function createTelemetryService(
     requestAuthenticator: dependencies.requestAuthenticator,
   });
 
+  const runDataLifecycle = createTelemetryDataLifecycle({
+    retentionRepository: createRetentionRepository(dependencies.database),
+    projectLifecycle: dependencies.projectLifecycle,
+    lease: createBackgroundLease(dependencies.database, {
+      name: "data-lifecycle",
+      holder: dependencies.leaseHolder ?? crypto.randomUUID(),
+      durationMilliseconds: 2 *
+        (dependencies.dataLifecycleIntervalMilliseconds ??
+          DEFAULT_DATA_LIFECYCLE_INTERVAL_MILLISECONDS),
+    }),
+    isPostgres: dependencies.database.dialect === "postgresql",
+    logger: dependencies.logger,
+    readCurrentTime,
+  });
+
   return {
+    runDataLifecycle,
     handleRequest: (request) => app.fetch(request),
     createGrpcServer: () =>
       createOtlpGrpcServer({

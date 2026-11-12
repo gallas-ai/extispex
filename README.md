@@ -111,6 +111,13 @@ OIDC sign-in becomes the same user when they sign in with the same email.
 Behind a reverse proxy, set `GATEWAY_TRUSTED_PROXY_COUNT` on the Gateway to the number of proxies,
 so that the limit on wrong passwords per address sees browsers and not the proxy.
 
+Each Project keeps its traces, logs and metrics for its Retention Period, 30 days unless its `admin`
+sets another on the Project's page. Every service removes older telemetry, and all data of a deleted
+Project, in a run every ten minutes (`DATA_LIFECYCLE_INTERVAL_MILLISECONDS` on each service);
+**Projects** shows Instance admins how far each service has got with a deleted Project. A
+deactivated user's email, name and sign-in identities are deleted for good 30 days later, and only
+the ID stays, as "Deleted user".
+
 Applications and scripts send one of the Project's API keys, and the key alone decides the Project.
 A key acts as an `editor`. It looks like `extispex_` followed by 43 letters and digits, and is shown
 only when it is created: Extispex stores only its hash. A revoked key, or any key of a deleted

@@ -10,6 +10,7 @@ export * from "./identity/api-key-resolution.ts";
 export * from "./identity/directory-contracts.ts";
 export * from "./identity/directory-routes.ts";
 export * from "./identity/project-contracts.ts";
+export * from "./identity/project-lifecycle.ts";
 export * from "./identity/project-routes.ts";
 export * from "./prompt/prompt-contracts.ts";
 export * from "./prompt/prompt-routes.ts";

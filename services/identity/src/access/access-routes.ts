@@ -125,6 +125,16 @@ export function registerAccessRoutes(
         409,
       );
     }
+    if (update.status === "personal_data_deleted") {
+      return context.json(
+        createErrorResponse(
+          "conflict",
+          "This user's personal data was deleted 30 days after deactivation, so the user cannot " +
+            "be changed. Create a new user instead.",
+        ),
+        409,
+      );
+    }
     return context.json(update.user, 200);
   });
 

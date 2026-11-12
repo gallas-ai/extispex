@@ -5,7 +5,10 @@ import {
   IdentityUnavailableError,
   type ProjectResolver,
 } from "@extispex/service-runtime";
-import { createTestAccessTokens } from "@extispex/service-runtime/testing";
+import {
+  createTestAccessTokens,
+  createTestProjectLifecycle,
+} from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import type {
   CorrelationSpansResponse,
@@ -106,6 +109,7 @@ async function withTelemetryService(
     await testBody(createTelemetryService({
       database,
       requestAuthenticator: testRequestAuthenticator,
+      projectLifecycle: createTestProjectLifecycle(),
       logger: createStructuredLogger("telemetry-test"),
     }));
   } finally {
@@ -331,6 +335,7 @@ Deno.test("asks clients to retry while API keys cannot be checked", async () => 
         },
         accessTokenVerifier: testAccessTokens.accessTokenVerifier,
       }),
+      projectLifecycle: createTestProjectLifecycle(),
       logger: { ...createStructuredLogger("telemetry-test"), warn: () => {} },
     });
     for (

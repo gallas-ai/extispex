@@ -52,7 +52,8 @@ export type CreateUserResult = { status: "created"; user: User } | { status: "em
 export type UpdateUserResult =
   | { status: "updated"; user: User }
   | { status: "not_found" }
-  | { status: "last_instance_admin" };
+  | { status: "last_instance_admin" }
+  | { status: "personal_data_deleted" };
 export type CreateGroupResult = { status: "created"; group: Group } | { status: "name_taken" };
 export type AddGroupMemberResult =
   | { status: "added"; group: Group }
@@ -61,6 +62,17 @@ export type AddGroupMemberResult =
 export type AssignRoleResult =
   | { status: "assigned"; roleAssignment: RoleAssignment }
   | { status: "group_not_found" };
+
+/** What a user whose personal data is deleted is called. */
+export const DELETED_USER_DISPLAY_NAME = "Deleted user";
+
+/**
+ * The email of a user whose personal data is deleted: unique, because emails are, and never
+ * deliverable, because `.invalid` is reserved for that (RFC 2606).
+ */
+function formatDeletedUserEmail(userId: string): string {
+  return `deleted-user-${userId}@deleted.invalid`;
+}
 
 /** The first administrator's Group, which gets the Role `admin` in every Project at first start. */
 export const FIRST_ADMINISTRATORS_GROUP_NAME = "Administrators";
@@ -82,6 +94,12 @@ export interface AccessRepository {
    * admin. Deactivating a user ends their sign-ins.
    */
   updateUser(userId: string, changes: UserChanges): Promise<UpdateUserResult>;
+  /**
+   * Deletes for good the email, name and sign-in identities of users deactivated before `cutoff`,
+   * with their memberships and sign-ins. The row stays with its ID, as "Deleted user", so that
+   * what refers to it still resolves. Resolves to how many users it changed.
+   */
+  deletePersonalDataOfUsersDeactivatedBefore(cutoff: Date, now: Date): Promise<number>;
 
   createGroup(name: string, createdAt: Date): Promise<CreateGroupResult>;
   /** By name, each with its members by email. */
@@ -213,6 +231,7 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
       return await database.orm.em.fork().transactional(async (entityManager) => {
         const userRow = await entityManager.findOne(UserRecord, { id: userId });
         if (userRow === null) return { status: "not_found" } as const;
+        if (userRow.personalDataDeletedAt) return { status: "personal_data_deleted" } as const;
         const isActiveAdminNow = userRow.isInstanceAdmin && userRow.deactivatedAt === null;
         const isActiveAdminAfter = (changes.isInstanceAdmin ?? userRow.isInstanceAdmin) &&
           (changes.deactivatedAt === undefined
@@ -243,6 +262,38 @@ export function createAccessRepository(database: IdentityDatabase): AccessReposi
           await entityManager.nativeDelete(SignInRecord, { userId });
         }
         return { status: "updated", user: toUser({ ...userRow, ...changedFields }) } as const;
+      });
+    },
+
+    async deletePersonalDataOfUsersDeactivatedBefore(cutoff, now) {
+      return await database.orm.em.fork().transactional(async (entityManager) => {
+        const userRows = await entityManager.find(
+          UserRecord,
+          { deactivatedAt: { $ne: null, $lt: cutoff }, personalDataDeletedAt: null },
+          { fields: ["id", "directoryRemovedAt"] },
+        );
+        for (const userRow of userRows) {
+          await entityManager.nativeUpdate(UserRecord, { id: userRow.id }, {
+            email: formatDeletedUserEmail(userRow.id),
+            displayName: DELETED_USER_DISPLAY_NAME,
+            passwordHash: null,
+            oidcIssuer: null,
+            oidcSubject: null,
+            directoryUserName: null,
+            directoryExternalId: null,
+            // Hidden from SCIM, so that the directory creates a new user if the person returns.
+            directoryRemovedAt: userRow.directoryRemovedAt ?? now,
+            isInstanceAdmin: false,
+            personalDataDeletedAt: now,
+          });
+        }
+        const userIds = userRows.map((userRow) => userRow.id);
+        if (userIds.length > 0) {
+          await entityManager.nativeDelete(GroupMemberRecord, { userId: { $in: userIds } });
+          await entityManager.nativeDelete(CompanyGroupMemberRecord, { userId: { $in: userIds } });
+          await entityManager.nativeDelete(SignInRecord, { userId: { $in: userIds } });
+        }
+        return userIds.length;
       });
     },
 
@@ -440,6 +491,7 @@ function createUserRow(newUser: NewUser, createdAt: Date): UserRow {
     directoryRemovedAt: null,
     createdAt,
     deactivatedAt: null,
+    personalDataDeletedAt: null,
   };
 }
 
@@ -453,6 +505,9 @@ export function toUser(userRow: UserRow): User {
     directorySource: (userRow.directorySource ?? null) as User["directorySource"],
     createdAt: userRow.createdAt.toISOString(),
     deactivatedAt: userRow.deactivatedAt ? userRow.deactivatedAt.toISOString() : null,
+    personalDataDeletedAt: userRow.personalDataDeletedAt
+      ? userRow.personalDataDeletedAt.toISOString()
+      : null,
   };
 }
 

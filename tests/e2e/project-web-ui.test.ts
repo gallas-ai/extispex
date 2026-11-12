@@ -1,8 +1,8 @@
 /**
  * Browser tests of the Projects and Access pages: creating a Project, giving a Group a Role in it,
- * switching to it, creating and revoking an API key, managing users and Groups, a viewer who
- * cannot change prompts, deleting the Project, and the layout rules that keep those pages from
- * scrolling sideways.
+ * switching to it, creating and revoking an API key, setting the Retention Period, managing users
+ * and Groups, a viewer who cannot change prompts, deleting the Project and watching its data
+ * removal, and the layout rules that keep those pages from scrolling sideways.
  */
 import { assert, assertEquals, assertMatch } from "@std/assert";
 import type { Browser } from "playwright-core";
@@ -123,6 +123,26 @@ Deno.test({
         await uiSession.close();
       });
 
+      await testContext.step("sets the Project's Retention Period", async () => {
+        const uiSession = await openAdminUi(projectPath);
+        const { page } = uiSession;
+        const retentionInput = page.getByLabel("Keep telemetry for");
+        assertEquals(await retentionInput.inputValue(), "30");
+        await retentionInput.fill("0");
+        await page.getByRole("button", { name: "Save retention" }).click();
+        await page.getByText("Choose a whole number of days from 1 to 400.").waitFor();
+        await retentionInput.fill("7");
+        await page.getByRole("button", { name: "Save retention" }).click();
+        await waitForCondition(
+          "the Retention Period is saved",
+          async () => await page.getByRole("button", { name: "Save retention" }).isDisabled(),
+        );
+        await page.reload();
+        assertEquals(await page.getByLabel("Keep telemetry for").inputValue(), "7");
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
       await testContext.step("creates a user and a Group with the user in it", async () => {
         const uiSession = await openAdminUi("/access");
         const { page } = uiSession;
@@ -177,6 +197,8 @@ Deno.test({
         assertEquals(await page.locator(".project-cell-name").allInnerTexts(), [projectName]);
         await page.getByRole("link", { name: projectName }).click();
         await page.getByText("Only the Project's admins manage its Roles and API keys.").waitFor();
+        await page.getByText("Telemetry is kept for 7 days.").waitFor();
+        assertEquals(await page.getByLabel("Keep telemetry for").count(), 0);
         assertNoPageErrors(uiSession);
         await uiSession.close();
       });
@@ -233,6 +255,29 @@ Deno.test({
           async () =>
             !(await page.locator(".project-cell-name").allInnerTexts()).includes(projectName),
         );
+        // Every service removes its data within seconds, because the tests run the data lifecycle
+        // every second; it counts as removed for good only five minutes later.
+        const deletedProject = page.getByRole("listitem", {
+          name: `Deleted Project ${projectName}`,
+        });
+        await deletedProject.waitFor();
+        const removals = deletedProject.getByRole("list", { name: "Data removal by service" });
+        await waitForCondition(
+          "every service removes the Project's data",
+          async () =>
+            (await removals.locator(".data-removal").allInnerTexts()).every((text) =>
+              text.includes("Removing") || text.includes("Removed")
+            ),
+        );
+        assertEquals(
+          await removals.locator(".data-removal-service").allInnerTexts(),
+          ["Identity", "Telemetry", "Prompt", "Evaluation"],
+        );
+        for (const width of SWEPT_WIDTHS) {
+          await page.setViewportSize({ width, height: 900 });
+          await assertNoHorizontalOverflow(page, `on the Project list at ${width}px`);
+        }
+        await page.setViewportSize({ width: 1280, height: 900 });
         await page.goto(projectPath);
         await page.getByRole("heading", { name: "This Project does not exist" }).waitFor();
         assert(!(await page.locator(".project-switcher-name").innerText()).includes(projectName));

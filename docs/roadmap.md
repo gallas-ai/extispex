@@ -21,7 +21,7 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 10   | [SCIM and file import](#10-scim-and-file-import)                                                       | Done   |
 | 11   | [Logs](#11-logs)                                                                                       | Done   |
 | 12   | [Metrics](#12-metrics)                                                                                 | Done   |
-| 13   | [Retention and Project deletion](#13-retention-and-project-deletion)                                   |        |
+| 13   | [Retention and Project deletion](#13-retention-and-project-deletion)                                   | Done   |
 | 14   | [Helm chart](#14-helm-chart)                                                                           |        |
 | 15   | [Nightly performance test and module boundaries](#15-nightly-performance-test-and-module-boundaries)   |        |
 

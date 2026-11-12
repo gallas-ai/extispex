@@ -72,6 +72,11 @@ const TRACE_COMPLETION_ENVIRONMENT = {
   EVALUATION_ROOT_SPAN_SETTLE_MILLISECONDS: "500",
   EVALUATION_ROOT_SPAN_TIMEOUT_MILLISECONDS: "3000",
 };
+/**
+ * The data lifecycle runs every second instead of every ten minutes, so that retention and the
+ * removal of a deleted Project's data show within a test. An external deployment needs the same.
+ */
+const DATA_LIFECYCLE_ENVIRONMENT = { DATA_LIFECYCLE_INTERVAL_MILLISECONDS: "1000" };
 const SERVICE_PERMISSIONS = [
   "--allow-net",
   "--allow-env",
@@ -124,6 +129,7 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
     TELEMETRY_GRPC_TLS_CERTIFICATE_FILE: tlsFiles.certificateFile,
     TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE: tlsFiles.privateKeyFile,
     ...TRACE_COMPLETION_ENVIRONMENT,
+    ...DATA_LIFECYCLE_ENVIRONMENT,
     ...createOidcEnvironment(gatewayPort),
   });
   const deployment = {
@@ -165,6 +171,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     BOOTSTRAP_ADMIN_EMAIL: E2E_ADMIN.email,
     BOOTSTRAP_ADMIN_PASSWORD: E2E_ADMIN.password,
     IDENTITY_PORT: String(identityPort),
+    ...DATA_LIFECYCLE_ENVIRONMENT,
     ...createOidcEnvironment(gatewayPort),
   });
   const telemetryProcess = startDenoProcess("telemetry", "services/telemetry/src/main.ts", {
@@ -175,12 +182,14 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     TELEMETRY_GRPC_PORT: String(otlpGrpcPort),
     TELEMETRY_GRPC_TLS_CERTIFICATE_FILE: tlsFiles.certificateFile,
     TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE: tlsFiles.privateKeyFile,
+    ...DATA_LIFECYCLE_ENVIRONMENT,
   });
   const promptProcess = startDenoProcess("prompt", "services/prompt/src/main.ts", {
     PROMPT_DATABASE_URL: replaceDatabaseName(postgresServerUrl, "prompt_e2e"),
     IDENTITY_URL: identityUrl,
     IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.prompt,
     PROMPT_PORT: String(promptPort),
+    ...DATA_LIFECYCLE_ENVIRONMENT,
   });
   const evaluationDatabaseUrl = replaceDatabaseName(postgresServerUrl, "evaluation_e2e");
   const evaluationApiProcess = startDenoProcess(
@@ -205,6 +214,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
       IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.evaluation,
       // The sample Target runs on this machine; production lists its own Targets.
       EVALUATION_TARGET_ALLOWED_DESTINATIONS: "127.0.0.1",
+      ...DATA_LIFECYCLE_ENVIRONMENT,
       ...TRACE_COMPLETION_ENVIRONMENT,
     },
   );

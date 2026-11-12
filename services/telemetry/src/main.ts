@@ -1,11 +1,16 @@
 import { createHttpServiceClient } from "@extispex/service-client";
 import {
+  createIdentityProjectLifecycleSource,
   createIdentityRequestAuthenticator,
+  createIdentityServiceTokenSource,
+  createServiceTokenClient,
   createStructuredLogger,
+  readDataLifecycleIntervalMilliseconds,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
   runOnTerminationSignal,
+  startPeriodicTask,
 } from "@extispex/service-runtime";
 import {
   bindOtlpGrpcServer,
@@ -20,13 +25,26 @@ const logger = createStructuredLogger("telemetry");
 const database = await openTelemetryDatabase(
   readRequiredEnvironmentVariable("TELEMETRY_DATABASE_URL"),
 );
+const identityClient = createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL"));
+const identityCredentials = {
+  identityClient,
+  clientId: "telemetry",
+  clientSecret: readRequiredEnvironmentVariable("IDENTITY_CLIENT_SECRET"),
+};
+const dataLifecycleIntervalMilliseconds = readDataLifecycleIntervalMilliseconds();
 const telemetryService = createTelemetryService({
   database,
-  requestAuthenticator: createIdentityRequestAuthenticator({
-    identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
-    clientId: "telemetry",
-    clientSecret: readRequiredEnvironmentVariable("IDENTITY_CLIENT_SECRET"),
-  }),
+  requestAuthenticator: createIdentityRequestAuthenticator(identityCredentials),
+  projectLifecycle: createIdentityProjectLifecycleSource(
+    createServiceTokenClient(identityClient, createIdentityServiceTokenSource(identityCredentials)),
+  ),
+  logger,
+  dataLifecycleIntervalMilliseconds,
+});
+const dataLifecycle = startPeriodicTask({
+  taskName: "data lifecycle",
+  intervalMilliseconds: dataLifecycleIntervalMilliseconds,
+  runTask: telemetryService.runDataLifecycle,
   logger,
 });
 
@@ -48,6 +66,7 @@ logger.info("gRPC server listening", { port: grpcPort, tls: readGrpcTlsFiles() !
 
 runOnTerminationSignal(logger, async () => {
   await Promise.all([httpServer.shutdown(), shutdownOtlpGrpcServer(grpcServer)]);
+  await dataLifecycle.stop();
   await database.close();
 });
 

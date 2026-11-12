@@ -31,17 +31,21 @@ import {
 import { createPromptService, openPromptDatabase } from "@extispex/prompt-service";
 import { createInProcessServiceClient } from "@extispex/service-client";
 import {
+  createIdentityProjectLifecycleSource,
   createIdentityRequestAuthenticator,
   createIdentityServiceTokenSource,
   createSecretCipher,
+  createServiceTokenClient,
   createStructuredLogger,
   generateMasterKey,
+  readDataLifecycleIntervalMilliseconds,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
   readPositiveIntegerEnvironmentVariable,
   readSecretEnvironmentVariable,
   readTrustedProxyCount,
   runOnTerminationSignal,
+  startPeriodicTask,
 } from "@extispex/service-runtime";
 import {
   bindOtlpGrpcServer,
@@ -65,6 +69,7 @@ const serviceClientSecrets = new Map([
   ["evaluation", generateServiceClientSecret()],
 ]);
 const signingKeyCipher = await createSigningKeyCipher(masterKey);
+const dataLifecycleIntervalMilliseconds = readDataLifecycleIntervalMilliseconds();
 await protectStoredSigningKeys(identityDatabase, signingKeyCipher);
 const identityService = createIdentityService({
   database: identityDatabase,
@@ -74,6 +79,7 @@ const identityService = createIdentityService({
   serviceClientSecrets,
   oidcSettings: readOidcSettings(readOptionalEnvironmentVariable),
   logger: createStructuredLogger("identity"),
+  dataLifecycleIntervalMilliseconds,
 });
 await createFirstProjectOnFirstStart(identityDatabase);
 await createFirstAdministratorOnFirstStart(identityDatabase);
@@ -84,19 +90,34 @@ const createRequestAuthenticator = (clientId: string) =>
     clientId,
     clientSecret: serviceClientSecrets.get(clientId)!,
   });
+const createServiceTokens = (clientId: string) =>
+  createIdentityServiceTokenSource({
+    identityClient,
+    clientId,
+    clientSecret: serviceClientSecrets.get(clientId)!,
+  });
+/** Identity's Retention Periods and deleted Projects, asked with the service's own token. */
+const createProjectLifecycle = (clientId: string) =>
+  createIdentityProjectLifecycleSource(
+    createServiceTokenClient(identityClient, createServiceTokens(clientId)),
+  );
 
 const telemetryDatabase = await openTelemetryDatabase(`sqlite:${dataDirectory}/telemetry.sqlite`);
 const telemetryService = createTelemetryService({
   database: telemetryDatabase,
   requestAuthenticator: createRequestAuthenticator("telemetry"),
+  projectLifecycle: createProjectLifecycle("telemetry"),
   logger: createStructuredLogger("telemetry"),
+  dataLifecycleIntervalMilliseconds,
 });
 
 const promptDatabase = await openPromptDatabase(`sqlite:${dataDirectory}/prompt.sqlite`);
 const promptService = createPromptService({
   database: promptDatabase,
   requestAuthenticator: createRequestAuthenticator("prompt"),
+  projectLifecycle: createProjectLifecycle("prompt"),
   logger: createStructuredLogger("prompt"),
+  dataLifecycleIntervalMilliseconds,
 });
 
 const evaluationDatabaseUrl = `sqlite:${dataDirectory}/evaluation.sqlite`;
@@ -131,11 +152,9 @@ const evaluationWorker = createEvaluationWorker({
     DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   ),
   telemetryService: createInProcessServiceClient(telemetryService.handleRequest),
-  serviceTokens: createIdentityServiceTokenSource({
-    identityClient,
-    clientId: "evaluation",
-    clientSecret: serviceClientSecrets.get("evaluation")!,
-  }),
+  serviceTokens: createServiceTokens("evaluation"),
+  projectLifecycle: createProjectLifecycle("evaluation"),
+  dataLifecycleIntervalMilliseconds,
   logger: evaluationLogger,
   traceCompletionTiming: {
     pollIntervalMilliseconds: readPositiveIntegerEnvironmentVariable(
@@ -153,6 +172,19 @@ const evaluationWorker = createEvaluationWorker({
   },
 });
 await evaluationWorker.start();
+const dataLifecycles = [
+  { name: "identity", runTask: identityService.runDataLifecycle },
+  { name: "telemetry", runTask: telemetryService.runDataLifecycle },
+  { name: "prompt", runTask: promptService.runDataLifecycle },
+  { name: "evaluation", runTask: evaluationWorker.runDataLifecycle },
+].map(({ name, runTask }) =>
+  startPeriodicTask({
+    taskName: `${name} data lifecycle`,
+    intervalMilliseconds: dataLifecycleIntervalMilliseconds,
+    runTask,
+    logger,
+  })
+);
 
 const gatewayService = createGatewayService({
   serviceClients: {
@@ -198,6 +230,7 @@ runOnTerminationSignal(logger, async () => {
     otlpHttpServer.shutdown(),
     shutdownOtlpGrpcServer(grpcServer),
   ]);
+  await Promise.all(dataLifecycles.map((dataLifecycle) => dataLifecycle.stop()));
   await evaluationWorker.stop();
   await Promise.all([
     telemetryDatabase.close(),

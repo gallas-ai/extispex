@@ -5,8 +5,10 @@ import {
   deleteProjectRoute,
   getProjectRoute,
   listApiKeysRoute,
+  listDeletedProjectsRoute,
   listProjectsRoute,
   revokeApiKeyRoute,
+  updateProjectRoute,
 } from "@extispex/contracts";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
@@ -15,6 +17,7 @@ import {
   INSTANCE_ADMIN_REQUIRED,
   PROJECT_ADMIN_REQUIRED,
 } from "../access/user-authentication.ts";
+import { ACCESS_TOKEN_LIFETIME_SECONDS } from "../access-tokens/signing-keys.ts";
 import { generateApiKey, hashApiKey, readKeyPrefix } from "../api-keys/api-key-secrets.ts";
 import type { AccessRepository } from "../storage/access-repository.ts";
 import type { ProjectRepository } from "../storage/project-repository.ts";
@@ -73,6 +76,37 @@ export function registerProjectRoutes(
       return context.json(projectNotFoundError(projectId), 404);
     }
     return context.json({ ...project, role }, 200);
+  });
+
+  app.openapi(updateProjectRoute, async (context) => {
+    const { projectId } = context.req.valid("param");
+    const { retentionDays } = context.req.valid("json");
+    const currentUser = context.get("currentUser");
+    const project = await projectRepository.findProject(projectId);
+    const role = await accessRepository.findUserRole(currentUser.id, projectId);
+    if (project === null || (role === null && !currentUser.isInstanceAdmin)) {
+      return context.json(projectNotFoundError(projectId), 404);
+    }
+    if (!currentUser.isInstanceAdmin && role !== "admin") {
+      return context.json(PROJECT_ADMIN_REQUIRED, 403);
+    }
+    const changedProject = retentionDays === undefined
+      ? project
+      : await projectRepository.setRetentionDays(projectId, retentionDays);
+    if (changedProject === null) return context.json(projectNotFoundError(projectId), 404);
+    return context.json({ ...changedProject, role }, 200);
+  });
+
+  app.openapi(listDeletedProjectsRoute, async (context) => {
+    if (!context.get("currentUser").isInstanceAdmin) {
+      return context.json(INSTANCE_ADMIN_REQUIRED, 403);
+    }
+    const { limit } = context.req.valid("query");
+    const deletedProjects = await projectRepository.listDeletedProjects(
+      limit,
+      ACCESS_TOKEN_LIFETIME_SECONDS * 1000,
+    );
+    return context.json({ deletedProjects }, 200);
   });
 
   app.openapi(deleteProjectRoute, async (context) => {

@@ -9,3 +9,7 @@ export const MINIMUM_PASSWORD_LENGTH = 12;
 
 /** Where a directory sends SCIM requests, as `SCIM_BASE_PATH` in `packages/contracts` says. */
 export const SCIM_BASE_PATH = "/scim/v2";
+
+/** The Retention Periods a Project may have, as `packages/contracts` says. */
+export const MINIMUM_RETENTION_DAYS = 1;
+export const MAXIMUM_RETENTION_DAYS = 400;

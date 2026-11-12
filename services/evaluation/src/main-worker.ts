@@ -1,12 +1,16 @@
 import { createHttpServiceClient } from "@extispex/service-client";
 import {
+  createIdentityProjectLifecycleSource,
   createIdentityServiceTokenSource,
   createSecretCipher,
+  createServiceTokenClient,
   createStructuredLogger,
+  readDataLifecycleIntervalMilliseconds,
   readOptionalEnvironmentVariable,
   readPositiveIntegerEnvironmentVariable,
   readRequiredEnvironmentVariable,
   runOnTerminationSignal,
+  startPeriodicTask,
 } from "@extispex/service-runtime";
 import {
   createEvaluationWorker,
@@ -24,6 +28,13 @@ const logger = createStructuredLogger("evaluation-worker");
 const databaseUrl = readRequiredEnvironmentVariable("EVALUATION_DATABASE_URL");
 const database = await openEvaluationDatabase(databaseUrl);
 const jobQueue = await openJobQueue(databaseUrl, database, logger);
+const identityClient = createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL"));
+const serviceTokens = createIdentityServiceTokenSource({
+  identityClient,
+  clientId: "evaluation",
+  clientSecret: readRequiredEnvironmentVariable("IDENTITY_CLIENT_SECRET"),
+});
+const dataLifecycleIntervalMilliseconds = readDataLifecycleIntervalMilliseconds();
 const evaluationWorker = createEvaluationWorker({
   database,
   jobQueue,
@@ -40,11 +51,11 @@ const evaluationWorker = createEvaluationWorker({
     DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   ),
   telemetryService: createHttpServiceClient(readRequiredEnvironmentVariable("TELEMETRY_URL")),
-  serviceTokens: createIdentityServiceTokenSource({
-    identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
-    clientId: "evaluation",
-    clientSecret: readRequiredEnvironmentVariable("IDENTITY_CLIENT_SECRET"),
-  }),
+  serviceTokens,
+  projectLifecycle: createIdentityProjectLifecycleSource(
+    createServiceTokenClient(identityClient, serviceTokens),
+  ),
+  dataLifecycleIntervalMilliseconds,
   logger,
   traceCompletionTiming: {
     pollIntervalMilliseconds: readPositiveIntegerEnvironmentVariable(
@@ -70,9 +81,16 @@ const evaluationWorker = createEvaluationWorker({
   ),
 });
 await evaluationWorker.start();
+const dataLifecycle = startPeriodicTask({
+  taskName: "data lifecycle",
+  intervalMilliseconds: dataLifecycleIntervalMilliseconds,
+  runTask: evaluationWorker.runDataLifecycle,
+  logger,
+});
 logger.info("Evaluation worker started");
 
 runOnTerminationSignal(logger, async () => {
+  await dataLifecycle.stop();
   await evaluationWorker.stop();
   await database.close();
 });

@@ -69,3 +69,43 @@ async function createPartition(
 function formatPartitionBound(timeUnixNano: bigint): string {
   return timeUnixNano.toString().padStart(UNIX_NANOSECONDS_TEXT_LENGTH, "0");
 }
+
+const PARTITION_DAY_PATTERN = /_(\d{4})(\d{2})(\d{2})$/;
+
+/**
+ * Drops the table's daily partitions that end at or before `cutoffUnixNano`, and resolves to their
+ * names. Each drop takes the same advisory lock as creating a partition, and the same short lock
+ * timeout, since it briefly locks the whole table too. Does nothing on SQLite.
+ */
+export async function dropDailyPartitionsEndingBefore(
+  database: TelemetryDatabase,
+  tableName: string,
+  cutoffUnixNano: bigint,
+): Promise<string[]> {
+  if (database.dialect === "sqlite") return [];
+  const partitionRows = await database.orm.em.fork().execute<{ partition_name: string }[]>(
+    `select child.relname as partition_name
+      from pg_inherits
+      join pg_class parent on parent.oid = pg_inherits.inhparent
+      join pg_class child on child.oid = pg_inherits.inhrelid
+      where parent.relname = ?
+      order by child.relname`,
+    [tableName],
+  );
+  const droppedPartitions: string[] = [];
+  for (const { partition_name: partitionName } of partitionRows) {
+    const dayMatch = partitionName.slice(tableName.length).match(PARTITION_DAY_PATTERN);
+    if (dayMatch === null || !partitionName.startsWith(`${tableName}_`)) continue;
+    const dayStartUnixNano = BigInt(
+      Date.UTC(Number(dayMatch[1]), Number(dayMatch[2]) - 1, Number(dayMatch[3])),
+    ) * 1_000_000n;
+    if (dayStartUnixNano + NANOSECONDS_PER_DAY > cutoffUnixNano) continue;
+    await database.orm.em.fork().transactional(async (entityManager) => {
+      await entityManager.execute(`set local lock_timeout = '${PARTITION_LOCK_TIMEOUT}'`);
+      await entityManager.execute(`select pg_advisory_xact_lock(${PARTITION_ADVISORY_LOCK_KEY})`);
+      await entityManager.execute(`drop table if exists "${partitionName}"`);
+    });
+    droppedPartitions.push(partitionName);
+  }
+  return droppedPartitions;
+}

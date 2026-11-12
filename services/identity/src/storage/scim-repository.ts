@@ -347,6 +347,7 @@ export function createScimRepository(database: IdentityDatabase): ScimRepository
             isInstanceAdmin: false,
             createdAt: now,
             deactivatedAt: attributes.isActive ? null : now,
+            personalDataDeletedAt: null,
           };
           await entityManager.insert(UserRecord, userRow);
           return { status: "saved", user: toDirectoryUser(userRow) };

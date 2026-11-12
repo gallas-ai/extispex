@@ -4,7 +4,10 @@ import {
   createStructuredLogger,
   type ProjectResolver,
 } from "@extispex/service-runtime";
-import { createTestAccessTokens } from "@extispex/service-runtime/testing";
+import {
+  createTestAccessTokens,
+  createTestProjectLifecycle,
+} from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import type {
   ListMetricAttributesResponse,
@@ -49,6 +52,7 @@ function createService(database: TelemetryDatabase) {
   return createTelemetryService({
     database,
     requestAuthenticator: testRequestAuthenticator,
+    projectLifecycle: createTestProjectLifecycle(),
     logger: createStructuredLogger("telemetry-test"),
     readCurrentTime: () => NOW,
   });

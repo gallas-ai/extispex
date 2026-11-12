@@ -13,6 +13,22 @@ export const ProjectRecord = defineEntity({
     name: p.string(),
     createdAt: p.datetime(),
     deletedAt: p.datetime().nullable(),
+    /** How many days the services keep the Project's telemetry. */
+    retentionDays: p.integer(),
+  },
+});
+
+/**
+ * When a service last removed a deleted Project's data. Each service keeps removing it until it
+ * has done so after every access token for the Project expired.
+ */
+export const ProjectDataRemovalRecord = defineEntity({
+  name: "ProjectDataRemovalRecord",
+  tableName: "project_data_removals",
+  properties: {
+    projectId: p.string().primary(),
+    service: p.string().primary(),
+    removedAt: p.datetime(),
   },
 });
 
@@ -59,6 +75,8 @@ export const UserRecord = defineEntity({
     isInstanceAdmin: p.boolean(),
     createdAt: p.datetime(),
     deactivatedAt: p.datetime().nullable(),
+    /** When the user's personal data was deleted for good, 30 days after deactivation. */
+    personalDataDeletedAt: p.datetime().nullable(),
   },
   uniques: [
     { properties: ["email"] },
