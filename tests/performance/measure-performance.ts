@@ -41,7 +41,7 @@ const deploymentName = Deno.env.get("E2E_DEPLOYMENT")!;
 
 const loadClient = createLoadClient(injectedDelayMilliseconds);
 console.log(`Starting the ${deploymentName} deployment.`);
-const deployment = await startDeploymentWithOneRetry();
+const deployment = await startDeployment();
 try {
   console.log("Measuring ingestion throughput.");
   const ingestion = await measureIngestion(deployment, loadClient, {
@@ -77,18 +77,4 @@ try {
   }
 } finally {
   await deployment.stop();
-}
-
-/**
- * Starts the deployment, and once more if it fails. The Evaluation API and worker can still race to
- * create the migrations table on an empty server (left over for the Helm chart step in
- * docs/roadmap.md); a failed start says nothing about performance.
- */
-async function startDeploymentWithOneRetry() {
-  try {
-    return await startDeployment();
-  } catch (error) {
-    console.warn(`The deployment did not start, trying once more:\n${error}`);
-    return await startDeployment();
-  }
 }

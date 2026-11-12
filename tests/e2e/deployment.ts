@@ -354,8 +354,6 @@ async function waitUntilHealthy(baseUrls: string[], processes: ManagedProcess[])
     while (true) {
       const exitedProcess = processes.find((managedProcess) => managedProcess.hasExited());
       if (exitedProcess) {
-        // Stopped, so that a caller can start the deployment again without leftover processes.
-        await Promise.all(processes.map((managedProcess) => managedProcess.stop()));
         throw new Error(
           `${exitedProcess.name} exited during startup:\n${exitedProcess.readOutput()}`,
         );
