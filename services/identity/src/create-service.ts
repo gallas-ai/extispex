@@ -53,7 +53,11 @@ export {
 } from "./api-keys/mod.ts";
 export { type OidcSettings, readOidcSettings } from "./oidc/mod.ts";
 export { createFirstProjectIfNone, FIRST_PROJECT_NAME } from "./projects/mod.ts";
-export { type IdentityDatabase, openIdentityDatabase } from "./storage/mod.ts";
+export {
+  type IdentityDatabase,
+  migrateIdentityDatabase,
+  openIdentityDatabase,
+} from "./storage/mod.ts";
 export type { IdentityDataLifecycleOutcome } from "./data-lifecycle/mod.ts";
 
 export interface IdentityServiceDependencies {

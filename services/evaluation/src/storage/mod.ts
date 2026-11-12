@@ -1,6 +1,10 @@
 /** Public entry point of the storage module: the only file other modules import. */
 export { createDatasetRepository, type DatasetRepository } from "./dataset-repository.ts";
-export { type EvaluationDatabase, openEvaluationDatabase } from "./evaluation-database.ts";
+export {
+  type EvaluationDatabase,
+  migrateEvaluationDatabase,
+  openEvaluationDatabase,
+} from "./evaluation-database.ts";
 export { QueuedJobRecord } from "./evaluation-entities.ts";
 export {
   type AttemptToEvaluate,

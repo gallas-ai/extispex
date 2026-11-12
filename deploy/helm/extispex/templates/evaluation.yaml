@@ -1,0 +1,12 @@
+{{- $env := include "extispex.evaluationEnv" . }}
+{{ include "extispex.deployment" (dict "root" . "component" "evaluation" "image" "evaluation" "entryPoint" "services/evaluation/src/main-api.ts" "values" .Values.evaluation "env" $env "ports" (list (dict "name" "http" "port" 8083)) "healthPort" "http") }}
+---
+{{ include "extispex.service" (dict "root" . "component" "evaluation" "ports" (list (dict "name" "http" "port" 8083))) }}
+
+{{- define "extispex.evaluationEnv" -}}
+- name: DATABASE_MIGRATIONS
+  value: check
+{{ include "extispex.databaseUrlEnv" (dict "root" . "service" "evaluation") }}
+{{ include "extispex.masterKeyEnv" . }}
+{{ include "extispex.identityClientEnv" (dict "root" . "client" "evaluation") }}
+{{- end -}}

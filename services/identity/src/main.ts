@@ -2,6 +2,7 @@ import { MINIMUM_PASSWORD_LENGTH } from "@extispex/contracts";
 import {
   createStructuredLogger,
   InvalidConfigurationError,
+  readDatabaseMigrationMode,
   readDataLifecycleIntervalMilliseconds,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
@@ -53,6 +54,7 @@ const signingKeyCipher = await createSigningKeyCipher(
 );
 const database = await openIdentityDatabase(
   readRequiredEnvironmentVariable("IDENTITY_DATABASE_URL"),
+  readDatabaseMigrationMode(),
 );
 await protectStoredSigningKeys(database, signingKeyCipher);
 if (bootstrapProjectApiKey !== undefined) {

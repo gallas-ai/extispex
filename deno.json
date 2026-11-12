@@ -32,7 +32,8 @@
       "**/otlp-proto/",
       "**/generated/",
       "data/",
-      "docs/business.md"
+      "docs/business.md",
+      "deploy/helm/extispex/templates/"
     ]
   },
   "lint": {

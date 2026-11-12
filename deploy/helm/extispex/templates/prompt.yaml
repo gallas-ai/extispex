@@ -1,0 +1,12 @@
+{{- $env := include "extispex.promptEnv" . }}
+{{ include "extispex.deployment" (dict "root" . "component" "prompt" "image" "prompt" "entryPoint" "services/prompt/src/main.ts" "values" .Values.prompt "env" $env "ports" (list (dict "name" "http" "port" 8081)) "healthPort" "http") }}
+---
+{{ include "extispex.service" (dict "root" . "component" "prompt" "ports" (list (dict "name" "http" "port" 8081))) }}
+
+{{- define "extispex.promptEnv" -}}
+- name: DATABASE_MIGRATIONS
+  value: check
+{{ include "extispex.databaseUrlEnv" (dict "root" . "service" "prompt") }}
+{{ include "extispex.dataLifecycleEnv" . }}
+{{ include "extispex.identityClientEnv" (dict "root" . "client" "prompt") }}
+{{- end -}}

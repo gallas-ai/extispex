@@ -1,0 +1,190 @@
+# Extispex on Kubernetes and OpenShift. Every service runs from its own image, on the customer's
+# PostgreSQL, as a non-root user with whatever UID the cluster assigns. See README.md next to this
+# file for the Secrets to create before installing.
+
+image:
+  # Each service's image is <registry>/<repository>-<service>:<tag>, for example
+  # ghcr.io/gallas-ai/extispex-identity:1.2.3.
+  registry: ghcr.io
+  repository: gallas-ai/extispex
+  # Defaults to the chart's appVersion: all services ship as one version set.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# The master key encrypts Target credentials and Identity's signing keys (ADR 0013). Create the
+# Secret before installing, for example:
+#   kubectl create secret generic extispex-master-key --from-literal=master-key="$(openssl rand -base64 32)"
+# Keep a copy: nothing encrypted with it can be read without it.
+masterKey:
+  existingSecret: ""
+  secretKey: master-key
+
+# The customer's PostgreSQL. The chart does not install it. One Secret holds each service's
+# connection URL; the databases may share one server. The migration Jobs create a missing database
+# when the user may, and otherwise need it created beforehand.
+database:
+  existingSecret: ""
+  secretKeys:
+    identity: identity-database-url
+    telemetry: telemetry-database-url
+    prompt: prompt-database-url
+    evaluation: evaluation-database-url
+
+# Database migrations run in a Job per service before every install and upgrade (a Helm hook); the
+# services then start with DATABASE_MIGRATIONS=check and refuse a database that is behind.
+migrations:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  resources: {}
+
+# Optional first-start values: the first Project's API key and the first administrator, a local
+# account (needs identity.localAccounts: enabled). A Secret with any of the keys below.
+bootstrap:
+  existingSecret: ""
+  secretKeys:
+    projectApiKey: project-api-key
+    adminEmail: admin-email
+    adminPassword: admin-password
+
+# Services authenticate to Identity with client secrets. The chart generates them on install and
+# keeps them on upgrade; set existingSecret to provide your own (keys telemetry, prompt, evaluation,
+# each at least 32 characters).
+serviceClients:
+  existingSecret: ""
+
+# An outbound HTTP proxy for the Evaluation worker's calls to Targets, LLM providers and Report
+# webhooks, and for Identity's calls to the OIDC provider. SMTP is always direct. The chart adds its
+# own Services to NO_PROXY, so calls inside the Instance stay direct. Leave empty when the cluster
+# reaches these destinations directly.
+proxy:
+  httpsProxy: ""
+  httpProxy: ""
+  noProxy: ""
+
+# How often each service removes data past its Retention Period and deleted Projects' data, in
+# milliseconds. Empty keeps the services' default of ten minutes.
+dataLifecycle:
+  intervalMilliseconds: ""
+
+identity:
+  replicas: 1
+  # "enabled" lets users sign in with a password that Identity stores, such as a break-glass admin.
+  localAccounts: disabled
+  oidc:
+    issuerUrl: ""
+    clientId: ""
+    # A Secret with the client secret.
+    clientSecret:
+      existingSecret: ""
+      secretKey: client-secret
+    # Defaults to https://<exposure.gateway.host>/v1/sign-in/oidc/callback.
+    redirectUrl: ""
+    providerName: ""
+    # The ID token claim with the user's Company groups, and the scopes to ask for; empty keeps
+    # Identity's defaults.
+    groupsClaim: ""
+    scopes: ""
+  resources: {}
+  extraEnv: []
+
+telemetry:
+  replicas: 1
+  # A kubernetes.io/tls Secret for OTLP/gRPC. Needed only when the load balancer passes TLS through,
+  # as an OpenShift Route for OTLP/gRPC does; an Ingress terminates TLS itself.
+  grpcTls:
+    existingSecret: ""
+  resources: {}
+  extraEnv: []
+
+prompt:
+  replicas: 1
+  resources: {}
+  extraEnv: []
+
+evaluation:
+  replicas: 1
+  resources: {}
+  extraEnv: []
+
+evaluationWorker:
+  replicas: 1
+  # Which Targets the worker may call, such as "agent.company.example:443,10.20.0.0/16". Empty
+  # allows none. Through a proxy, list host names: a CIDR range allows only addresses in the URL.
+  allowedDestinations: ""
+  # Which LLM providers it may call. Empty keeps the default:
+  # api.openai.com:443,api.anthropic.com:443,api.typesafe.ai:443. Add Azure OpenAI or a local model.
+  llmProviderAllowedDestinations: ""
+  # Which SMTP servers and Teams webhooks Reports go to, such as
+  # "smtp.company.example:587,*.logic.azure.com". Empty allows none.
+  reportAllowedDestinations: ""
+  # Where people open the UI, for the links in a Report. Defaults to https://<exposure.gateway.host>.
+  publicUiUrl: ""
+  # A ConfigMap with a private certificate authority for HTTPS destinations (NODE_EXTRA_CA_CERTS).
+  extraCaCertificates:
+    configMap: ""
+    key: ca.crt
+  resources: {}
+  extraEnv: []
+
+gateway:
+  replicas: 1
+  # How many proxies in front of the Gateway append to X-Forwarded-For: the Ingress controller or
+  # the OpenShift router.
+  trustedProxyCount: 1
+  resources: {}
+  extraEnv: []
+
+# How the Instance is reached from outside the cluster: "ingress" (default), "route" for an
+# OpenShift Route, or "none" to expose the Services yourself. A host left empty is not exposed.
+exposure:
+  type: ingress
+  # The UI and the REST API.
+  gateway:
+    host: ""
+    tlsSecretName: ""
+  # OTLP over HTTP: /v1/traces, /v1/logs and /v1/metrics.
+  otlpHttp:
+    host: ""
+    tlsSecretName: ""
+  # OTLP over gRPC holds long-lived HTTP/2 connections, so it needs an L7 load balancer that
+  # balances each call. With ingress-nginx this needs TLS, because it speaks HTTP/2 only there.
+  otlpGrpc:
+    host: ""
+    tlsSecretName: ""
+  ingress:
+    className: ""
+    # Added to every Ingress.
+    annotations: {}
+    # The defaults suit ingress-nginx: request bodies up to Telemetry's 32 MiB limit, and gRPC to
+    # the backend. Replace them for another controller.
+    gatewayAnnotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: 32m
+    otlpHttpAnnotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: 32m
+    otlpGrpcAnnotations:
+      nginx.ingress.kubernetes.io/backend-protocol: GRPC
+      nginx.ingress.kubernetes.io/proxy-body-size: 32m
+  route:
+    # Added to every Route. The UI and OTLP/HTTP use edge TLS with the router's certificate;
+    # OTLP/gRPC uses passthrough, so Telemetry terminates TLS (telemetry.grpcTls) and the router
+    # keeps HTTP/2 end to end.
+    annotations: {}
+
+# Applied to every pod. No runAsUser: OpenShift assigns one from the project's range, and the images
+# run as any UID in the root group. Elsewhere the images' own non-root user applies.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+serviceAccountName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

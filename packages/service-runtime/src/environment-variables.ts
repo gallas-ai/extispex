@@ -74,3 +74,18 @@ export function readTrustedProxyCount(): number {
   }
   return proxyCount;
 }
+
+/**
+ * `DATABASE_MIGRATIONS`: `apply` (the default) applies pending migrations when the service starts;
+ * `check` makes it refuse to start while a migration is pending, because a separate `migrate`
+ * command applies them, as the Helm chart's migration Job does.
+ */
+export function readDatabaseMigrationMode(): "apply" | "check" {
+  const configuredValue = readOptionalEnvironmentVariable("DATABASE_MIGRATIONS") ?? "apply";
+  if (configuredValue !== "apply" && configuredValue !== "check") {
+    throw new InvalidConfigurationError(
+      `DATABASE_MIGRATIONS must be "apply" or "check", got "${configuredValue}".`,
+    );
+  }
+  return configuredValue;
+}

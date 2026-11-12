@@ -1,0 +1,42 @@
+{{- $caCertificates := .Values.evaluationWorker.extraCaCertificates }}
+{{- $env := include "extispex.evaluationWorkerEnv" . }}
+{{- $volumeMounts := "" }}
+{{- $volumes := "" }}
+{{- if $caCertificates.configMap }}
+{{- $volumeMounts = "- name: extra-ca-certificates\n  mountPath: /etc/extispex/ca\n  readOnly: true" }}
+{{- $volumes = printf "- name: extra-ca-certificates\n  configMap:\n    name: %s" $caCertificates.configMap }}
+{{- end }}
+{{ include "extispex.deployment" (dict "root" . "component" "evaluation-worker" "image" "evaluation-worker" "entryPoint" "services/evaluation/src/main-worker.ts" "values" .Values.evaluationWorker "env" $env "volumeMounts" $volumeMounts "volumes" $volumes) }}
+
+{{- define "extispex.evaluationWorkerEnv" -}}
+- name: DATABASE_MIGRATIONS
+  value: check
+{{ include "extispex.databaseUrlEnv" (dict "root" . "service" "evaluation") }}
+{{ include "extispex.masterKeyEnv" . }}
+{{ include "extispex.identityClientEnv" (dict "root" . "client" "evaluation") }}
+- name: TELEMETRY_URL
+  value: {{ include "extispex.serviceUrl" (dict "root" . "component" "telemetry" "port" 4318) }}
+- name: PROMPT_URL
+  value: {{ include "extispex.serviceUrl" (dict "root" . "component" "prompt" "port" 8081) }}
+- name: EVALUATION_TARGET_ALLOWED_DESTINATIONS
+  value: {{ .Values.evaluationWorker.allowedDestinations | quote }}
+- name: EVALUATION_REPORT_ALLOWED_DESTINATIONS
+  value: {{ .Values.evaluationWorker.reportAllowedDestinations | quote }}
+{{- with .Values.evaluationWorker.llmProviderAllowedDestinations }}
+- name: EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS
+  value: {{ . | quote }}
+{{- end }}
+{{- $publicUiUrl := .Values.evaluationWorker.publicUiUrl | default (ternary (printf "https://%s" .Values.exposure.gateway.host) "" (ne .Values.exposure.gateway.host "")) }}
+{{- with $publicUiUrl }}
+- name: PUBLIC_UI_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.evaluationWorker.extraCaCertificates }}
+{{- if .configMap }}
+- name: NODE_EXTRA_CA_CERTS
+  value: /etc/extispex/ca/{{ .key }}
+{{- end }}
+{{- end }}
+{{ include "extispex.dataLifecycleEnv" . }}
+{{ include "extispex.proxyEnv" . }}
+{{- end -}}

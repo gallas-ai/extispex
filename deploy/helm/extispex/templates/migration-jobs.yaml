@@ -1,0 +1,51 @@
+{{- /*
+One Job per service applies its database migrations before the services of a new install or
+upgrade start. Helm waits for each Job; a failed Job stops the release, and the previous version
+keeps running. The services start with DATABASE_MIGRATIONS=check, so none of them migrates.
+*/}}
+{{- include "extispex.requiredSecrets" . }}
+{{- range $index, $service := list "identity" "telemetry" "prompt" "evaluation" }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "extispex.fullname" $ }}-migrate-{{ $service }}
+  labels:
+    {{- include "extispex.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: migrate-{{ $service }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: {{ $index | quote }}
+    # A failed Job stays for its logs until the next attempt replaces it.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ $.Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ $.Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "extispex.selectorLabels" (dict "root" $ "component" (printf "migrate-%s" $service)) | nindent 8 }}
+    spec:
+      {{- include "extispex.podSpecCommon" $ | nindent 6 }}
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ include "extispex.image" (dict "root" $ "image" $service) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            {{- include "extispex.denoCommand" (printf "services/%s/src/migrate.ts" $service) | nindent 12 }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          env:
+            - name: NO_COLOR
+              value: "1"
+            {{- include "extispex.databaseUrlEnv" (dict "root" $ "service" $service) | nindent 12 }}
+          {{- with $.Values.migrations.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- include "extispex.tmpVolumeMount" $ | nindent 12 }}
+      volumes:
+        {{- include "extispex.tmpVolume" $ | nindent 8 }}
+{{- end }}

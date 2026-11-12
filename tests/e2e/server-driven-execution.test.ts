@@ -8,7 +8,7 @@ import type {
 } from "@extispex/contracts";
 import { waitForCondition } from "./browser.ts";
 import { startDeployment } from "./deployment.ts";
-import { SAMPLE_TARGET_TOKEN, startSampleTarget } from "./sample-target.ts";
+import { canRunSampleTarget, SAMPLE_TARGET_TOKEN, startSampleTarget } from "./sample-target.ts";
 import { callGateway } from "./sign-in.ts";
 
 const TARGET_TOKEN = SAMPLE_TARGET_TOKEN;
@@ -40,11 +40,9 @@ const CANCEL_SESSION_TEST_CASE = {
 
 Deno.test({
   name: "Server-Driven Execution through the gateway",
-  // A container has its own network, so it cannot call a Target on this machine.
-  ignore: Deno.env.get("E2E_DEPLOYMENT") === "external",
+  ignore: !canRunSampleTarget(),
   fn: async (testContext) => {
     const deployment = await startDeployment();
-    assert(deployment.canCallLocalTargets);
     const sampleTarget = await startSampleTarget(deployment);
     const bearerToken = deployment.apiKey;
     const uniquePart = crypto.randomUUID().slice(0, 8);

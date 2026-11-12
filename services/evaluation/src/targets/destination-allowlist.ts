@@ -9,6 +9,11 @@ export interface DestinationAllowlist {
   isUrlAllowed(url: URL): boolean;
   /** Decides on the addresses that a URL's host name resolved to. All of them must be allowed. */
   areResolvedAddressesAllowed(url: URL, addresses: string[]): boolean;
+  /**
+   * Decides on a URL that a proxy calls for the worker. The proxy resolves the name, so a name must
+   * be listed itself: a CIDR range allows only an address written in the URL.
+   */
+  isUrlAllowedThroughProxy(url: URL): boolean;
 }
 
 type AllowedEntry =
@@ -145,7 +150,11 @@ export function parseDestinationAllowlist(
 ): DestinationAllowlist {
   const entries = configuredList.split(",").map((entry) => entry.trim()).filter(Boolean);
   if (entries.length === 1 && entries[0] === "*") {
-    return { isUrlAllowed: () => true, areResolvedAddressesAllowed: () => true };
+    return {
+      isUrlAllowed: () => true,
+      areResolvedAddressesAllowed: () => true,
+      isUrlAllowedThroughProxy: () => true,
+    };
   }
   const allowedEntries = entries.map((entry) => parseEntry(entry, variableName));
   const hostEntries = allowedEntries.filter((entry) => entry.kind === "host");
@@ -173,6 +182,9 @@ export function parseDestinationAllowlist(
 
   return {
     isUrlAllowed,
+    isUrlAllowedThroughProxy(url) {
+      return parseIpAddress(url.hostname) !== null ? isUrlAllowed(url) : isHostListed(url);
+    },
     areResolvedAddressesAllowed(url, addresses) {
       if (addresses.length === 0) return false;
       // An address written in the URL is not resolved, and listing it explicitly allows it.

@@ -1,0 +1,48 @@
+# The sample Target from examples/, run from the Evaluation image, which contains the repository.
+# It sends its spans straight to Telemetry inside the cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sample-target }
+  template:
+    metadata:
+      labels: { app: sample-target }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: sample-target
+          image: ghcr.io/gallas-ai/extispex-evaluation:kind
+          imagePullPolicy: Never
+          command:
+            - deno
+            - run
+            - --cached-only
+            - --allow-net
+            - --allow-env
+            - examples/typescript/sample-target.ts
+          env:
+            - { name: PORT, value: "8090" }
+            - { name: OTLP_HTTP_URL, value: "http://extispex-telemetry:4318" }
+            - { name: TARGET_TOKEN, value: e2e-target-token }
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef: { name: extispex-bootstrap, key: project-api-key }
+          ports:
+            - containerPort: 8090
+          readinessProbe:
+            httpGet: { path: /health, port: 8090 }
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-target
+spec:
+  selector: { app: sample-target }
+  ports:
+    - port: 8090

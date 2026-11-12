@@ -12,7 +12,7 @@ import { createBackgroundLease } from "@extispex/service-storage";
 import { type PromptServiceEnvironment, registerPromptRoutes } from "./prompts/mod.ts";
 import { createPromptRepository, type PromptDatabase } from "./storage/mod.ts";
 
-export { openPromptDatabase, type PromptDatabase } from "./storage/mod.ts";
+export { migratePromptDatabase, openPromptDatabase, type PromptDatabase } from "./storage/mod.ts";
 
 export interface PromptServiceDependencies {
   database: PromptDatabase;

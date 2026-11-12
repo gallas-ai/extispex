@@ -1,0 +1,62 @@
+# An HTTP proxy between the Evaluation worker and the sample Target, as a cluster with egress
+# rules would have. Squid writes every request to /var/log/squid/access.log, which the CI job
+# checks.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-proxy
+data:
+  squid.conf: |
+    http_port 3128
+    acl localnet src 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    acl SSL_ports port 443
+    acl CONNECT method CONNECT
+    http_access deny CONNECT !SSL_ports
+    http_access allow localnet
+    http_access deny all
+    cache deny all
+    # Squid writes its logs as the user proxy, which cannot open the container's stdout.
+    access_log stdio:/var/log/squid/access.log
+    cache_log /var/log/squid/cache.log
+    pid_filename none
+    # The container's file limit is huge, and Squid sizes its tables by it.
+    max_filedescriptors 1024
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: egress-proxy }
+  template:
+    metadata:
+      labels: { app: egress-proxy }
+    spec:
+      containers:
+        - name: squid
+          image: ubuntu/squid:6.6-24.04_edge
+          ports:
+            - containerPort: 3128
+          volumeMounts:
+            - name: config
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+          readinessProbe:
+            tcpSocket:
+              port: 3128
+            periodSeconds: 2
+      volumes:
+        - name: config
+          configMap:
+            name: egress-proxy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-proxy
+spec:
+  selector: { app: egress-proxy }
+  ports:
+    - port: 3128

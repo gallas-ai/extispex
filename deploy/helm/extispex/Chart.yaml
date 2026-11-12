@@ -1,0 +1,11 @@
+apiVersion: v2
+name: extispex
+description: Self-hosted observability and evaluation for GenAI applications, as separate services on the customer's PostgreSQL.
+type: application
+# The chart and the images share one version set: a release tag v1.2.3 publishes both as 1.2.3.
+version: 0.1.0
+appVersion: "main"
+home: https://github.com/gallas-ai/extispex
+sources:
+  - https://github.com/gallas-ai/extispex
+license: AGPL-3.0-only

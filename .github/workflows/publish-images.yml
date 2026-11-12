@@ -1,0 +1,83 @@
+name: Publish images
+
+# Every image ships with one version set: a push to main publishes each image as `main` and
+# `sha-<short commit>`, and a tag `v1.2.3` publishes each as `1.2.3`, together with the Helm chart
+# as an OCI artifact of the same version. The chart's appVersion then names the same images.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-image:
+    name: Publish ${{ matrix.image }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: extispex, dockerfile: all-in-one }
+          - { image: extispex-gateway, dockerfile: gateway }
+          - { image: extispex-telemetry, dockerfile: telemetry }
+          - { image: extispex-prompt, dockerfile: prompt }
+          - { image: extispex-identity, dockerfile: identity }
+          - { image: extispex-evaluation, dockerfile: evaluation }
+          - { image: extispex-evaluation-worker, dockerfile: evaluation-worker }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/${{ matrix.dockerfile }}.Dockerfile
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  publish-chart:
+    name: Publish the Helm chart
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish-image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Helm
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz |
+            tar -xz -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Package and push the chart with the images' version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          helm package deploy/helm/extispex --version "$version" --app-version "$version" \
+            --destination "$RUNNER_TEMP/chart"
+          echo "$GH_TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+          helm push "$RUNNER_TEMP/chart/extispex-$version.tgz" "oci://ghcr.io/$OWNER/charts"

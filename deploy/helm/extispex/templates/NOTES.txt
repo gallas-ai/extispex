@@ -1,0 +1,20 @@
+Extispex {{ include "extispex.imageTag" . }} is installed as {{ include "extispex.fullname" . }}.
+The migration Jobs applied every service's database migrations before the services started.
+{{- if eq .Values.exposure.type "none" }}
+
+Nothing is exposed outside the cluster. Point your load balancer at:
+  UI and REST API:  {{ include "extispex.fullname" . }}-gateway:8080
+  OTLP/HTTP:        {{ include "extispex.fullname" . }}-telemetry:4318
+  OTLP/gRPC:        {{ include "extispex.fullname" . }}-telemetry:4317 (needs an L7 load balancer)
+{{- else }}
+{{- with .Values.exposure.gateway.host }}
+
+UI and REST API: {{ . }}
+{{- end }}
+{{- with .Values.exposure.otlpHttp.host }}
+OTLP/HTTP:       {{ . }}
+{{- end }}
+{{- with .Values.exposure.otlpGrpc.host }}
+OTLP/gRPC:       {{ . }}
+{{- end }}
+{{- end }}

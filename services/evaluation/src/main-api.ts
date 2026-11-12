@@ -3,6 +3,7 @@ import {
   createIdentityRequestAuthenticator,
   createSecretCipher,
   createStructuredLogger,
+  readDatabaseMigrationMode,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
   runOnTerminationSignal,
@@ -19,7 +20,10 @@ import {
 const logger = createStructuredLogger("evaluation-api");
 
 const databaseUrl = readRequiredEnvironmentVariable("EVALUATION_DATABASE_URL");
-const database = await openEvaluationDatabase(databaseUrl);
+const database = await openEvaluationDatabase(
+  databaseUrl,
+  readDatabaseMigrationMode(),
+);
 const jobQueue = await openJobQueue(databaseUrl, database, logger);
 const masterKey = readRequiredEnvironmentVariable("MASTER_KEY");
 const evaluationApi = createEvaluationApiService({

@@ -25,3 +25,8 @@ export function listTestDatabases(serviceName: string): TestDatabase[] {
   }
   return testDatabases;
 }
+
+export {
+  registerServiceMigrationTests,
+  type ServiceMigrationTestSubject,
+} from "./migration-tests.ts";

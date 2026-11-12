@@ -1,0 +1,26 @@
+{{- $grpcTls := .Values.telemetry.grpcTls.existingSecret }}
+{{- $env := include "extispex.telemetryEnv" . }}
+{{- $volumeMounts := "" }}
+{{- $volumes := "" }}
+{{- if $grpcTls }}
+{{- $volumeMounts = "- name: grpc-tls\n  mountPath: /etc/extispex/grpc-tls\n  readOnly: true" }}
+{{- $volumes = printf "- name: grpc-tls\n  secret:\n    secretName: %s" $grpcTls }}
+{{- end }}
+{{- $ports := list (dict "name" "otlp-http" "port" 4318) (dict "name" "otlp-grpc" "port" 4317) }}
+{{ include "extispex.deployment" (dict "root" . "component" "telemetry" "image" "telemetry" "entryPoint" "services/telemetry/src/main.ts" "values" .Values.telemetry "env" $env "ports" $ports "healthPort" "otlp-http" "volumeMounts" $volumeMounts "volumes" $volumes) }}
+---
+{{ include "extispex.service" (dict "root" . "component" "telemetry" "ports" (list (dict "name" "otlp-http" "port" 4318 "appProtocol" "http") (dict "name" "otlp-grpc" "port" 4317 "appProtocol" "grpc"))) }}
+
+{{- define "extispex.telemetryEnv" -}}
+- name: DATABASE_MIGRATIONS
+  value: check
+{{ include "extispex.databaseUrlEnv" (dict "root" . "service" "telemetry") }}
+{{ include "extispex.dataLifecycleEnv" . }}
+{{ include "extispex.identityClientEnv" (dict "root" . "client" "telemetry") }}
+{{- if .Values.telemetry.grpcTls.existingSecret }}
+- name: TELEMETRY_GRPC_TLS_CERTIFICATE_FILE
+  value: /etc/extispex/grpc-tls/tls.crt
+- name: TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE
+  value: /etc/extispex/grpc-tls/tls.key
+{{- end }}
+{{- end -}}

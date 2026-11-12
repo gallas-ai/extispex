@@ -8,6 +8,7 @@ import {
   resolveWithSystem,
 } from "./allowed-destination-post.ts";
 import type { DestinationAllowlist } from "./destination-allowlist.ts";
+import type { ProxyRouting } from "./proxy-settings.ts";
 
 export const DEFAULT_TARGET_TIMEOUT_MILLISECONDS = 60_000;
 
@@ -47,6 +48,8 @@ export interface TargetClientOptions {
   timeoutMilliseconds: number;
   /** The system's resolver by default; tests answer with changing addresses. */
   resolveHostAddresses?: ResolveHostAddresses;
+  /** From `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`; direct connections when not given. */
+  proxyRouting?: ProxyRouting;
 }
 
 const NOT_ALLOWED_REASON =
@@ -97,6 +100,7 @@ export function createTargetClient(options: TargetClientOptions): TargetClient {
             resolveHostAddresses,
             notAllowedReason: NOT_ALLOWED_REASON,
             maximumResponseBytes: MAXIMUM_TARGET_RESPONSE_BYTES,
+            proxyRouting: options.proxyRouting,
           },
           signal,
         );

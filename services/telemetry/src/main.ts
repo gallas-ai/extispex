@@ -5,6 +5,7 @@ import {
   createIdentityServiceTokenSource,
   createServiceTokenClient,
   createStructuredLogger,
+  readDatabaseMigrationMode,
   readDataLifecycleIntervalMilliseconds,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
@@ -24,6 +25,7 @@ const logger = createStructuredLogger("telemetry");
 
 const database = await openTelemetryDatabase(
   readRequiredEnvironmentVariable("TELEMETRY_DATABASE_URL"),
+  readDatabaseMigrationMode(),
 );
 const identityClient = createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL"));
 const identityCredentials = {

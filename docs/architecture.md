@@ -290,6 +290,12 @@ Authorization: Bearer …
   checked addresses, so a DNS record that changes in between cannot redirect the call. Redirects are
   not followed. An HTTPS Target's certificate is checked against its host name; a private
   certificate authority is added with `NODE_EXTRA_CA_CERTS`.
+- **Through a proxy:** since step 14 the worker honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`
+  (or their lower-case forms) for Targets, and the same way for LLM providers and Report webhooks;
+  SMTP stays direct. An `http://` Target gets the request in absolute form, an `https://` Target a
+  CONNECT tunnel inside which the worker checks the certificate itself. The proxy resolves the name,
+  so the worker cannot check the addresses: a Target reached through a proxy needs its host name
+  listed, and a CIDR range allows only an address written in the URL.
 
 ### Session Test Cases
 
@@ -887,13 +893,33 @@ Observability and evaluation share one interface.
 
 ### Production
 
-- One image per service, deployed by one Helm chart to OpenShift, AKS or EKS.
-- The customer provides PostgreSQL. The chart does not install it.
-- Containers run as non-root with an arbitrary UID, as OpenShift requires by default.
+- One image per service, deployed by one Helm chart in `deploy/helm/extispex` to OpenShift, AKS or
+  EKS. Its [README](../deploy/helm/extispex/README.md) lists what to create before installing.
+- The customer provides PostgreSQL. The chart does not install it. The database URLs and the master
+  key come from Secrets that the operator creates; the chart generates only the services' client
+  secrets for Identity and keeps them across upgrades.
+- Containers run as non-root with an arbitrary UID, as OpenShift requires by default: the chart sets
+  no `runAsUser`, the images run as any UID in the root group, and the root file system is
+  read-only.
+- **Exposure:** `exposure.type` is `ingress` (default), `route` for an OpenShift Route, or `none`.
+  Only the chosen kind is rendered, one object per host: the UI and REST API, OTLP/HTTP and
+  OTLP/gRPC.
 - gRPC holds long-lived HTTP/2 connections, so OTLP/gRPC needs an L7 load balancer or client-side
-  balancing.
+  balancing. With an Ingress the controller balances each call; ingress-nginx needs TLS for that,
+  because it speaks HTTP/2 only there. An OpenShift Route passes TLS through to Telemetry, because
+  the router keeps HTTP/2 to the backend only then.
+- **Migrations:** a Job per service applies its migrations as a Helm `pre-install` and `pre-upgrade`
+  hook, and the services start with `DATABASE_MIGRATIONS=check`: they refuse a pending migration and
+  accept migrations from a newer version, as during an upgrade. Migrations must therefore stay
+  backward compatible for one release. Compose and the all-in-one process keep applying them at
+  start, under a PostgreSQL advisory lock. See
+  [ADR 0019](adr/0019-migrations-in-a-helm-hook-job-and-services-that-only-check.md).
+- **Egress:** the worker reaches Targets, LLM providers and Report webhooks through the cluster's
+  network and egress rules, or through the HTTP proxy in the chart's `proxy` values, which Identity
+  also uses for the OIDC provider. The chart keeps its own Services in `NO_PROXY`.
 - All services ship as one version set. Within `/v1`, contract changes must be backward compatible
-  so that rolling updates work.
+  so that rolling updates work. A push to `main` publishes every image to `ghcr.io` as `main` and
+  `sha-<commit>`; a tag `v1.2.3` publishes them as `1.2.3`, and the chart with the same version.
 
 ### Local image
 
@@ -994,8 +1020,9 @@ Import rules, enforced in CI:
 
 This repository's GitHub Actions pipeline runs on every pull request. It checks lint, formatting,
 types and import rules, runs unit tests on SQLite and PostgreSQL, runs e2e tests in both
-deployments, and builds the container images and runs the e2e tests against the `all-in-one` image.
-The e2e tests include browser tests of the web UI's main flows and layout rules.
+deployments, builds the container images and runs the e2e tests against the `all-in-one` image and
+against the Helm chart installed into kind. The e2e tests include browser tests of the web UI's main
+flows and layout rules.
 
 The import rules from [10. Repository structure](#10-repository-structure) are two tests in
 `tests/architecture`, run by `deno task test:architecture`, as part of `deno task check` and as
@@ -1050,6 +1077,18 @@ repository.
 | TypeScript and Python examples                                 | Both send a two-step conversation that appears under one Session ID                    |
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
+
+The Helm chart step added these checks on 2026-11-11.
+
+| Tested                                                 | Result                                                                                                                                        |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| The chart in kind with ingress-nginx, in CI            | Installed and then upgraded, as UID 1000870000 in the root group with a read-only root file system; every e2e test passes through the Ingress |
+| OTLP/gRPC through ingress-nginx                        | Spans, logs and metrics over gRPC with TLS at the Ingress reach Telemetry in plain HTTP/2                                                     |
+| Server-Driven Execution in the cluster behind a proxy  | The worker calls the sample Target through Squid, whose log shows each call                                                                   |
+| Migrations on SQLite and PostgreSQL, for every service | The `migrate` command applies each once; `check` refuses a database that is missing, never migrated or behind, and accepts one ahead          |
+| Five replicas migrating an empty server at once        | One creates the database and applies the migrations and the others find them done, for every service; without the lock the test fails         |
+| Exposure types                                         | `ingress`, `route` and `none` render only their own objects; a Route for OTLP/gRPC without Telemetry's TLS Secret is refused                  |
+| Targets through an HTTP proxy                          | An `http://` Target in absolute form with proxy credentials, an `https://` Target through CONNECT with its certificate checked, `NO_PROXY`    |
 
 The LLM providers, Grading Evaluator and LLM Summary step added these checks on 2026-11-12.
 
@@ -1164,15 +1203,15 @@ The Trace completion and Telemetry Evaluator step added these checks on 2026-11-
 
 The Datasets and Client-Driven Execution step added these checks on 2026-11-08.
 
-| Tested                                                    | Result                                                                                                                  |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Evaluation service on SQLite and PostgreSQL               | Datasets, runs, retries, repeated reports, copies of Test Cases, early finish and inactive runs work on both            |
-| Concurrent evaluations of one run                         | Two deliveries each of eight jobs at once finish the run once with eight attempts, on both databases                    |
-| pg-boss 12.38.1 on PostgreSQL 17 in a container           | Delivers jobs and retries a failing one exactly up to its limit, from the Evaluation service's API and worker processes |
-| A slow regular expression                                 | `^(a+)+$` on 40 characters is terminated in its Web Worker at the time limit and ends as Error                          |
-| Five replicas starting at once on an empty server         | They create one database and apply its migrations once. API and worker starting together first exposed this race        |
-| The example scripts in TypeScript and Python              | Both run a Dataset to the verdict `passed` through the Gateway, in all-in-one and in separate services                  |
-| Datasets, Test Cases and run results in headless Chromium | Creating, editing, an invalid pattern and a run's results work, and nothing scrolls sideways from 360px to 2,000px      |
+| Tested                                                    | Result                                                                                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Evaluation service on SQLite and PostgreSQL               | Datasets, runs, retries, repeated reports, copies of Test Cases, early finish and inactive runs work on both                                                        |
+| Concurrent evaluations of one run                         | Two deliveries each of eight jobs at once finish the run once with eight attempts, on both databases                                                                |
+| pg-boss 12.38.1 on PostgreSQL 17 in a container           | Delivers jobs and retries a failing one exactly up to its limit, from the Evaluation service's API and worker processes                                             |
+| A slow regular expression                                 | `^(a+)+$` on 40 characters is terminated in its Web Worker at the time limit and ends as Error                                                                      |
+| Five replicas starting at once on an empty server         | They create one database and apply its migrations once. API and worker starting together first exposed this race; since step 14 an advisory lock replaces the retry |
+| The example scripts in TypeScript and Python              | Both run a Dataset to the verdict `passed` through the Gateway, in all-in-one and in separate services                                                              |
+| Datasets, Test Cases and run results in headless Chromium | Creating, editing, an invalid pattern and a run's results work, and nothing scrolls sideways from 360px to 2,000px                                                  |
 
 The OIDC sign-in step added these checks on 2026-11-09.
 
@@ -1218,8 +1257,15 @@ The Prompt service step added these checks on 2026-11-07.
 ### What has not been verified
 
 - The capacity target of 5,000 spans per second
-- The Prompt and Identity images running against a managed PostgreSQL service, where the user may
-  not be allowed to create databases; they then need their databases created beforehand
+- The images running against a managed PostgreSQL service, where the user may not be allowed to
+  create databases; they then need their databases created beforehand, which the migrate command
+  accepts without reaching the server's `postgres` database
+- The chart on OpenShift, AKS or EKS: only kind ran it. The Route templates were rendered, not
+  applied, and OTLP/gRPC through a cloud load balancer or an OpenShift router was not tried
+- Publishing to `ghcr.io`: the workflow runs only on `main` and on tags, so its first run is after
+  the merge. Images are built for linux/amd64 only
+- A Target behind a real corporate proxy, and an `https://` Target through a proxy in the cluster:
+  the cluster test uses Squid and a plain `http://` sample Target
 - That Identity's port stays unreachable from outside the Instance in Kubernetes
 - Service tokens across the network in the all-in-one deployment: its services call Identity in the
   process, and no other client reaches Identity's internal API there. The all-in-one e2e tests cover
@@ -1262,8 +1308,7 @@ The Prompt service step added these checks on 2026-11-07.
 - Targets that answer slowly under load: a worker handles four jobs at once, calls and evaluations
   together, so many slow Targets delay evaluations
 - Rotating the master key, which is not built
-- The allowlist with real DNS records and IPv6 Targets beyond the unit tests, and Targets behind an
-  HTTP proxy, which the worker does not use
+- The allowlist with real DNS records and IPv6 Targets beyond the unit tests
 - Server-Driven Execution in the all-in-one image and Docker Compose, where the worker must reach
   the Target from inside a container; the e2e tests run it only in the all-in-one process and
   separate services
@@ -1323,3 +1368,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0017: Reports delivered through the job queue, one row per channel, email through nodemailer](adr/0017-reports-delivered-through-the-job-queue-with-nodemailer.md)
 - [ADR 0018: Data removed in leased periodic runs, shared days dropped only past every Project](adr/0018-data-lifecycle-through-leased-periodic-runs.md)
 - [ADR 0021: Nightly performance compared with the previous run, kept as a workflow artifact](adr/0021-nightly-performance-compared-with-the-previous-run.md)
+- [ADR 0019: Migrations run in a Helm hook Job, and services in the chart only check them](adr/0019-migrations-in-a-helm-hook-job-and-services-that-only-check.md)

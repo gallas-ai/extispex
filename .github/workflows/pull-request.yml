@@ -98,6 +98,51 @@ jobs:
           E2E_POSTGRES_URL: postgresql://extispex:extispex@localhost:5432/extispex
           E2E_OIDC_ISSUER_URL: http://localhost:8180/realms/extispex
 
+  helm-end-to-end-tests:
+    name: End-to-end tests (Helm)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+      - run: deno install --frozen
+      - name: Install Chromium
+        run: .github/scripts/install-browser.sh
+        timeout-minutes: 40
+      - name: Install kind and Helm
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfLo "$RUNNER_TEMP/bin/kind" https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x "$RUNNER_TEMP/bin/kind"
+          curl -sSfL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz |
+            tar -xz -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Lint the chart and check what each exposure type renders
+        run: deploy/helm/check-chart.sh
+      - name: Install the chart into kind, then upgrade it
+        run: deploy/helm/kind/install.sh
+        env:
+          E2E_WORK_DIR: ${{ runner.temp }}/helm-e2e
+      - name: End-to-end tests against the chart
+        run: |
+          set -a
+          . "$RUNNER_TEMP/helm-e2e/e2e.env"
+          set +a
+          deno task test:e2e
+      - name: The worker reached the sample Target through the egress proxy
+        run: |
+          kubectl -n extispex exec deployment/egress-proxy -- cat /var/log/squid/access.log |
+            grep "sample-target.extispex.svc.cluster.local:8090/evaluate"
+      - name: Cluster state
+        if: failure()
+        run: |
+          kubectl get pods -A
+          kubectl -n extispex get jobs,events
+          kubectl -n extispex logs --all-containers --prefix --tail=300 \
+            -l app.kubernetes.io/name=extispex || true
+          kubectl -n extispex exec deployment/egress-proxy -- tail -n 100 /var/log/squid/access.log || true
+
   container-images:
     name: Container images
     runs-on: ubuntu-24.04

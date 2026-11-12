@@ -1,0 +1,44 @@
+# The chart's values for the end-to-end tests in kind. See install.sh.
+image:
+  tag: kind
+  pullPolicy: Never
+masterKey:
+  existingSecret: extispex-master-key
+database:
+  existingSecret: extispex-database
+bootstrap:
+  existingSecret: extispex-bootstrap
+identity:
+  localAccounts: enabled
+# Short, as in the other e2e deployments, so that the retention tests see data go within seconds.
+dataLifecycle:
+  intervalMilliseconds: "1000"
+# The worker reaches the sample Target only through the proxy, by its full name, which Squid can
+# resolve without the cluster's search domains.
+proxy:
+  httpProxy: http://egress-proxy.extispex.svc.cluster.local:3128
+evaluationWorker:
+  allowedDestinations: sample-target.extispex.svc.cluster.local:8090
+  # Short waits, as in the other e2e deployments, so that a missing root span costs seconds.
+  extraEnv:
+    - { name: EVALUATION_TELEMETRY_POLL_INTERVAL_MILLISECONDS, value: "200" }
+    - { name: EVALUATION_ROOT_SPAN_SETTLE_MILLISECONDS, value: "500" }
+    - { name: EVALUATION_ROOT_SPAN_TIMEOUT_MILLISECONDS, value: "3000" }
+exposure:
+  type: ingress
+  gateway:
+    host: extispex.localhost
+  otlpHttp:
+    host: otlp.extispex.localhost
+  otlpGrpc:
+    host: otlp-grpc.extispex.localhost
+    tlsSecretName: extispex-otlp-grpc-tls
+  ingress:
+    className: nginx
+# An arbitrary UID in the root group, as OpenShift assigns.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000870000
+  runAsGroup: 0
+  seccompProfile:
+    type: RuntimeDefault

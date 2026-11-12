@@ -54,6 +54,8 @@ import {
   createTargetClient,
   DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   parseDestinationAllowlist,
+  parseProxyRouting,
+  type ProxyEnvironment,
   registerTargetRoutes,
   type ResolveHostAddresses,
 } from "./targets/mod.ts";
@@ -79,7 +81,12 @@ export {
   REPORT_DELIVERY_ATTEMPTS,
 } from "./reports/mod.ts";
 export { DEFAULT_LLM_TIMEOUT_MILLISECONDS } from "./llm-providers/mod.ts";
-export { type EvaluationDatabase, openEvaluationDatabase } from "./storage/mod.ts";
+export type { ProxyEnvironment } from "./targets/mod.ts";
+export {
+  type EvaluationDatabase,
+  migrateEvaluationDatabase,
+  openEvaluationDatabase,
+} from "./storage/mod.ts";
 export { DEFAULT_TARGET_TIMEOUT_MILLISECONDS } from "./targets/mod.ts";
 
 /** The purpose that Target credentials are encrypted for. */
@@ -170,6 +177,11 @@ export interface EvaluationWorkerServiceDependencies {
   targetTimeoutMilliseconds?: number;
   /** How a Target's host name is resolved; tests answer with changing addresses. */
   resolveTargetHostAddresses?: ResolveHostAddresses;
+  /**
+   * `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`, for calls to Targets, LLM providers and Report
+   * webhooks. They go directly when none is set.
+   */
+  proxy?: ProxyEnvironment;
   /** Opens Report channel secrets, with the purpose {@link REPORT_CHANNEL_CIPHER_PURPOSE}. */
   reportChannelCipher: SecretCipher;
   /** `EVALUATION_REPORT_ALLOWED_DESTINATIONS`; an empty value allows no SMTP server or webhook. */
@@ -219,6 +231,7 @@ export function createEvaluationWorker(
   dependencies: EvaluationWorkerServiceDependencies,
 ): EvaluationWorkerService {
   const readCurrentTime = dependencies.readCurrentTime ?? (() => new Date());
+  const proxyRouting = parseProxyRouting(dependencies.proxy ?? {});
   const lease = createBackgroundLease(dependencies.database, {
     name: "data-lifecycle",
     holder: dependencies.leaseHolder ?? crypto.randomUUID(),
@@ -248,6 +261,7 @@ export function createEvaluationWorker(
         ),
         timeoutMilliseconds: dependencies.reportTimeoutMilliseconds ??
           DEFAULT_REPORT_TIMEOUT_MILLISECONDS,
+        proxyRouting,
       }),
       jobQueue: dependencies.jobQueue,
       publicUiUrl: dependencies.publicUiUrl?.replace(/\/+$/, "") || null,
@@ -266,6 +280,7 @@ export function createEvaluationWorker(
       timeoutMilliseconds: dependencies.targetTimeoutMilliseconds ??
         DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
       resolveHostAddresses: dependencies.resolveTargetHostAddresses,
+      proxyRouting,
     }),
     jobQueue: dependencies.jobQueue,
     llmProviderRepository: createLlmProviderRepository(
@@ -277,6 +292,7 @@ export function createEvaluationWorker(
       timeoutMilliseconds: dependencies.llmTimeoutMilliseconds ?? DEFAULT_LLM_TIMEOUT_MILLISECONDS,
       resolveHostAddresses: dependencies.resolveLlmProviderHostAddresses,
       retryDelayMilliseconds: dependencies.llmRetryDelayMilliseconds,
+      proxyRouting,
     }),
     promptClient: createPromptClient(dependencies.promptService, dependencies.serviceTokens),
     telemetryClient: createTelemetryClient(

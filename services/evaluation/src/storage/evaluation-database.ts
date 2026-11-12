@@ -1,4 +1,10 @@
-import { openServiceDatabase, type ServiceDatabase } from "@extispex/service-storage";
+import {
+  type DatabaseMigrationMode,
+  migrateServiceDatabase,
+  openServiceDatabase,
+  type ServiceDatabase,
+  type ServiceDatabaseDefinition,
+} from "@extispex/service-storage";
 import {
   DatasetRecord,
   EvaluationRunRecord,
@@ -29,47 +35,57 @@ import { Migration0006CreateBackgroundLeases as SqliteMigration0006 } from "./mi
 
 export type EvaluationDatabase = ServiceDatabase;
 
+const EVALUATION_DATABASE: ServiceDatabaseDefinition = {
+  entities: [
+    DatasetRecord,
+    TestCaseRecord,
+    EvaluationRunRecord,
+    RunTestCaseRecord,
+    IterationRecord,
+    IterationAttemptRecord,
+    IterationAttemptStepRecord,
+    TargetRecord,
+    ReportSettingsRecord,
+    ReportDeliveryRecord,
+    LlmProviderRecord,
+    LlmSummarySettingsRecord,
+    QueuedJobRecord,
+  ],
+  migrationsByDialect: {
+    postgresql: [
+      { name: "0001-create-evaluation", class: PostgresMigration0001 },
+      { name: "0002-index-attempt-telemetry-ids", class: PostgresMigration0002 },
+      { name: "0003-add-server-driven-execution", class: PostgresMigration0003 },
+      { name: "0004-add-llm-providers", class: PostgresMigration0004 },
+      { name: "0005-add-reports", class: PostgresMigration0005 },
+      { name: "0006-create-background-leases", class: PostgresMigration0006 },
+    ],
+    sqlite: [
+      { name: "0001-create-evaluation", class: SqliteMigration0001 },
+      { name: "0002-index-attempt-telemetry-ids", class: SqliteMigration0002 },
+      { name: "0003-add-server-driven-execution", class: SqliteMigration0003 },
+      { name: "0004-add-llm-providers", class: SqliteMigration0004 },
+      { name: "0005-add-reports", class: SqliteMigration0005 },
+      { name: "0006-create-background-leases", class: SqliteMigration0006 },
+    ],
+  },
+};
+
 /**
- * Opens the Evaluation database and applies pending migrations.
+ * Opens the Evaluation database. `apply` creates it when it is missing and applies pending migrations;
+ * `check` refuses it while a migration is pending, see `DatabaseMigrationMode`.
  *
  * Accepts `postgresql://…` or `postgres://…` for PostgreSQL, and `sqlite:<file path>` or
  * `sqlite::memory:` for SQLite.
  */
-export function openEvaluationDatabase(databaseUrl: string): Promise<EvaluationDatabase> {
-  return openServiceDatabase({
-    databaseUrl,
-    entities: [
-      DatasetRecord,
-      TestCaseRecord,
-      EvaluationRunRecord,
-      RunTestCaseRecord,
-      IterationRecord,
-      IterationAttemptRecord,
-      IterationAttemptStepRecord,
-      TargetRecord,
-      ReportSettingsRecord,
-      ReportDeliveryRecord,
-      LlmProviderRecord,
-      LlmSummarySettingsRecord,
-      QueuedJobRecord,
-    ],
-    migrationsByDialect: {
-      postgresql: [
-        { name: "0001-create-evaluation", class: PostgresMigration0001 },
-        { name: "0002-index-attempt-telemetry-ids", class: PostgresMigration0002 },
-        { name: "0003-add-server-driven-execution", class: PostgresMigration0003 },
-        { name: "0004-add-llm-providers", class: PostgresMigration0004 },
-        { name: "0005-add-reports", class: PostgresMigration0005 },
-        { name: "0006-create-background-leases", class: PostgresMigration0006 },
-      ],
-      sqlite: [
-        { name: "0001-create-evaluation", class: SqliteMigration0001 },
-        { name: "0002-index-attempt-telemetry-ids", class: SqliteMigration0002 },
-        { name: "0003-add-server-driven-execution", class: SqliteMigration0003 },
-        { name: "0004-add-llm-providers", class: SqliteMigration0004 },
-        { name: "0005-add-reports", class: SqliteMigration0005 },
-        { name: "0006-create-background-leases", class: SqliteMigration0006 },
-      ],
-    },
-  });
+export function openEvaluationDatabase(
+  databaseUrl: string,
+  migrations: DatabaseMigrationMode = "apply",
+): Promise<EvaluationDatabase> {
+  return openServiceDatabase({ databaseUrl, migrations, ...EVALUATION_DATABASE });
+}
+
+/** The `migrate` command: applies pending migrations and returns their names. */
+export function migrateEvaluationDatabase(databaseUrl: string): Promise<string[]> {
+  return migrateServiceDatabase({ databaseUrl, ...EVALUATION_DATABASE });
 }

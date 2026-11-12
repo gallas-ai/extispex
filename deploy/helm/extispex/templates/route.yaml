@@ -1,0 +1,39 @@
+{{- if eq .Values.exposure.type "route" }}
+{{- range (include "extispex.exposedEndpoints" . | fromYamlArray) }}
+{{- if .host }}
+{{- $isGrpc := eq .name "otlp-grpc" }}
+{{- if and $isGrpc (not $.Values.telemetry.grpcTls.existingSecret) }}
+{{- fail "An OpenShift Route passes OTLP/gRPC through with its TLS, so Telemetry needs telemetry.grpcTls.existingSecret, a kubernetes.io/tls Secret for exposure.otlpGrpc.host." }}
+{{- end }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "extispex.fullname" $ }}-{{ .name }}
+  labels:
+    {{- include "extispex.labels" $ | nindent 4 }}
+  {{- with $.Values.exposure.route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  host: {{ .host | quote }}
+  to:
+    kind: Service
+    name: {{ include "extispex.fullname" $ }}-{{ .component }}
+    weight: 100
+  port:
+    targetPort: {{ .port }}
+  tls:
+    {{- if $isGrpc }}
+    # The router keeps HTTP/2 end to end only when it passes TLS through to Telemetry.
+    termination: passthrough
+    insecureEdgeTerminationPolicy: None
+    {{- else }}
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+    {{- end }}
+  wildcardPolicy: None
+{{- end }}
+{{- end }}
+{{- end }}
