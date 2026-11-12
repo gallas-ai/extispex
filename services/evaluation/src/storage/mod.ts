@@ -7,7 +7,15 @@ export {
   type AttemptToExecute,
   createEvaluationRunRepository,
   type EvaluationRunRepository,
+  MAXIMUM_SUMMARY_ATTEMPTS,
+  type RunForSummary,
+  type SummaryClaim,
 } from "./evaluation-run-repository.ts";
+export {
+  createLlmProviderRepository,
+  type LlmProviderConnection,
+  type LlmProviderRepository,
+} from "./llm-provider-repository.ts";
 export { removeEvaluationProjectData } from "./project-data-repository.ts";
 export {
   type ClaimedDelivery,

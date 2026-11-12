@@ -1,4 +1,5 @@
 import {
+  type EvaluationRun,
   type EvaluationRunSummary,
   type EvaluationRunWork,
   type EvaluatorResult,
@@ -8,6 +9,7 @@ import {
   type IterationStatus,
   type ListIterationResultsResponse,
   type ListTestCaseResultsResponse,
+  type LlmSummary,
   MAXIMUM_ITERATION_ATTEMPTS,
   type RejectedReport,
   type ReportedStep,
@@ -26,6 +28,7 @@ import type {
   EvaluateAttemptJob,
   EvaluationJob,
   ExecuteAttemptJob,
+  SummarizeRunJob,
 } from "../job-queue/mod.ts";
 import type { EvaluationDatabase } from "./evaluation-database.ts";
 import {
@@ -33,6 +36,8 @@ import {
   IterationAttemptRecord,
   IterationAttemptStepRecord,
   IterationRecord,
+  LlmProviderRecord,
+  LlmSummarySettingsRecord,
   RunTestCaseRecord,
   TestCaseRecord,
 } from "./evaluation-entities.ts";
@@ -49,6 +54,13 @@ const STATEMENT_CHUNK_SIZE = 500;
 const UNFINISHED_STATUSES: IterationStatus[] = ["awaiting_report", "executing", "evaluating"];
 /** A worker that stopped renewing its claim on an attempt has died; another may take over. */
 const EXECUTION_CLAIM_MILLISECONDS = 120_000;
+/** A worker writing an LLM Summary renews its claim well within this time. */
+const SUMMARY_CLAIM_MILLISECONDS = 120_000;
+/** How many times a worker starts writing one LLM Summary before it fails. */
+export const MAXIMUM_SUMMARY_ATTEMPTS = 3;
+/** The results an LLM Summary sees: the first Test Cases in run order, and a few reasons each. */
+const SUMMARY_TEST_CASE_LIMIT = 200;
+const SUMMARY_REASON_LIMIT = 5;
 
 export const NOT_REPORTED_ERROR = "The Iteration was not reported before the run ended.";
 export const NOT_EVALUATED_ERROR = "The Iteration was not evaluated before the run ended.";
@@ -75,7 +87,7 @@ export type StartRunResult =
 
 export interface ReportResult {
   rejected: RejectedReport[];
-  /** Attempts with an Output, and the Reports of a run that ended, to queue after commit. */
+  /** Attempts with an Output, a finished run's LLM Summary and Reports, to queue after commit. */
   jobs: EvaluationJob[];
 }
 
@@ -86,6 +98,7 @@ export interface ResultPage {
 
 export interface AttemptToEvaluate {
   projectId: string;
+  testCaseName: string;
   /** In a Session Test Case, the last step's Output. */
   output: string;
   /** In a Session Test Case, every step's Output in order; otherwise empty. */
@@ -110,6 +123,40 @@ export interface TelemetryIdConflict {
   attemptNumber: number;
 }
 
+/** What the worker needs to write one run's LLM Summary. */
+export interface SummaryClaim {
+  projectId: string;
+  /** Null when the Project's settings named no provider; the claim then fails at once. */
+  providerId: string | null;
+  providerName: string | null;
+  prompt: { name: string; version: number } | null;
+  attempt: number;
+}
+
+/** A finished run's results, as an LLM Summary describes them. */
+export interface RunForSummary {
+  datasetName: string;
+  executionMode: ExecutionMode;
+  targetName: string | null;
+  verdict: Verdict;
+  createdAt: Date;
+  finishedAt: Date;
+  totalTestCases: number;
+  testCases: {
+    name: string;
+    outcome: Verdict;
+    scope: "trace" | "session";
+    passedIterations: number;
+    totalIterations: number;
+    /** Distinct reasons from failed and erroneous last attempts, at most a few. */
+    reasons: string[];
+  }[];
+}
+
+export type SummaryOutcome =
+  | { status: "completed"; text: string; model: string }
+  | { status: "failed"; error: string };
+
 /** What the worker needs to call the Target for one attempt. */
 export interface AttemptToExecute {
   /** Null only if the run was started without a Target, which the API does not allow. */
@@ -124,7 +171,7 @@ export interface EvaluationRunRepository {
     projectId: string,
     filter: { datasetName?: string; limit: number },
   ): Promise<EvaluationRunSummary[]>;
-  readRun(projectId: string, runId: string): Promise<EvaluationRunSummary | null>;
+  readRun(projectId: string, runId: string): Promise<EvaluationRun | null>;
   /** Null when the run does not exist. */
   listTestCaseResults(
     projectId: string,
@@ -153,7 +200,8 @@ export interface EvaluationRunRepository {
     reportedAt: Date,
   ): Promise<ReportResult | null>;
   /**
-   * Null when the run does not exist; otherwise the Reports to queue, if this ended the run.
+   * Null when the run does not exist; otherwise the LLM Summary and Reports to queue, if this
+   * ended the run.
    */
   requestFinish(
     projectId: string,
@@ -197,11 +245,26 @@ export interface EvaluationRunRepository {
   keepEvaluationWaiting(job: EvaluateAttemptJob, requestedAt: Date): Promise<void>;
   /** Attempts whose job was queued before the cutoff; their request time is set to now. */
   claimStalledEvaluations(cutoff: Date, claimedAt: Date): Promise<AttemptJob[]>;
-  /** Ends runs without activity since the cutoff, with the Reports of those runs to queue. */
+  /** Ends runs without activity since the cutoff, with the LLM Summaries and Reports to queue. */
   endInactiveRuns(
     cutoff: Date,
     endedAt: Date,
-  ): Promise<{ endedRunCount: number; jobs: DeliverReportJob[] }>;
+  ): Promise<{ endedRunCount: number; jobs: EvaluationJob[] }>;
+  /**
+   * Takes a finished run's LLM Summary for this worker. Null when it is not waiting to be
+   * written, or when another worker holds a live claim on it.
+   */
+  claimSummary(job: SummarizeRunJob, claimedAt: Date): Promise<SummaryClaim | null>;
+  /** The worker is still writing the LLM Summary, so its claim holds. */
+  renewSummary(job: SummarizeRunJob, renewedAt: Date): Promise<void>;
+  /** Stores the LLM Summary or why it failed. Does nothing unless the claim is still held. */
+  recordSummary(job: SummarizeRunJob, outcome: SummaryOutcome, recordedAt: Date): Promise<void>;
+  /** Puts a failed attempt back, so that the next job tries again. */
+  releaseSummary(job: SummarizeRunJob, releasedAt: Date): Promise<void>;
+  /** Null when the run does not exist or has not finished. */
+  readRunForSummary(runId: string): Promise<RunForSummary | null>;
+  /** LLM Summaries whose job was queued before the cutoff; their request time is set to now. */
+  claimStalledSummaries(cutoff: Date, claimedAt: Date): Promise<SummarizeRunJob[]>;
 }
 
 interface TelemetryIdConflictRow {
@@ -309,14 +372,15 @@ function findReportShapeProblem(
 }
 
 /**
- * Sets the verdicts once no Iteration is open. A finished run is never changed again. The result
- * is the jobs of the run's Reports, to queue after commit.
+ * Sets the verdicts once no Iteration is open. A finished run is never changed again. The run then
+ * takes the Project's LLM Summary settings, and the result is the jobs of its LLM Summary and its
+ * Reports, to queue after commit.
  */
 async function finalizeRunIfComplete(
   entityManager: EntityManager,
   run: RunRow,
   finishedAt: Date,
-): Promise<DeliverReportJob[]> {
+): Promise<EvaluationJob[]> {
   if (run.status === "finished") return [];
   const openCount = await entityManager.count(IterationRecord, {
     runId: run.id,
@@ -345,12 +409,27 @@ async function finalizeRunIfComplete(
     }
   }
   const verdict = decideRunVerdict([...idsByOutcome.keys()]);
+  const settingsRow = await entityManager.findOne(LlmSummarySettingsRecord, {
+    projectId: run.projectId,
+  });
+  const providerRow = settingsRow?.providerId == null
+    ? null
+    : await entityManager.findOne(LlmProviderRecord, { id: settingsRow.providerId });
   await entityManager.nativeUpdate(EvaluationRunRecord, { id: run.id }, {
     status: "finished",
     verdict,
     finishedAt,
+    summaryStatus: providerRow === null ? "not_configured" : "pending",
+    summaryProviderId: providerRow?.id ?? null,
+    summaryProviderName: providerRow?.name ?? null,
+    summaryPromptName: settingsRow?.promptName ?? null,
+    summaryPromptVersion: settingsRow?.promptVersion ?? null,
+    summaryRequestedAt: providerRow === null ? null : finishedAt,
   });
-  return await scheduleReportDeliveries(entityManager, run, verdict, finishedAt);
+  return [
+    ...(providerRow === null ? [] : [{ kind: "summarize" as const, runId: run.id }]),
+    ...await scheduleReportDeliveries(entityManager, run, verdict, finishedAt),
+  ];
 }
 
 /** Ends every Iteration that is still waiting for its report, and optionally for its evaluation. */
@@ -489,6 +568,17 @@ export function createEvaluationRunRepository(
           lastActivityAt: startedAt,
           createdAt: startedAt,
           finishedAt: null,
+          summaryStatus: null,
+          summaryProviderId: null,
+          summaryProviderName: null,
+          summaryPromptName: null,
+          summaryPromptVersion: null,
+          summaryText: null,
+          summaryError: null,
+          summaryModel: null,
+          summaryAttempts: 0,
+          summaryRequestedAt: null,
+          summaryGeneratedAt: null,
         });
         for (const rowChunk of chunk(runTestCases)) {
           await entityManager.insertMany(RunTestCaseRecord, rowChunk);
@@ -536,7 +626,10 @@ export function createEvaluationRunRepository(
         IterationRecord,
         { runId, status: { $in: UNFINISHED_STATUSES } },
       );
-      return toRunSummary(runRow, runRow.totalIterations - openCount);
+      return {
+        ...toRunSummary(runRow, runRow.totalIterations - openCount),
+        llmSummary: toLlmSummary(runRow),
+      };
     },
 
     async listTestCaseResults(projectId, runId, { cursor, limit }) {
@@ -832,6 +925,7 @@ export function createEvaluationRunRepository(
       const correlationId = attemptRow.correlationId ?? "";
       return {
         projectId: runRow.projectId,
+        testCaseName: testCaseRow.name,
         output: attemptRow.output ?? "",
         stepOutputs: stepRows.map((row) => row.output),
         correlationId,
@@ -1053,7 +1147,7 @@ export function createEvaluationRunRepository(
         id: { $in: iterationRows.map((iterationRow) => iterationRow.id) },
         status: { $in: ["evaluating", "executing"] },
       }, { evaluationRequestedAt: claimedAt });
-      return iterationRows.map((iterationRow): AttemptJob => ({
+      return iterationRows.map((iterationRow): EvaluationJob => ({
         ...(iterationRow.status === "executing" ? { kind: "execute" } : {}),
         iterationId: iterationRow.id,
         attemptNumber: iterationRow.currentAttempt,
@@ -1066,9 +1160,9 @@ export function createEvaluationRunRepository(
         lastActivityAt: { $lt: cutoff },
       }, { limit: STATEMENT_CHUNK_SIZE });
       let endedRunCount = 0;
-      const jobs: DeliverReportJob[] = [];
+      const jobs: EvaluationJob[] = [];
       for (const inactiveRow of inactiveRows) {
-        const reportJobs = await database.orm.em.fork().transactional(async (entityManager) => {
+        const endedRunJobs = await database.orm.em.fork().transactional(async (entityManager) => {
           const runRow = await lockRun(entityManager, { id: inactiveRow.id });
           // A report may have arrived since the search above.
           if (runRow === null || runRow.status === "finished" || runRow.lastActivityAt >= cutoff) {
@@ -1077,11 +1171,157 @@ export function createEvaluationRunRepository(
           await endOpenIterations(entityManager, runRow.id, UNFINISHED_STATUSES, endedAt);
           return await finalizeRunIfComplete(entityManager, runRow, endedAt);
         });
-        if (reportJobs === null) continue;
+        if (endedRunJobs === null) continue;
         endedRunCount++;
-        jobs.push(...reportJobs);
+        jobs.push(...endedRunJobs);
       }
       return { endedRunCount, jobs };
+    },
+
+    async claimSummary(job, claimedAt) {
+      const entityManager = database.orm.em.fork();
+      const claimExpiresBefore = new Date(claimedAt.getTime() - SUMMARY_CLAIM_MILLISECONDS);
+      // One statement, so that of two deliveries at once only one changes the row.
+      const claimedCount = await entityManager.nativeUpdate(EvaluationRunRecord, {
+        id: job.runId,
+        $or: [
+          { summaryStatus: "pending" },
+          { summaryStatus: "generating", summaryRequestedAt: { $lt: claimExpiresBefore } },
+        ],
+      }, {
+        summaryStatus: "generating",
+        summaryAttempts: raw("summary_attempts + 1"),
+        summaryRequestedAt: claimedAt,
+      });
+      if (claimedCount === 0) return null;
+      const runRow = await entityManager.findOneOrFail(EvaluationRunRecord, { id: job.runId }, {
+        refresh: true,
+      });
+      return {
+        projectId: runRow.projectId,
+        providerId: runRow.summaryProviderId ?? null,
+        providerName: runRow.summaryProviderName ?? null,
+        prompt: runRow.summaryPromptName == null || runRow.summaryPromptVersion == null
+          ? null
+          : { name: runRow.summaryPromptName, version: runRow.summaryPromptVersion },
+        attempt: runRow.summaryAttempts,
+      };
+    },
+
+    async renewSummary(job, renewedAt) {
+      await database.orm.em.fork().nativeUpdate(EvaluationRunRecord, {
+        id: job.runId,
+        summaryStatus: "generating",
+      }, { summaryRequestedAt: renewedAt });
+    },
+
+    async recordSummary(job, outcome, recordedAt) {
+      await database.orm.em.fork().nativeUpdate(
+        EvaluationRunRecord,
+        {
+          id: job.runId,
+          summaryStatus: "generating",
+        },
+        outcome.status === "completed"
+          ? {
+            summaryStatus: "completed",
+            summaryText: outcome.text,
+            summaryModel: outcome.model,
+            summaryError: null,
+            summaryRequestedAt: null,
+            summaryGeneratedAt: recordedAt,
+          }
+          : {
+            summaryStatus: "failed",
+            summaryError: outcome.error,
+            summaryRequestedAt: null,
+            summaryGeneratedAt: recordedAt,
+          },
+      );
+    },
+
+    async releaseSummary(job, releasedAt) {
+      await database.orm.em.fork().nativeUpdate(EvaluationRunRecord, {
+        id: job.runId,
+        summaryStatus: "generating",
+      }, { summaryStatus: "pending", summaryRequestedAt: releasedAt });
+    },
+
+    async readRunForSummary(runId) {
+      const entityManager = database.orm.em.fork();
+      const runRow = await entityManager.findOne(EvaluationRunRecord, {
+        id: runId,
+        status: "finished",
+      });
+      if (runRow === null || runRow.verdict == null || runRow.finishedAt == null) return null;
+      const totalTestCases = await entityManager.count(RunTestCaseRecord, { runId });
+      const testCaseRows = await entityManager.find(
+        RunTestCaseRecord,
+        { runId },
+        { orderBy: { position: "asc" }, limit: SUMMARY_TEST_CASE_LIMIT },
+      );
+      const iterationRows = testCaseRows.length === 0 ? [] : await entityManager.find(
+        IterationRecord,
+        { runTestCaseId: { $in: testCaseRows.map((row) => row.id) } },
+      );
+      // The last attempt of each Iteration that did not pass says why.
+      const unsuccessfulRows = iterationRows.filter((row) => row.status !== "passed");
+      const attemptRows: AttemptRow[] = [];
+      for (const rowChunk of chunk(unsuccessfulRows)) {
+        attemptRows.push(
+          ...await entityManager.find(IterationAttemptRecord, {
+            $or: rowChunk.map((row) => ({
+              iterationId: row.id,
+              attemptNumber: row.currentAttempt,
+            })),
+          }),
+        );
+      }
+      return {
+        datasetName: runRow.datasetName,
+        executionMode: runRow.executionMode as ExecutionMode,
+        targetName: runRow.targetName ?? null,
+        verdict: runRow.verdict,
+        createdAt: runRow.createdAt,
+        finishedAt: runRow.finishedAt,
+        totalTestCases,
+        testCases: testCaseRows.map((testCaseRow) => {
+          const ownIterations = iterationRows.filter((row) => row.runTestCaseId === testCaseRow.id);
+          const ownIterationIds = new Set(ownIterations.map((row) => row.id));
+          const reasons = new Set<string>();
+          for (const attemptRow of attemptRows) {
+            if (!ownIterationIds.has(attemptRow.iterationId)) continue;
+            if (attemptRow.error) reasons.add(`Error: ${attemptRow.error}`);
+            for (const result of attemptRow.evaluatorResults) {
+              if (result.outcome !== "passed") {
+                reasons.add(`${result.name} (${result.outcome}): ${result.reason}`);
+              }
+            }
+          }
+          return {
+            name: testCaseRow.name,
+            outcome: testCaseRow.outcome ?? "error",
+            scope: testCaseRow.definition.scope,
+            passedIterations: ownIterations.filter((row) => row.status === "passed").length,
+            totalIterations: ownIterations.length,
+            reasons: [...reasons].slice(0, SUMMARY_REASON_LIMIT),
+          };
+        }),
+      };
+    },
+
+    async claimStalledSummaries(cutoff, claimedAt) {
+      const entityManager = database.orm.em.fork();
+      const runRows = await entityManager.find(EvaluationRunRecord, {
+        summaryStatus: { $in: ["pending", "generating"] },
+        summaryRequestedAt: { $lt: cutoff },
+      }, { fields: ["id"], limit: STATEMENT_CHUNK_SIZE });
+      if (runRows.length === 0) return [];
+      await entityManager.nativeUpdate(EvaluationRunRecord, {
+        id: { $in: runRows.map((runRow) => runRow.id) },
+        summaryStatus: "pending",
+      }, { summaryRequestedAt: claimedAt });
+      return runRows.map((runRow) => ({ kind: "summarize" as const, runId: runRow.id }));
     },
   };
 }
@@ -1098,6 +1338,24 @@ function toRunSummary(runRow: RunRow, completedIterations: number): EvaluationRu
     completedIterations,
     createdAt: runRow.createdAt.toISOString(),
     finishedAt: runRow.finishedAt?.toISOString() ?? null,
+  };
+}
+
+/** `generating` is the worker's claim; to a reader the LLM Summary is still pending. */
+function toLlmSummary(runRow: RunRow): LlmSummary | null {
+  if (runRow.summaryStatus == null) return null;
+  return {
+    status: runRow.summaryStatus === "generating"
+      ? "pending"
+      : runRow.summaryStatus as LlmSummary["status"],
+    text: runRow.summaryText ?? null,
+    error: runRow.summaryError ?? null,
+    providerName: runRow.summaryProviderName ?? null,
+    model: runRow.summaryModel ?? null,
+    prompt: runRow.summaryPromptName == null || runRow.summaryPromptVersion == null
+      ? null
+      : { name: runRow.summaryPromptName, version: runRow.summaryPromptVersion },
+    generatedAt: runRow.summaryGeneratedAt?.toISOString() ?? null,
   };
 }
 

@@ -27,7 +27,14 @@ export interface AllowedDestinationOptions {
   maximumResponseBytes: number;
 }
 
-export type PostResult = { statusCode: number; body: string } | { status: "too_large" };
+export type PostResult =
+  | {
+    statusCode: number;
+    body: string;
+    /** The `retry-after` header, which a busy server may send. */
+    retryAfter: string | undefined;
+  }
+  | { status: "too_large" };
 
 /**
  * Resolves a host name once and checks every address. Connecting to exactly these addresses means
@@ -101,9 +108,11 @@ export function postToAllowedDestination(
           merged.set(chunk, offset);
           offset += chunk.length;
         }
+        const retryAfter = incoming.headers["retry-after"];
         resolvePost({
           statusCode: incoming.statusCode ?? 0,
           body: new TextDecoder().decode(merged),
+          retryAfter: Array.isArray(retryAfter) ? retryAfter[0] : retryAfter,
         });
       });
       incoming.on("error", rejectPost);

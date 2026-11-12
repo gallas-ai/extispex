@@ -5,9 +5,11 @@
 import {
   createEvaluationApiService,
   createEvaluationWorker,
+  DEFAULT_LLM_TIMEOUT_MILLISECONDS,
   DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
   DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   DEFAULT_TRACE_COMPLETION_TIMING,
+  LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
   openEvaluationDatabase,
   openJobQueue,
   REPORT_CHANNEL_CIPHER_PURPOSE,
@@ -136,11 +138,16 @@ const targetCredentialCipher = await createSecretCipher(
 );
 const reportChannelCipher = await createSecretCipher(masterKey, REPORT_CHANNEL_CIPHER_PURPOSE);
 const gatewayPort = readPortEnvironmentVariable("GATEWAY_PORT", 8080);
+const llmProviderApiKeyCipher = await createSecretCipher(
+  masterKey,
+  LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
+);
 const evaluationApiService = createEvaluationApiService({
   database: evaluationDatabase,
   jobQueue: evaluationJobQueue,
   targetCredentialCipher,
   reportChannelCipher,
+  llmProviderApiKeyCipher,
   requestAuthenticator: createRequestAuthenticator("evaluation"),
   logger: evaluationLogger,
 });
@@ -167,7 +174,17 @@ const evaluationWorker = createEvaluationWorker({
     "EVALUATION_REPORT_RETRY_DELAY_MILLISECONDS",
     DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
   ),
+  llmProviderApiKeyCipher,
+  // Local models usually run on the same machine as the local image.
+  llmProviderAllowedDestinations: readOptionalEnvironmentVariable(
+    "EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS",
+  ) ?? "*",
+  llmTimeoutMilliseconds: readPositiveIntegerEnvironmentVariable(
+    "EVALUATION_LLM_TIMEOUT_MILLISECONDS",
+    DEFAULT_LLM_TIMEOUT_MILLISECONDS,
+  ),
   telemetryService: createInProcessServiceClient(telemetryService.handleRequest),
+  promptService: createInProcessServiceClient(promptService.handleRequest),
   serviceTokens: createServiceTokens("evaluation"),
   projectLifecycle: createProjectLifecycle("evaluation"),
   dataLifecycleIntervalMilliseconds,

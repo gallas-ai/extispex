@@ -9,6 +9,7 @@ import {
 } from "@extispex/service-runtime";
 import {
   createEvaluationApiService,
+  LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
   openEvaluationDatabase,
   openJobQueue,
   REPORT_CHANNEL_CIPHER_PURPOSE,
@@ -26,6 +27,10 @@ const evaluationApi = createEvaluationApiService({
   jobQueue,
   targetCredentialCipher: await createSecretCipher(masterKey, TARGET_CREDENTIAL_CIPHER_PURPOSE),
   reportChannelCipher: await createSecretCipher(masterKey, REPORT_CHANNEL_CIPHER_PURPOSE),
+  llmProviderApiKeyCipher: await createSecretCipher(
+    masterKey,
+    LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
+  ),
   requestAuthenticator: createIdentityRequestAuthenticator({
     identityClient: createHttpServiceClient(readRequiredEnvironmentVariable("IDENTITY_URL")),
     clientId: "evaluation",

@@ -215,6 +215,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
       EVALUATION_DATABASE_URL: evaluationDatabaseUrl,
       MASTER_KEY: E2E_MASTER_KEY,
       TELEMETRY_URL: `http://127.0.0.1:${otlpHttpPort}`,
+      PROMPT_URL: `http://127.0.0.1:${promptPort}`,
       IDENTITY_URL: identityUrl,
       IDENTITY_CLIENT_SECRET: SERVICE_CLIENT_SECRETS.evaluation,
       // The sample Target runs on this machine; production lists its own Targets.
@@ -223,6 +224,8 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
       // So do the fake SMTP server and webhook that receive Reports.
       EVALUATION_REPORT_ALLOWED_DESTINATIONS: "127.0.0.1",
       PUBLIC_UI_URL: `http://127.0.0.1:${gatewayPort}`,
+      // So does the fake LLM provider.
+      EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS: "127.0.0.1",
       ...TRACE_COMPLETION_ENVIRONMENT,
     },
   );

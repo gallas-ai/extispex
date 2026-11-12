@@ -9,6 +9,8 @@ import { EditTestCasePage, NewTestCasePage } from "./datasets/test-case-editor-p
 import { EvaluationRunPage } from "./evaluation-runs/evaluation-run-page.tsx";
 import { EvaluationRunsPage } from "./evaluation-runs/evaluation-runs-page.tsx";
 import { getCurrentUser, listProjects } from "./api/identity-api.ts";
+import { LlmProviderPage } from "./llm-providers/llm-provider-page.tsx";
+import { LlmProvidersPage } from "./llm-providers/llm-providers-page.tsx";
 import { signOut } from "./api/sign-in-api.ts";
 import { LogsPage } from "./logs/logs-page.tsx";
 import { MetricsPage } from "./metrics/metrics-page.tsx";
@@ -47,6 +49,7 @@ import {
   PromptIcon,
   RunIcon,
   ShieldIcon,
+  SparklesIcon,
   TargetIcon,
 } from "./ui/icons.tsx";
 import { usePopover } from "./ui/use-popover.ts";
@@ -244,6 +247,10 @@ function AppShell() {
                     <TargetIcon size={15} />
                     <span className="navigation-link-text">Targets</span>
                   </NavLink>
+                  <NavLink className="navigation-link" to="/llm-providers">
+                    <SparklesIcon size={15} />
+                    <span className="navigation-link-text">LLM providers</span>
+                  </NavLink>
                   <NavLink className="navigation-link" to="/evaluation-runs">
                     <RunIcon size={15} />
                     <span className="navigation-link-text">Runs</span>
@@ -335,6 +342,14 @@ function AppShell() {
                 <Route
                   path="/targets/:targetName"
                   element={<TargetPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/llm-providers"
+                  element={<LlmProvidersPage key={selectedProject.id} {...pageProps} />}
+                />
+                <Route
+                  path="/llm-providers/:providerName"
+                  element={<LlmProviderPage key={selectedProject.id} {...pageProps} />}
                 />
                 <Route
                   path="/evaluation-runs"

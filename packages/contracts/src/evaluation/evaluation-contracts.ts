@@ -1,5 +1,11 @@
 import { z } from "zod";
+import { promptMessageSchema } from "../prompt/prompt-contracts.ts";
 import { spanStatusCodeSchema } from "../telemetry/trace-contracts.ts";
+import {
+  llmProviderNameSchema,
+  llmSummarySchema,
+  promptVersionReferenceSchema,
+} from "./llm-provider-contracts.ts";
 
 /** Letters, digits, `.`, `_` and `-`, starting with a letter or digit, so names are safe in URLs. */
 const URL_SAFE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -101,11 +107,87 @@ export const telemetryEvaluatorSchema = z.strictObject({
   count: spanCountSchema.default({ min: 1 }),
 });
 
-/** Grading Evaluators join this list in a later step. */
+const judgmentTextSchema = z.string().min(1).max(10_000);
+
+/** A yes-or-no question. Jev answers with the probability of yes, which must reach the bar. */
+export const noulQuestionSchema = z.strictObject({
+  type: z.literal("noul"),
+  instructions: judgmentTextSchema,
+  /** What counts as yes and as no. */
+  criteria: z.strictObject({
+    true: judgmentTextSchema.optional(),
+    false: judgmentTextSchema.optional(),
+  }).optional(),
+  /** The least probability of yes that passes. */
+  passProbability: z.number().gt(0).lt(1).default(0.5),
+});
+
+/** A rating on ordered levels, lowest first. Jev's expected level must reach `passScore`. */
+export const scoreQuestionSchema = z.strictObject({
+  type: z.literal("score"),
+  instructions: judgmentTextSchema,
+  criteria: z.array(judgmentTextSchema).min(2).max(10),
+  /** The least expected level that passes, counted from 0 for the first level. */
+  passScore: z.number().min(0),
+}).refine(
+  (question) => question.passScore <= question.criteria.length - 1,
+  { message: "passScore must not exceed the highest level.", path: ["passScore"] },
+);
+
+/** A choice among named options. The Output passes when Jev picks one of `passingChoices`. */
+export const choiceQuestionSchema = z.strictObject({
+  type: z.literal("choice"),
+  instructions: judgmentTextSchema,
+  /** Each option's name and when it applies. */
+  criteria: z.record(z.string().min(1).max(128), z.string().max(10_000)).refine(
+    (criteria) => Object.keys(criteria).length >= 2 && Object.keys(criteria).length <= 255,
+    "Give 2 to 255 choices.",
+  ),
+  passingChoices: z.array(z.string().min(1).max(128)).min(1),
+}).refine(
+  (question) => question.passingChoices.every((choice) => choice in question.criteria),
+  { message: "Every passing choice must be one of the criteria.", path: ["passingChoices"] },
+).refine(
+  (question) => question.passingChoices.length < Object.keys(question.criteria).length,
+  { message: "At least one choice must fail.", path: ["passingChoices"] },
+);
+
+/** The typed question a Judgment provider such as TypeSafe Jev answers about the Transcript. */
+export const judgmentQuestionSchema = z.discriminatedUnion("type", [
+  noulQuestionSchema,
+  scoreQuestionSchema,
+  choiceQuestionSchema,
+]);
+
+/**
+ * A Grading Evaluator. With a Text Generation provider it sends a Prompt Version and asks for a
+ * structured verdict; with a Judgment provider it asks a typed `question` instead. Spans of the
+ * Iteration's traces are added only with `includeSpans`.
+ */
+export const gradingEvaluatorSchema = z.strictObject({
+  type: z.literal("grading"),
+  name: z.string().min(1).max(128),
+  providerName: llmProviderNameSchema,
+  prompt: promptVersionReferenceSchema.optional(),
+  question: judgmentQuestionSchema.optional(),
+  includeSpans: z.boolean().default(false),
+}).refine(
+  (evaluator) => (evaluator.prompt === undefined) !== (evaluator.question === undefined),
+  "Give a prompt for a Text Generation provider or a question for a Judgment provider.",
+);
+
 export const evaluatorSchema = z.discriminatedUnion("type", [
   regexEvaluatorSchema,
   telemetryEvaluatorSchema,
+  gradingEvaluatorSchema,
 ]);
+
+/** Whether a Test Case needs the spans of its traces before its Evaluators can run. */
+export function needsSpans(evaluators: Evaluator[]): boolean {
+  return evaluators.some((evaluator) =>
+    evaluator.type === "telemetry" || (evaluator.type === "grading" && evaluator.includeSpans)
+  );
+}
 
 export const testCaseScopeSchema = z.enum(["trace", "session"]);
 
@@ -400,14 +482,31 @@ export const matchedSpanSummarySchema = z.object({
   attributes: z.record(z.string(), z.unknown()),
 });
 
+/** A copy of the Prompt Version a Grading Evaluator sent, readable whatever happens to the prompt. */
+export const usedPromptVersionSchema = z.object({
+  name: z.string(),
+  version: z.number().int(),
+  type: z.enum(["text", "chat"]),
+  /** A text prompt's text; null for a chat prompt. */
+  text: z.string().nullable(),
+  /** A chat prompt's messages; null for a text prompt. */
+  messages: z.array(promptMessageSchema).nullable(),
+});
+
 export const evaluatorResultSchema = z.object({
   name: z.string(),
-  type: z.enum(["regex", "telemetry"]),
+  type: z.enum(["regex", "telemetry", "grading"]),
   outcome: verdictSchema,
   reason: z.string(),
   /** Telemetry Evaluators only: how many spans matched, which may exceed the summaries kept. */
   matchedSpanCount: z.number().int().optional(),
   matchedSpans: z.array(matchedSpanSummarySchema).optional(),
+  /** Grading Evaluators only: the verdict's score from 0 to 1, or null when it gave none. */
+  score: z.number().nullable().optional(),
+  /** Grading Evaluators only: the model that judged, as the provider named it. */
+  model: z.string().optional(),
+  /** Grading Evaluators with a Text Generation provider only: the Prompt Version they sent. */
+  prompt: usedPromptVersionSchema.optional(),
 });
 
 /** One step of a Transcript: what was sent and what the application answered. */
@@ -492,6 +591,11 @@ export const evaluationRunSummarySchema = z.object({
   finishedAt: z.string().nullable(),
 });
 
+/** One run with its LLM Summary, which is null until the run has finished. */
+export const evaluationRunSchema = evaluationRunSummarySchema.extend({
+  llmSummary: llmSummarySchema.nullable(),
+});
+
 export const listEvaluationRunsQuerySchema = z.object({
   datasetName: datasetNameSchema.optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -504,6 +608,10 @@ export const listEvaluationRunsResponseSchema = z.object({
 export type Evaluator = z.infer<typeof evaluatorSchema>;
 export type RegexEvaluator = z.infer<typeof regexEvaluatorSchema>;
 export type TelemetryEvaluator = z.infer<typeof telemetryEvaluatorSchema>;
+export type GradingEvaluator = z.infer<typeof gradingEvaluatorSchema>;
+export type JudgmentQuestion = z.infer<typeof judgmentQuestionSchema>;
+export type UsedPromptVersion = z.infer<typeof usedPromptVersionSchema>;
+export type EvaluationRun = z.infer<typeof evaluationRunSchema>;
 export type MatchedSpanSummary = z.infer<typeof matchedSpanSummarySchema>;
 export type TestCaseDefinition = z.infer<typeof testCaseDefinitionSchema>;
 export type TestCaseDefinitionInput = z.input<typeof testCaseDefinitionSchema>;

@@ -50,8 +50,9 @@ image also keeps it in `/data/initial-admin-password`. Then send a sample conver
 To choose them yourself, set `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` (at least 12
 characters) and `BOOTSTRAP_PROJECT_API_KEY` (at least 32 characters) before the first start.
 
-The image also creates `/data/master-key`, which encrypts Target credentials and the key that signs
-access tokens. Keep the volume, or set `MASTER_KEY` (`openssl rand -base64 32`) yourself.
+The image also creates `/data/master-key`, which encrypts Target credentials, LLM provider API keys
+and the key that signs access tokens. Keep the volume, or set `MASTER_KEY`
+(`openssl rand -base64 32`) yourself.
 
 ## Projects, users and Roles
 
@@ -198,6 +199,16 @@ cd examples/typescript && API_KEY=$EXTISPEX_API_KEY deno task run-dataset
 ```
 
 The script exits with 0 only when the run's verdict is `passed`.
+
+### Grading Evaluators and LLM Summaries
+
+Add an LLM provider under **LLM providers**: OpenAI or any OpenAI-compatible server (Azure OpenAI's
+v1 API, vLLM, Ollama), Anthropic, or TypeSafe Jev. Its API key is stored encrypted. A Grading
+Evaluator then judges the Transcript with one of your Prompt Versions, or, with Jev, with a typed
+question, and every finished run gets an LLM Summary from the provider chosen on the same page.
+Separate services call only the providers in `EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS`, by
+default `api.openai.com:443,api.anthropic.com:443,api.typesafe.ai:443`; add your Azure resource or
+local server there. The local image allows any.
 
 ### Reports
 

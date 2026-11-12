@@ -2,6 +2,7 @@ import type {
   EmailChannel,
   EvaluatorResult,
   IterationStatus,
+  LlmProviderKind,
   TestCaseDefinition,
   Verdict,
 } from "@extispex/contracts";
@@ -61,10 +62,29 @@ export const EvaluationRunRecord = defineEntity({
     lastActivityAt: p.datetime(),
     createdAt: p.datetime(),
     finishedAt: p.datetime().nullable(),
+    /**
+     * The LLM Summary: null while the run is running, then `pending`, `generating`, `completed`,
+     * `failed` or `not_configured`. The provider and prompt are copied from the Project's settings
+     * when the run finishes.
+     */
+    summaryStatus: p.string().nullable(),
+    summaryProviderId: p.string().nullable(),
+    summaryProviderName: p.string().nullable(),
+    summaryPromptName: p.string().nullable(),
+    summaryPromptVersion: p.integer().nullable(),
+    summaryText: p.text().nullable(),
+    summaryError: p.text().nullable(),
+    summaryModel: p.string().nullable(),
+    /** How many times a worker has started writing the LLM Summary. */
+    summaryAttempts: p.integer(),
+    /** When a job for the LLM Summary was last queued or claimed; maintenance retries stale ones. */
+    summaryRequestedAt: p.datetime().nullable(),
+    summaryGeneratedAt: p.datetime().nullable(),
   },
   indexes: [
     { properties: ["projectId", "createdAt"] },
     { properties: ["status", "lastActivityAt"] },
+    { properties: ["summaryStatus", "summaryRequestedAt"] },
   ],
 });
 
@@ -178,6 +198,38 @@ export const ReportSettingsRecord = defineEntity({
     sealedSmtpPassword: p.text().nullable(),
     sealedTeamsWebhookUrl: p.text().nullable(),
     teamsWebhookHost: p.string().nullable(),
+    updatedAt: p.datetime(),
+  },
+});
+
+/** An LLM provider of a Project. The API key is stored only in sealed form. */
+export const LlmProviderRecord = defineEntity({
+  name: "LlmProviderRecord",
+  tableName: "llm_providers",
+  properties: {
+    id: p.string().primary(),
+    projectId: p.string(),
+    name: p.string(),
+    kind: p.string().$type<LlmProviderKind>(),
+    baseUrl: p.text(),
+    defaultModel: p.string(),
+    description: p.text(),
+    sealedApiKey: p.text().nullable(),
+    createdAt: p.datetime(),
+    updatedAt: p.datetime(),
+  },
+  uniques: [{ properties: ["projectId", "name"] }],
+});
+
+/** Which provider and Prompt Version write a Project's LLM Summaries. */
+export const LlmSummarySettingsRecord = defineEntity({
+  name: "LlmSummarySettingsRecord",
+  tableName: "llm_summary_settings",
+  properties: {
+    projectId: p.string().primary(),
+    providerId: p.string().nullable(),
+    promptName: p.string().nullable(),
+    promptVersion: p.integer().nullable(),
     updatedAt: p.datetime(),
   },
 });

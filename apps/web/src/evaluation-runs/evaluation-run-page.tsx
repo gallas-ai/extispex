@@ -3,6 +3,7 @@ import type {
   EvaluatorResult,
   IterationAttempt,
   IterationResult,
+  LlmSummary,
   ReportChannel,
   ReportDelivery,
   TestCaseResult,
@@ -22,7 +23,7 @@ import { serializeTracesUrlState } from "../navigation/traces-url-state.ts";
 import { Breadcrumbs } from "../prompts/prompt-parts.tsx";
 import { REPORT_SETTINGS_PATH } from "../reports/report-settings-page.tsx";
 import { useAccess } from "../sign-in/access-context.ts";
-import { AlertIcon } from "../ui/icons.tsx";
+import { AlertIcon, SparklesIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
 import { usePagedResource } from "../ui/use-paged-resource.ts";
@@ -40,8 +41,11 @@ export function EvaluationRunPage({ credentials, onSignInRequired }: EvaluationR
   const linkedTestCaseName = useSearchParams()[0].get("testCase");
   const loadRun = useCallback(() => getEvaluationRun(credentials, runId), [credentials, runId]);
   const [runState, reloadRun] = useApiResource(loadRun);
+  // The LLM Summary is written after the run finishes, so the page keeps asking until it is there.
   usePollingWhile(
-    runState.status === "loaded" && runState.resource.status === "running",
+    runState.status === "loaded" &&
+      (runState.resource.status === "running" ||
+        runState.resource.llmSummary?.status === "pending"),
     reloadRun,
   );
   const breadcrumbs = (title: string) => (
@@ -102,6 +106,7 @@ export function EvaluationRunPage({ credentials, onSignInRequired }: EvaluationR
           testCaseName={linkedTestCaseName}
         />
       )}
+      {run.llmSummary !== null && <LlmSummaryPanel summary={run.llmSummary} />}
       <ReportDeliveries credentials={credentials} run={run} />
       <TestCaseResults credentials={credentials} runId={run.id} refreshKey={refreshKey} />
     </div>
@@ -227,6 +232,41 @@ function LinkedTestCase(
         isInitiallyOpen
       />
     </div>
+  );
+}
+
+/** The LLM-written overview of the finished run. It never changes the verdict. */
+function LlmSummaryPanel({ summary }: { summary: LlmSummary }) {
+  return (
+    <section className="panel panel-form llm-summary" aria-label="LLM Summary">
+      <h2 className="section-title">
+        <SparklesIcon size={14} /> LLM Summary
+      </h2>
+      {summary.status === "pending" && (
+        <p className="status-text" role="status">
+          {summary.providerName} is writing the LLM Summary…
+        </p>
+      )}
+      {summary.status === "completed" && <p className="llm-summary-text">{summary.text}</p>}
+      {summary.status === "failed" && (
+        <p className="attempt-error" role="note">
+          The LLM Summary could not be written: {summary.error}
+        </p>
+      )}
+      {summary.status === "not_configured" && (
+        <p className="status-text">
+          No LLM Summary: the Project had no summary provider when this run finished. Choose one
+          under <Link to="/llm-providers">LLM providers</Link>.
+        </p>
+      )}
+      {summary.status === "completed" && (
+        <p className="status-text">
+          Written by {summary.model} through {summary.providerName}, with {summary.prompt === null
+            ? "the default prompt"
+            : `${summary.prompt.name} version ${summary.prompt.version}`}.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -437,7 +477,19 @@ function AttemptDetails(
             <li key={result.name} className="evaluator-result">
               <VerdictBadge status={result.outcome} />
               <span className="evaluator-result-name">{result.name}</span>
+              {typeof result.score === "number" && (
+                <span className="text-muted evaluator-result-score">
+                  score {result.score.toFixed(2)}
+                </span>
+              )}
               <span className="text-muted evaluator-result-reason">{result.reason}</span>
+              {result.model !== undefined && (
+                <span className="text-muted evaluator-result-model">
+                  {result.prompt === undefined
+                    ? result.model
+                    : `${result.model} · ${result.prompt.name} version ${result.prompt.version}`}
+                </span>
+              )}
               <MatchedSpans
                 result={result}
                 correlationId={attempt.correlationId}

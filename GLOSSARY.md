@@ -98,6 +98,10 @@ It never changes the run's result. _Avoid_: Notification
 
 ### LLM Providers
 
+**LLM provider**: A model service that a Project has configured for Grading Evaluators and LLM
+Summaries, such as OpenAI, Anthropic, a local model or TypeSafe Jev, with an API key that the
+platform stores encrypted. It declares its capabilities. _Avoid_: Model, LLM connection
+
 **Text Generation**: The provider capability of producing free-form text from a prompt.
 
 **Judgment**: The provider capability of answering a typed question about a given state with a

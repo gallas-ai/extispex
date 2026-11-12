@@ -23,11 +23,14 @@ const PROJECT_ROW_CONDITIONS: [tableName: string, condition: string][] = [
   ["datasets", "project_id = ?"],
   ["targets", "project_id = ?"],
   ["report_settings", "project_id = ?"],
+  ["llm_summary_settings", "project_id = ?"],
+  ["llm_providers", "project_id = ?"],
 ];
 
 /**
- * Deletes every Dataset, Evaluation Run with its results and Report Deliveries, Target and the
- * Report settings of a deleted Project, in one transaction. Queued jobs of its runs find nothing and end.
+ * Deletes every Dataset, Evaluation Run with its results and Report Deliveries, Target, LLM
+ * provider and the Report settings of a deleted Project, in one transaction. Queued jobs of its runs
+ * find nothing and end.
  */
 export async function removeEvaluationProjectData(
   database: EvaluationDatabase,

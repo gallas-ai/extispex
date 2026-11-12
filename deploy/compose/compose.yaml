@@ -7,12 +7,15 @@
 # the master key default to development values that everyone can read here. Override
 # BOOTSTRAP_ADMIN_PASSWORD (at least 12 characters), BOOTSTRAP_PROJECT_API_KEY and the
 # *_CLIENT_SECRET variables (at least 32 characters each), and MASTER_KEY (`openssl rand -base64 32`),
-# before anyone else can reach the ports. The master key encrypts Target credentials and Identity's
-# signing keys; keep it, because nothing encrypted with it can be read without it.
+# before anyone else can reach the ports. The master key encrypts Target credentials, LLM provider
+# API keys and Identity's signing keys; keep it, because nothing encrypted with it can be read
+# without it.
 #
 # The worker calls only the Targets that EVALUATION_TARGET_ALLOWED_DESTINATIONS lists, and nothing
-# by default: for example "agent.company.example:443,*.internal.company.example,10.20.0.0/16". Sign in to the UI as
-# admin@extispex.local, or as BOOTSTRAP_ADMIN_EMAIL.
+# by default: for example "agent.company.example:443,*.internal.company.example,10.20.0.0/16". It
+# calls the LLM providers that EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS lists, by default
+# OpenAI, Anthropic and TypeSafe. Sign in to the UI as admin@extispex.local, or as
+# BOOTSTRAP_ADMIN_EMAIL.
 #
 # Reports go only to the SMTP servers and Teams webhooks that EVALUATION_REPORT_ALLOWED_DESTINATIONS
 # lists, in the same format, for example "smtp.company.example:587,*.logic.azure.com". Their links
@@ -118,7 +121,9 @@ services:
       EVALUATION_TARGET_ALLOWED_DESTINATIONS: ${EVALUATION_TARGET_ALLOWED_DESTINATIONS:-}
       EVALUATION_REPORT_ALLOWED_DESTINATIONS: ${EVALUATION_REPORT_ALLOWED_DESTINATIONS:-}
       PUBLIC_UI_URL: ${PUBLIC_UI_URL:-http://localhost:8080}
+      EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS: ${EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS:-api.openai.com:443,api.anthropic.com:443,api.typesafe.ai:443}
       TELEMETRY_URL: http://telemetry:4318
+      PROMPT_URL: http://prompt:8081
       IDENTITY_URL: http://identity:8082
       IDENTITY_CLIENT_SECRET: ${EVALUATION_CLIENT_SECRET:-development-evaluation-client-secret-000}
     depends_on:
@@ -127,6 +132,8 @@ services:
       evaluation:
         condition: service_started
       telemetry:
+        condition: service_started
+      prompt:
         condition: service_started
       identity:
         condition: service_started

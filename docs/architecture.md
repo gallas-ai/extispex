@@ -37,6 +37,7 @@ flowchart LR
   browser["Browser"]
   client["Customer scripts and CI"]
   company["Company identity system"]
+  llm["LLM providers"]
 
   subgraph instance["Instance"]
     gateway["Gateway + UI"]
@@ -62,6 +63,7 @@ flowchart LR
   evaluation_worker -- "read traces and sessions" --> telemetry
   evaluation_worker -- "read Prompt Versions" --> prompt
   evaluation_worker -- "call Target" --> app
+  evaluation_worker -- "Grading Evaluators, LLM Summaries" --> llm
 ```
 
 | Service          | Owns                                                                   | Deployed as                                         |
@@ -486,6 +488,37 @@ compared exactly. `count` defaults to at least one, and `{ "min": 0, "max": 0 }`
 span. More than 10,000 spans for one Correlation ID make the attempt an Error, because judging part
 of them could produce a false failure.
 
+A Grading Evaluator names an LLM provider and either a Prompt Version, for a Text Generation
+provider, or a typed question, for a Judgment provider such as TypeSafe Jev. See
+[ADR 0016](adr/0016-grading-verdicts-as-structured-output-and-jev-questions.md):
+
+```json
+{
+  "type": "grading",
+  "name": "states-refund-period",
+  "providerName": "judge",
+  "prompt": { "name": "refund-grader", "version": 3 },
+  "includeSpans": false
+}
+```
+
+Built in roadmap step 7:
+
+- **Prompt Version:** read by number from the Prompt service's API with a service token for the
+  Project, so a run can be repeated. Its Prompt Variables are `{{transcript}}` (every step as "User
+  … / Application …"), `{{input}}` and `{{output}}` of the last step, `{{expectedOutput}}`,
+  `{{testCaseName}}` and, with `includeSpans`, `{{spans}}`: up to 200 spans as JSON with their
+  names, statuses, durations and attributes. A variable the prompt uses but the platform does not
+  fill is an Error. The Prompt Version's model, or else the provider's default model, judges.
+- **Verdict:** `{ "passed": boolean, "score": 0..1 | null, "explanation": string }`, enforced as
+  structured output and validated on receipt. Anything else is an Error, not a failure. The result
+  keeps the score, the model that answered and a copy of the Prompt Version.
+- **Spans:** a Grading Evaluator with `includeSpans` waits for complete traces and is protected
+  against mixed telemetry, like a Telemetry Evaluator. Without it, a Test Case with only Regex and
+  Grading Evaluators is judged at once.
+- **Long calls:** the worker renews the attempt's job every 30 seconds while an LLM answers, so
+  maintenance does not queue it again.
+
 ### Results
 
 - An Iteration is `passed`, `failed` or `error`. It passes only if all its Evaluators pass.
@@ -504,6 +537,33 @@ Providers declare capabilities: **Text Generation** and **Judgment**. V1 include
 (including Azure and local models), Anthropic and TypeSafe adapters. TypeSafe Jev accepts a state
 and typed questions, not free-form prompts, so a Grading Evaluator using it has its own
 configuration. LLM Summaries need Text Generation.
+
+Built in roadmap step 7:
+
+| Kind                | Capability      | Request                                                                         |
+| ------------------- | --------------- | ------------------------------------------------------------------------------- |
+| `openai_compatible` | Text Generation | `POST <base URL>/chat/completions`, `Authorization: Bearer`, strict JSON Schema |
+| `anthropic`         | Text Generation | `POST <base URL>/v1/messages`, `x-api-key`, `output_config.format`              |
+| `typesafe`          | Judgment        | `POST <base URL>/v1/systemone` with the Transcript as the state                 |
+
+- **Providers** belong to a Project, at `/v1/llm-providers`: a name, a kind, a base URL (the kind's
+  public address by default; Azure's v1 API or a local server otherwise), a default model and an API
+  key, which is stored encrypted and never returned. `editor` manages them.
+- **Model parameters:** `temperature`, `topP` and `maxOutputTokens` are sent only when the Prompt
+  Version sets them, and `providerOptions` are added to the request as given. Anthropic needs a
+  token limit and gets 4,096 by default; current Claude models refuse `temperature` and `top_p`.
+- **Calls** go only to `EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS`, with the same rules as
+  Targets: separate services allow OpenAI's, Anthropic's and TypeSafe's public hosts by default, and
+  the local image allows `*`. A call times out after `EVALUATION_LLM_TIMEOUT_MILLISECONDS` (60 s). A
+  busy or failing provider (408, 409, 429, 5xx, 529, a timeout or no connection) gets two more tries
+  within the call, after 1 and 2 seconds or its `retry-after` up to 10 seconds; then the attempt's
+  own retries apply.
+- **LLM Summary:** `PUT /v1/llm-summary-settings` chooses a provider with Text Generation and,
+  optionally, a Prompt Version, whose `{{results}}` is the run as text, with `{{datasetName}}` and
+  `{{verdict}}`. The default prompt asks for at most 150 words. A run takes the settings when it
+  finishes and queues a job; the summary is `pending` until the worker writes it, `failed` after
+  three attempts or a permanent problem, and `not_configured` without a provider. It never changes
+  the verdict. The results it sees are the first 200 Test Cases with up to five reasons each.
 
 ### Reports
 
@@ -799,11 +859,13 @@ which Project a key belongs to.
 
 ### Secrets
 
-Target credentials, LLM provider keys (step 7), Report channel secrets and Identity's private
-signing keys are encrypted with AES-256-GCM, each purpose with its own key derived from one master
-key. The master key comes from `MASTER_KEY`, a Kubernetes Secret in production, which Identity, the
-Evaluation API and the worker need. The local image generates it into `/data/master-key` on first
-start. See [ADR 0013](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md).
+Target credentials, LLM provider API keys, Report channel secrets and Identity's private signing
+keys are encrypted with AES-256-GCM, each purpose with its own key derived from one master key:
+`evaluation-target-credential`, `evaluation-llm-provider-api-key`, `evaluation-report-channel` and
+`identity-signing-key`. A provider's API key is bound to the provider's ID. The master key comes
+from `MASTER_KEY`, a Kubernetes Secret in production, which Identity, the Evaluation API and the
+worker need. The local image generates it into `/data/master-key` on first start. See
+[ADR 0013](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md).
 
 ### Known risks to design for
 
@@ -985,6 +1047,18 @@ repository.
 | TypeScript and Python examples                                 | Both send a two-step conversation that appears under one Session ID                    |
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
+
+The LLM providers, Grading Evaluator and LLM Summary step added these checks on 2026-11-12.
+
+| Tested                                                              | Result                                                                                                                                                                                                  |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Grading Evaluators against fake providers, on both databases        | A Prompt Version's verdict, a whole Session's Transcript, Jev's yes-or-no, score and choice questions, Anthropic's request shape, and spans only with `includeSpans`                                    |
+| Unusable answers                                                    | An invalid verdict, a refusal, a refused key and a missing provider, prompt or Prompt Variable end as Error with the reason; a 429 is tried again within the call                                       |
+| LLM Summaries on both databases                                     | Written with the default prompt or a Prompt Version, `not_configured` without a provider, retried and then `failed`, a lost job queued again, a repeated job ignored                                    |
+| Provider API keys at rest                                           | Stored only in sealed form, never returned, kept, replaced or removed on change; a deleted Project's providers and settings are removed                                                                 |
+| Real providers, run locally with keys                               | `gpt-4.1-mini` through OpenAI and `jev-1.14.0` through TypeSafe pass the Transcript that names the refund period and fail the one that does not                                                         |
+| Through the Gateway, with a fake provider                           | A Session's Transcript judged by a Prompt Version and by Jev, and the LLM Summary written, in all-in-one and in separate services                                                                       |
+| LLM providers, Grading Evaluator editor and LLM Summary in Chromium | Adding a provider, choosing it for LLM Summaries, a Grading Evaluator with a Prompt Version and with a Choice question, and the summary on the run page; nothing scrolls sideways from 360px to 2,040px |
 
 The Nightly performance test and module boundaries step added these checks on 2026-11-12. The
 numbers come from the nightly workflow on `ubuntu-latest` runners, run on its branch before merging;
@@ -1203,9 +1277,16 @@ The Prompt service step added these checks on 2026-11-07.
   webhook: the tests use plain SMTP and a fake webhook, and how Teams renders the Adaptive Card has
   not been seen
 - How email clients such as Outlook render the HTML Report
-- The LLM Summary in a Report: the field exists and is rendered when set, but runs have no LLM
-  Summary before roadmap step 7
 - Retries at their real intervals of 1 to 64 minutes; the tests check the scheduled delays
+- Anthropic against the real API: no key was available, so the adapter was tested against a fake
+  server that answers as the documentation describes
+- Azure OpenAI's v1 API and local servers such as vLLM and Ollama, including their support for
+  `response_format` with a strict JSON Schema
+- How well LLM verdicts and Jev's thresholds agree with people's judgement; the tests check the
+  mechanics with two clear Transcripts
+- Provider rate limits under load: each Grading Evaluator is one call per attempt, and four jobs per
+  worker share the provider's limit
+- LLM Summaries of runs with thousands of Test Cases: the summary sees the first 200
 - The web UI's colours, spacing and typography, and browsers other than Chromium
 
 ### First implementation step
@@ -1234,6 +1315,7 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0013: Secrets sealed with keys derived from one master key](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md)
 - [ADR 0014: A user from the directory is linked to their first OIDC sign-in by email, once](adr/0014-directory-users-linked-to-oidc-by-email-once.md)
 - [ADR 0015: Metric Time Series stored once, cumulative values resolved at query time](adr/0015-metric-time-series-stored-once-and-cumulative-values-at-query-time.md)
+- [ADR 0016: Grading verdicts as structured output, and typed questions for Jev](adr/0016-grading-verdicts-as-structured-output-and-jev-questions.md)
 - [ADR 0017: Reports delivered through the job queue, one row per channel, email through nodemailer](adr/0017-reports-delivered-through-the-job-queue-with-nodemailer.md)
 - [ADR 0018: Data removed in leased periodic runs, shared days dropped only past every Project](adr/0018-data-lifecycle-through-leased-periodic-runs.md)
 - [ADR 0021: Nightly performance compared with the previous run, kept as a workflow artifact](adr/0021-nightly-performance-compared-with-the-previous-run.md)

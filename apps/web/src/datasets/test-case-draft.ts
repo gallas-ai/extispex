@@ -1,5 +1,7 @@
 import type {
   Evaluator,
+  GradingEvaluator,
+  JudgmentQuestion,
   SpanStatusCode,
   TestCase,
   TestCaseDefinitionInput,
@@ -32,7 +34,40 @@ export interface TelemetryEvaluatorDraft {
   maximumCount: string;
 }
 
-export type EvaluatorDraft = RegexEvaluatorDraft | TelemetryEvaluatorDraft;
+export type JudgmentQuestionType = JudgmentQuestion["type"];
+
+/** One option of a Choice question, and whether choosing it passes. */
+export interface ChoiceDraft {
+  name: string;
+  description: string;
+  passes: boolean;
+}
+
+/**
+ * A Grading Evaluator. A Text Generation provider follows a Prompt Version (`prompt`); a Judgment
+ * provider such as TypeSafe Jev answers a typed question (`question`).
+ */
+export interface GradingEvaluatorDraft {
+  type: "grading";
+  name: string;
+  providerName: string;
+  mode: "prompt" | "question";
+  promptName: string;
+  promptVersion: string;
+  questionType: JudgmentQuestionType;
+  instructions: string;
+  /** A Noul question's descriptions of yes and no; both optional. */
+  yesCriterion: string;
+  noCriterion: string;
+  passProbability: string;
+  /** A Score question's levels, lowest first. */
+  levels: string[];
+  passScore: string;
+  choices: ChoiceDraft[];
+  includeSpans: boolean;
+}
+
+export type EvaluatorDraft = RegexEvaluatorDraft | TelemetryEvaluatorDraft | GradingEvaluatorDraft;
 
 /** A Test Case as the editor holds it: every field as the text in its input. */
 export interface TestCaseDraft {
@@ -67,6 +102,27 @@ export const NEW_TELEMETRY_EVALUATOR_DRAFT: TelemetryEvaluatorDraft = {
   maximumCount: "",
 };
 
+export const NEW_GRADING_EVALUATOR_DRAFT: GradingEvaluatorDraft = {
+  type: "grading",
+  name: "",
+  providerName: "",
+  mode: "prompt",
+  promptName: "",
+  promptVersion: "",
+  questionType: "noul",
+  instructions: "",
+  yesCriterion: "",
+  noCriterion: "",
+  passProbability: "0.5",
+  levels: ["", ""],
+  passScore: "1",
+  choices: [
+    { name: "", description: "", passes: true },
+    { name: "", description: "", passes: false },
+  ],
+  includeSpans: false,
+};
+
 export const NEW_TEST_CASE_DRAFT: TestCaseDraft = {
   name: "",
   scope: "trace",
@@ -98,7 +154,51 @@ function formatInput(input: unknown): string {
   return JSON.stringify(input, null, 2);
 }
 
+function createGradingDraft(evaluator: GradingEvaluator): GradingEvaluatorDraft {
+  const base = {
+    ...NEW_GRADING_EVALUATOR_DRAFT,
+    name: evaluator.name,
+    providerName: evaluator.providerName,
+    includeSpans: evaluator.includeSpans,
+  };
+  if (evaluator.prompt !== undefined) {
+    return {
+      ...base,
+      mode: "prompt",
+      promptName: evaluator.prompt.name,
+      promptVersion: String(evaluator.prompt.version),
+    };
+  }
+  const question = evaluator.question!;
+  const questionBase = {
+    ...base,
+    mode: "question" as const,
+    questionType: question.type,
+    instructions: question.instructions,
+  };
+  if (question.type === "noul") {
+    return {
+      ...questionBase,
+      yesCriterion: question.criteria?.true ?? "",
+      noCriterion: question.criteria?.false ?? "",
+      passProbability: String(question.passProbability),
+    };
+  }
+  if (question.type === "score") {
+    return { ...questionBase, levels: question.criteria, passScore: String(question.passScore) };
+  }
+  return {
+    ...questionBase,
+    choices: Object.entries(question.criteria).map(([name, description]) => ({
+      name,
+      description,
+      passes: question.passingChoices.includes(name),
+    })),
+  };
+}
+
 function createEvaluatorDraft(evaluator: Evaluator): EvaluatorDraft {
+  if (evaluator.type === "grading") return createGradingDraft(evaluator);
   if (evaluator.type === "regex") {
     const { name, pattern, flags, expectMatch, step } = evaluator;
     return {
@@ -183,13 +283,99 @@ function findTelemetryEvaluatorProblem(draft: TelemetryEvaluatorDraft): string |
     : null;
 }
 
+function isNumberText(text: string): boolean {
+  return text.trim() !== "" && Number.isFinite(Number(text));
+}
+
+function findGradingEvaluatorProblem(draft: GradingEvaluatorDraft): string | null {
+  if (draft.providerName === "") return "Choose an LLM provider for every Grading Evaluator.";
+  if (draft.mode === "prompt") {
+    if (draft.promptName === "") return "Choose a prompt for every Grading Evaluator.";
+    const version = Number(draft.promptVersion);
+    return Number.isInteger(version) && version >= 1
+      ? null
+      : "Choose the Prompt Version of every Grading Evaluator.";
+  }
+  if (draft.instructions.trim() === "") return "Give every Grading Evaluator's question.";
+  if (draft.questionType === "noul") {
+    const probability = Number(draft.passProbability);
+    return isNumberText(draft.passProbability) && probability > 0 && probability < 1
+      ? null
+      : "The probability of yes that passes must be between 0 and 1.";
+  }
+  if (draft.questionType === "score") {
+    if (draft.levels.length < 2 || draft.levels.some((level) => level.trim() === "")) {
+      return "Describe at least two levels of every Score question.";
+    }
+    const passScore = Number(draft.passScore);
+    return isNumberText(draft.passScore) && passScore >= 0 && passScore <= draft.levels.length - 1
+      ? null
+      : `The score that passes must be from 0 to ${draft.levels.length - 1}.`;
+  }
+  const names = draft.choices.map((choice) => choice.name.trim());
+  if (draft.choices.length < 2 || names.some((name) => name === "")) {
+    return "Name at least two choices of every Choice question.";
+  }
+  if (new Set(names).size !== names.length) return "Choice names must be unique.";
+  const passingCount = draft.choices.filter((choice) => choice.passes).length;
+  return passingCount > 0 && passingCount < draft.choices.length
+    ? null
+    : "At least one choice must pass and at least one must fail.";
+}
+
 function findEvaluatorProblem(draft: EvaluatorDraft): string | null {
   if (draft.name.trim() === "") return "Give every Evaluator a name.";
   if (draft.type === "telemetry") return findTelemetryEvaluatorProblem(draft);
+  if (draft.type === "grading") return findGradingEvaluatorProblem(draft);
   return draft.pattern === "" ? "Give every Evaluator a regular expression." : null;
 }
 
+function toQuestion(draft: GradingEvaluatorDraft): JudgmentQuestion {
+  const instructions = draft.instructions.trim();
+  if (draft.questionType === "noul") {
+    const criteria = {
+      ...(draft.yesCriterion.trim() === "" ? {} : { true: draft.yesCriterion.trim() }),
+      ...(draft.noCriterion.trim() === "" ? {} : { false: draft.noCriterion.trim() }),
+    };
+    return {
+      type: "noul",
+      instructions,
+      ...(Object.keys(criteria).length === 0 ? {} : { criteria }),
+      passProbability: Number(draft.passProbability),
+    };
+  }
+  if (draft.questionType === "score") {
+    return {
+      type: "score",
+      instructions,
+      criteria: draft.levels.map((level) => level.trim()),
+      passScore: Number(draft.passScore),
+    };
+  }
+  return {
+    type: "choice",
+    instructions,
+    criteria: Object.fromEntries(
+      draft.choices.map((choice) => [choice.name.trim(), choice.description.trim()]),
+    ),
+    passingChoices: draft.choices.filter((choice) => choice.passes).map((choice) =>
+      choice.name.trim()
+    ),
+  };
+}
+
 function toEvaluatorDefinition(draft: EvaluatorDraft, scope: TestCaseScope) {
+  if (draft.type === "grading") {
+    return {
+      type: "grading" as const,
+      name: draft.name.trim(),
+      providerName: draft.providerName,
+      ...(draft.mode === "prompt"
+        ? { prompt: { name: draft.promptName, version: Number(draft.promptVersion) } }
+        : { question: toQuestion(draft) }),
+      includeSpans: draft.includeSpans,
+    };
+  }
   if (draft.type === "regex") {
     return {
       type: "regex" as const,
