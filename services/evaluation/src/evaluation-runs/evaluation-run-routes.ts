@@ -5,23 +5,27 @@ import {
   finishEvaluationRunRoute,
   getEvaluationRunRoute,
   getEvaluationRunWorkRoute,
+  getTestCaseResultRoute,
   listEvaluationRunsRoute,
   listIterationResultsRoute,
+  listReportDeliveriesRoute,
   listTestCaseResultsRoute,
   reportIterationsRoute,
 } from "@extispex/contracts";
 import type { ProjectAccessEnvironment, StructuredLogger } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { AttemptJob, JobQueue } from "../job-queue/mod.ts";
+import type { EvaluationJob, JobQueue } from "../job-queue/mod.ts";
 import type {
   DatasetRepository,
   EvaluationRunRepository,
+  ReportDeliveryRepository,
   TargetRepository,
 } from "../storage/mod.ts";
 
 export interface EvaluationRunRouteDependencies {
   datasetRepository: DatasetRepository;
   evaluationRunRepository: EvaluationRunRepository;
+  reportDeliveryRepository: ReportDeliveryRepository;
   targetRepository: TargetRepository;
   jobQueue: JobQueue;
   logger: StructuredLogger;
@@ -39,14 +43,18 @@ export function registerEvaluationRunRoutes(
   const {
     datasetRepository,
     evaluationRunRepository,
+    reportDeliveryRepository,
     targetRepository,
     jobQueue,
     logger,
     readCurrentTime,
   } = dependencies;
 
-  /** A failure here is not the script's problem: the worker queues stalled attempts again. */
-  const enqueueAfterCommit = async (jobs: AttemptJob[]) => {
+  /**
+   * A failure here is not the script's problem: the worker queues stalled attempts and Report
+   * deliveries again.
+   */
+  const enqueueAfterCommit = async (jobs: EvaluationJob[]) => {
     try {
       await jobQueue.enqueue(jobs);
     } catch (error) {
@@ -121,6 +129,32 @@ export function registerEvaluationRunRoutes(
     return context.json(page, 200);
   });
 
+  app.openapi(getTestCaseResultRoute, async (context) => {
+    const { runId, testCaseName } = context.req.valid("param");
+    const testCase = await evaluationRunRepository.readTestCaseResult(
+      context.get("projectAccess").projectId,
+      runId,
+      testCaseName,
+    );
+    if (testCase === null) {
+      return context.json(
+        createErrorResponse("not_found", `Run ${runId} has no Test Case ${testCaseName}.`),
+        404,
+      );
+    }
+    return context.json(testCase, 200);
+  });
+
+  app.openapi(listReportDeliveriesRoute, async (context) => {
+    const { runId } = context.req.valid("param");
+    const reportDeliveries = await reportDeliveryRepository.listDeliveries(
+      context.get("projectAccess").projectId,
+      runId,
+    );
+    if (reportDeliveries === null) return context.json(runNotFoundError(runId), 404);
+    return context.json({ reportDeliveries }, 200);
+  });
+
   app.openapi(listIterationResultsRoute, async (context) => {
     const { runId, testCaseName } = context.req.valid("param");
     const page = await evaluationRunRepository.listIterationResults(
@@ -166,9 +200,13 @@ export function registerEvaluationRunRoutes(
   app.openapi(finishEvaluationRunRoute, async (context) => {
     const { runId } = context.req.valid("param");
     const { projectId } = context.get("projectAccess");
-    if (!await evaluationRunRepository.requestFinish(projectId, runId, readCurrentTime())) {
-      return context.json(runNotFoundError(runId), 404);
-    }
+    const reportJobs = await evaluationRunRepository.requestFinish(
+      projectId,
+      runId,
+      readCurrentTime(),
+    );
+    if (reportJobs === null) return context.json(runNotFoundError(runId), 404);
+    await enqueueAfterCommit(reportJobs);
     return context.json((await evaluationRunRepository.readWork(projectId, runId))!, 200);
   });
 }

@@ -4,7 +4,8 @@ import { Link } from "react-router";
 import type { ApiCredentials } from "../api/api-request.ts";
 import { listEvaluationRuns } from "../api/evaluation-api.ts";
 import { formatRelativeTime } from "../traces/trace-formatting.ts";
-import { RunIcon } from "../ui/icons.tsx";
+import { REPORT_SETTINGS_PATH } from "../reports/report-settings-page.tsx";
+import { MailIcon, RunIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
 import { useNow } from "../ui/use-now.ts";
@@ -35,6 +36,12 @@ export function EvaluationRunsPage({ credentials, onSignInRequired }: Evaluation
         <div className="page-heading">
           <h1>Evaluation Runs</h1>
           <p className="page-subtitle">Executions of a Dataset, newest first.</p>
+        </div>
+        <div className="page-actions">
+          <Link className="button button-secondary" to={REPORT_SETTINGS_PATH}>
+            <MailIcon size={14} />
+            Report settings
+          </Link>
         </div>
       </div>
       <section className="panel" aria-label="Evaluation Run list">

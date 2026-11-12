@@ -28,13 +28,20 @@ import {
   targetSchema,
   testCaseDefinitionSchema,
   testCaseNameSchema,
+  testCaseResultSchema,
   testCaseSchema,
   updateTargetRequestSchema,
 } from "./evaluation-contracts.ts";
+import {
+  listReportDeliveriesResponseSchema,
+  reportSettingsSchema,
+  updateReportSettingsRequestSchema,
+} from "./report-contracts.ts";
 
 const DATASET_TAGS = ["Datasets"];
 const RUN_TAGS = ["Evaluation Runs"];
 const TARGET_TAGS = ["Targets"];
+const REPORT_TAGS = ["Reports"];
 
 const datasetPathParameters = z.object({ datasetName: datasetNameSchema });
 const testCasePathParameters = datasetPathParameters.extend({ testCaseName: testCaseNameSchema });
@@ -235,6 +242,20 @@ export const listTestCaseResultsRoute = createRoute({
   },
 });
 
+export const getTestCaseResultRoute = createRoute({
+  method: "get",
+  path: "/v1/evaluation-runs/{runId}/test-cases/{testCaseName}",
+  summary: "Get one Test Case's result in a run.",
+  tags: RUN_TAGS,
+  security: projectDataSecurity,
+  request: { params: runPathParameters.extend({ testCaseName: testCaseNameSchema }) },
+  responses: {
+    200: jsonResponse("The Test Case result.", testCaseResultSchema),
+    ...commonErrorResponses,
+    404: describeErrorResponse("The run does not exist or has no such Test Case."),
+  },
+});
+
 export const listIterationResultsRoute = createRoute({
   method: "get",
   path: "/v1/evaluation-runs/{runId}/test-cases/{testCaseName}/iterations",
@@ -369,6 +390,49 @@ export const deleteTargetRoute = createRoute({
   },
 });
 
+export const listReportDeliveriesRoute = createRoute({
+  method: "get",
+  path: "/v1/evaluation-runs/{runId}/report-deliveries",
+  summary: "List where the run's Report went and how each delivery is doing.",
+  description: "A run gets a delivery for each channel when it finishes, if the Project's " +
+    "Report settings ask for one. A delivery never changes the run's result.",
+  tags: RUN_TAGS,
+  security: projectDataSecurity,
+  request: { params: runPathParameters },
+  responses: {
+    200: jsonResponse("The run's Report deliveries.", listReportDeliveriesResponseSchema),
+    ...commonErrorResponses,
+    404: runNotFound,
+  },
+});
+
+export const getReportSettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/report-settings",
+  summary: "Get the Project's Report settings, without their secrets.",
+  tags: REPORT_TAGS,
+  security: projectDataSecurity,
+  responses: {
+    200: jsonResponse("The Report settings.", reportSettingsSchema),
+    ...commonErrorResponses,
+  },
+});
+
+export const updateReportSettingsRoute = createRoute({
+  method: "put",
+  path: "/v1/report-settings",
+  summary: "Replace the Project's Report settings. Runs that finish afterwards use them.",
+  description: "The SMTP password and the Teams webhook URL are stored encrypted. Leaving one " +
+    "out keeps the stored value.",
+  tags: REPORT_TAGS,
+  security: projectDataSecurity,
+  request: { body: jsonBody(updateReportSettingsRequestSchema) },
+  responses: {
+    200: jsonResponse("The Report settings, without their secrets.", reportSettingsSchema),
+    ...commonErrorResponses,
+  },
+});
+
 export const evaluationPublicRoutes: RouteConfig[] = [
   createDatasetRoute,
   listDatasetsRoute,
@@ -383,13 +447,17 @@ export const evaluationPublicRoutes: RouteConfig[] = [
   listEvaluationRunsRoute,
   getEvaluationRunRoute,
   listTestCaseResultsRoute,
+  getTestCaseResultRoute,
   listIterationResultsRoute,
   getEvaluationRunWorkRoute,
   reportIterationsRoute,
   finishEvaluationRunRoute,
+  listReportDeliveriesRoute,
   createTargetRoute,
   listTargetsRoute,
   getTargetRoute,
   updateTargetRoute,
   deleteTargetRoute,
+  getReportSettingsRoute,
+  updateReportSettingsRoute,
 ];

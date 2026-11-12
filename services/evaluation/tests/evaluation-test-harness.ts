@@ -24,14 +24,15 @@ import {
 } from "@extispex/service-runtime/testing";
 import { listTestDatabases } from "@extispex/service-storage/testing";
 import {
-  type AttemptJob,
   createEvaluationApiService,
   createEvaluationWorker,
   type EvaluationApiService,
   type EvaluationDatabase,
+  type EvaluationJob,
   type EvaluationWorkerService,
   type JobQueue,
   openEvaluationDatabase,
+  REPORT_CHANNEL_CIPHER_PURPOSE,
   TARGET_CREDENTIAL_CIPHER_PURPOSE,
 } from "../src/create-service.ts";
 
@@ -39,6 +40,14 @@ export const TEST_TARGET_CREDENTIAL_CIPHER = await createSecretCipher(
   generateMasterKey(),
   TARGET_CREDENTIAL_CIPHER_PURPOSE,
 );
+
+export const TEST_REPORT_CHANNEL_CIPHER = await createSecretCipher(
+  generateMasterKey(),
+  REPORT_CHANNEL_CIPHER_PURPOSE,
+);
+
+/** Where the UI is in tests, for the links in Reports. */
+export const TEST_PUBLIC_UI_URL = "https://extispex.example";
 
 export const API_KEY = "test-api-key";
 export const OTHER_PROJECT_API_KEY = "other-project-api-key";
@@ -131,7 +140,9 @@ export interface TestHarness {
   worker: EvaluationWorkerService;
   /** What the worker's data lifecycle hears from Identity. */
   projectLifecycle: TestProjectLifecycle;
-  queuedJobs: AttemptJob[];
+  queuedJobs: EvaluationJob[];
+  /** The delay each queued job asked for, in the order of `queuedJobs`; 0 for none. */
+  queuedDelays: number[];
   telemetry: FakeTelemetry;
   readClock(): Date;
   advanceClock(milliseconds: number): void;
@@ -155,12 +166,15 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
         await entityManager.execute("delete from datasets");
         await entityManager.execute("delete from targets");
         await entityManager.execute("delete from background_leases");
+        await entityManager.execute("delete from report_settings");
         let clockMilliseconds = Date.parse("2026-11-08T10:00:00Z");
         const readCurrentTime = () => new Date(clockMilliseconds += 1_000);
-        const queuedJobs: AttemptJob[] = [];
+        const queuedJobs: EvaluationJob[] = [];
+        const queuedDelays: number[] = [];
         const jobQueue: JobQueue = {
-          enqueue: (jobs) => {
+          enqueue: (jobs, options) => {
             queuedJobs.push(...jobs);
+            queuedDelays.push(...jobs.map(() => options?.delayMilliseconds ?? 0));
             return Promise.resolve();
           },
           startWorking: () => Promise.resolve(),
@@ -199,6 +213,10 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
           targetCredentialCipher: TEST_TARGET_CREDENTIAL_CIPHER,
           targetAllowedDestinations: "127.0.0.1",
           targetTimeoutMilliseconds: 2_000,
+          reportChannelCipher: TEST_REPORT_CHANNEL_CIPHER,
+          reportAllowedDestinations: "127.0.0.1",
+          publicUiUrl: `${TEST_PUBLIC_UI_URL}/`,
+          reportTimeoutMilliseconds: 5_000,
           telemetryService: createFakeTelemetryService(telemetry, readClock),
           serviceTokens: FAKE_SERVICE_TOKENS,
           projectLifecycle,
@@ -213,6 +231,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
             database,
             jobQueue,
             targetCredentialCipher: TEST_TARGET_CREDENTIAL_CIPHER,
+            reportChannelCipher: TEST_REPORT_CHANNEL_CIPHER,
             requestAuthenticator: testRequestAuthenticator,
             logger,
             readCurrentTime,
@@ -220,6 +239,7 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
           worker,
           projectLifecycle,
           queuedJobs,
+          queuedDelays,
           telemetry,
           readClock,
           advanceClock: (milliseconds) => {
@@ -227,10 +247,12 @@ export function defineEvaluationTest(testName: string, testBody: EvaluationTestB
           },
           target,
           drainJobs: async () => {
+            queuedDelays.splice(0);
             for (const job of queuedJobs.splice(0)) await worker.handleJob(job);
           },
           drainJobsUntilIdle: async () => {
             for (let round = 0; round < 20 && queuedJobs.length > 0; round++) {
+              queuedDelays.splice(0);
               for (const job of queuedJobs.splice(0)) await worker.handleJob(job);
             }
           },

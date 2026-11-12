@@ -1,4 +1,5 @@
 import type {
+  EmailChannel,
   EvaluatorResult,
   IterationStatus,
   TestCaseDefinition,
@@ -158,6 +159,50 @@ export const TargetRecord = defineEntity({
     updatedAt: p.datetime(),
   },
   uniques: [{ properties: ["projectId", "name"] }],
+});
+
+/** The non-secret part of a Project's email channel; the SMTP password is sealed separately. */
+export type StoredEmailChannel = Omit<EmailChannel, "hasSmtpPassword">;
+
+/**
+ * A Project's Report settings. A null channel is turned off. The SMTP password and the Teams
+ * webhook URL are stored only in sealed form, each bound to the Project.
+ */
+export const ReportSettingsRecord = defineEntity({
+  name: "ReportSettingsRecord",
+  tableName: "report_settings",
+  properties: {
+    projectId: p.string().primary(),
+    condition: p.string(),
+    emailChannel: p.json<StoredEmailChannel>().nullable(),
+    sealedSmtpPassword: p.text().nullable(),
+    sealedTeamsWebhookUrl: p.text().nullable(),
+    teamsWebhookHost: p.string().nullable(),
+    updatedAt: p.datetime(),
+  },
+});
+
+/**
+ * One channel's Report of a finished run. `dueAt` is when its job should run: the first try, a
+ * retry, or the claim of a worker that is sending it. A job that has not run two minutes after it
+ * was due is queued again.
+ */
+export const ReportDeliveryRecord = defineEntity({
+  name: "ReportDeliveryRecord",
+  tableName: "report_deliveries",
+  properties: {
+    id: p.string().primary(),
+    runId: p.string(),
+    channel: p.string(),
+    status: p.string(),
+    attemptCount: p.integer(),
+    lastError: p.text().nullable(),
+    dueAt: p.datetime(),
+    deliveredAt: p.datetime().nullable(),
+    createdAt: p.datetime(),
+  },
+  uniques: [{ properties: ["runId", "channel"] }],
+  indexes: [{ properties: ["status", "dueAt"] }],
 });
 
 /** The local image's job queue; PostgreSQL deployments use pg-boss instead. */

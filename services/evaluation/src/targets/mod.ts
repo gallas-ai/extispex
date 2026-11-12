@@ -1,5 +1,11 @@
 /** Public entry point of the targets module: the only file other modules import. */
-export { parseDestinationAllowlist } from "./destination-allowlist.ts";
+export {
+  DestinationNotAllowedError,
+  postToAllowedDestination,
+  resolveAllowedAddresses,
+  resolveWithSystem,
+} from "./allowed-destination-post.ts";
+export { type DestinationAllowlist, parseDestinationAllowlist } from "./destination-allowlist.ts";
 export {
   createTargetClient,
   DEFAULT_TARGET_TIMEOUT_MILLISECONDS,

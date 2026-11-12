@@ -14,11 +14,19 @@ export interface ExecuteAttemptJob {
 
 export type AttemptJob = EvaluateAttemptJob | ExecuteAttemptJob;
 
+/** Asks the worker to send one channel's Report of a finished run. */
+export interface DeliverReportJob {
+  kind: "deliver-report";
+  deliveryId: string;
+}
+
+export type EvaluationJob = AttemptJob | DeliverReportJob;
+
 export interface EnqueueOptions {
   delayMilliseconds?: number;
 }
 
-export type AttemptJobHandler = (job: AttemptJob) => Promise<void>;
+export type JobHandler = (job: EvaluationJob) => Promise<void>;
 
 /**
  * Evaluation's private queue, with pg-boss in production and a SQLite table in the local image.
@@ -26,8 +34,8 @@ export type AttemptJobHandler = (job: AttemptJob) => Promise<void>;
  */
 export interface JobQueue {
   /** With `delayMilliseconds`, the jobs are not delivered before that much time has passed. */
-  enqueue(jobs: AttemptJob[], options?: EnqueueOptions): Promise<void>;
-  startWorking(handler: AttemptJobHandler): Promise<void>;
+  enqueue(jobs: EvaluationJob[], options?: EnqueueOptions): Promise<void>;
+  startWorking(handler: JobHandler): Promise<void>;
   /** Stops taking jobs and waits for the running ones. */
   stop(): Promise<void>;
 }

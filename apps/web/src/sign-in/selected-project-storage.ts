@@ -16,3 +16,8 @@ export function storeProjectId(projectId: string): void {
     // The choice then lasts only for this page load.
   }
 }
+
+/** The Project that a link names with `?project=`, such as a link in a Report. */
+export function readLinkedProjectId(): string | null {
+  return new URLSearchParams(globalThis.location?.search ?? "").get("project");
+}

@@ -265,7 +265,8 @@ defineEvaluationTest(
     );
     await createTarget(harness);
     const work = await startServerRun(harness);
-    const iterationId = harness.queuedJobs[0].iterationId;
+    const [firstJob] = harness.queuedJobs;
+    const iterationId = "iterationId" in firstJob ? firstJob.iterationId : "";
     const response = await report(harness, work.runId, [{
       iterationId,
       attempt: 1,

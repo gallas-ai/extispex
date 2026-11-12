@@ -28,8 +28,17 @@ import {
 } from "./iterations/mod.ts";
 import type { JobQueue } from "./job-queue/mod.ts";
 import {
+  createReportDeliverer,
+  createReportSender,
+  DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
+  DEFAULT_REPORT_TIMEOUT_MILLISECONDS,
+  registerReportSettingsRoutes,
+} from "./reports/mod.ts";
+import {
   createDatasetRepository,
   createEvaluationRunRepository,
+  createReportDeliveryRepository,
+  createReportSettingsRepository,
   createTargetRepository,
   type EvaluationDatabase,
   removeEvaluationProjectData,
@@ -50,22 +59,34 @@ export {
 export { DEFAULT_TRACE_COMPLETION_TIMING, type TraceCompletionTiming } from "./iterations/mod.ts";
 export {
   type AttemptJob,
+  type DeliverReportJob,
   type EvaluateAttemptJob,
+  type EvaluationJob,
   type ExecuteAttemptJob,
   type JobQueue,
   openJobQueue,
 } from "./job-queue/mod.ts";
+export {
+  DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
+  DEFAULT_REPORT_TIMEOUT_MILLISECONDS,
+  REPORT_DELIVERY_ATTEMPTS,
+} from "./reports/mod.ts";
 export { type EvaluationDatabase, openEvaluationDatabase } from "./storage/mod.ts";
 export { DEFAULT_TARGET_TIMEOUT_MILLISECONDS } from "./targets/mod.ts";
 
 /** The purpose that Target credentials are encrypted for. */
 export const TARGET_CREDENTIAL_CIPHER_PURPOSE = "evaluation-target-credential";
 
+/** The purpose that a Report channel's SMTP password and Teams webhook URL are encrypted for. */
+export const REPORT_CHANNEL_CIPHER_PURPOSE = "evaluation-report-channel";
+
 export interface EvaluationApiDependencies {
   database: EvaluationDatabase;
   jobQueue: JobQueue;
   /** Encrypts Target credentials, with the purpose {@link TARGET_CREDENTIAL_CIPHER_PURPOSE}. */
   targetCredentialCipher: SecretCipher;
+  /** Encrypts Report channel secrets, with the purpose {@link REPORT_CHANNEL_CIPHER_PURPOSE}. */
+  reportChannelCipher: SecretCipher;
   requestAuthenticator: RequestAuthenticator;
   logger: StructuredLogger;
   readCurrentTime?: () => Date;
@@ -93,10 +114,18 @@ export function createEvaluationApiService(
   );
   registerDatasetRoutes(app, { datasetRepository, readCurrentTime });
   registerTargetRoutes(app, { targetRepository, readCurrentTime });
+  registerReportSettingsRoutes(app, {
+    reportSettingsRepository: createReportSettingsRepository(
+      dependencies.database,
+      dependencies.reportChannelCipher,
+    ),
+    readCurrentTime,
+  });
   registerEvaluationRunRoutes(app, {
     datasetRepository,
     targetRepository,
     evaluationRunRepository: createEvaluationRunRepository(dependencies.database),
+    reportDeliveryRepository: createReportDeliveryRepository(dependencies.database),
     jobQueue: dependencies.jobQueue,
     logger: dependencies.logger,
     readCurrentTime,
@@ -114,6 +143,14 @@ export interface EvaluationWorkerServiceDependencies {
   targetTimeoutMilliseconds?: number;
   /** How a Target's host name is resolved; tests answer with changing addresses. */
   resolveTargetHostAddresses?: ResolveHostAddresses;
+  /** Opens Report channel secrets, with the purpose {@link REPORT_CHANNEL_CIPHER_PURPOSE}. */
+  reportChannelCipher: SecretCipher;
+  /** `EVALUATION_REPORT_ALLOWED_DESTINATIONS`; an empty value allows no SMTP server or webhook. */
+  reportAllowedDestinations: string;
+  /** `PUBLIC_UI_URL`, where people open the UI, for the links in a Report. */
+  publicUiUrl?: string | null;
+  reportRetryDelayMilliseconds?: number;
+  reportTimeoutMilliseconds?: number;
   /** Reaches Telemetry's internal API, with the service token that `serviceTokens` provides. */
   telemetryService: ServiceClient;
   serviceTokens: ServiceTokenSource;
@@ -158,7 +195,29 @@ export function createEvaluationWorker(
     logger: dependencies.logger,
     readCurrentTime,
   });
+  const logger = dependencies.logger;
   const worker = createAttemptEvaluationWorker({
+    reportDeliverer: createReportDeliverer({
+      reportDeliveryRepository: createReportDeliveryRepository(dependencies.database),
+      reportSettingsRepository: createReportSettingsRepository(
+        dependencies.database,
+        dependencies.reportChannelCipher,
+      ),
+      reportSender: createReportSender({
+        allowlist: parseDestinationAllowlist(
+          dependencies.reportAllowedDestinations,
+          "EVALUATION_REPORT_ALLOWED_DESTINATIONS",
+        ),
+        timeoutMilliseconds: dependencies.reportTimeoutMilliseconds ??
+          DEFAULT_REPORT_TIMEOUT_MILLISECONDS,
+      }),
+      jobQueue: dependencies.jobQueue,
+      publicUiUrl: dependencies.publicUiUrl?.replace(/\/+$/, "") || null,
+      retryDelayMilliseconds: dependencies.reportRetryDelayMilliseconds ??
+        DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
+      logger,
+      readCurrentTime,
+    }),
     evaluationRunRepository: createEvaluationRunRepository(dependencies.database),
     targetRepository: createTargetRepository(
       dependencies.database,
@@ -179,7 +238,7 @@ export function createEvaluationWorker(
       ...DEFAULT_TRACE_COMPLETION_TIMING,
       ...dependencies.traceCompletionTiming,
     },
-    logger: dependencies.logger,
+    logger,
     regexTimeoutMilliseconds: dependencies.regexTimeoutMilliseconds ??
       DEFAULT_REGEX_TIMEOUT_MILLISECONDS,
     inactiveRunTimeoutMilliseconds: dependencies.inactiveRunTimeoutMilliseconds ??

@@ -90,6 +90,12 @@ evaluation
 **Report**: A message about a finished Evaluation Run, delivered to a channel outside the platform.
 It usually carries the LLM Summary. _Avoid_: Notification, alert
 
+**Report Channel**: Where a Project's Reports go: email over the company's SMTP server, or a Teams
+channel through a Workflows webhook. _Avoid_: Destination, integration
+
+**Report Delivery**: One Report Channel's sending of one run's Report, with its attempts and status.
+It never changes the run's result. _Avoid_: Notification
+
 ### LLM Providers
 
 **Text Generation**: The provider capability of producing free-form text from a prompt.

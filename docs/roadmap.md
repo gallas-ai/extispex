@@ -16,7 +16,7 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 5    | [Trace completion and Telemetry Evaluator](#5-trace-completion-and-telemetry-evaluator)                | Done   |
 | 6    | [Server-Driven Execution and Session Test Cases](#6-server-driven-execution-and-session-test-cases)    | Done   |
 | 7    | [LLM providers, Grading Evaluator and LLM Summary](#7-llm-providers-grading-evaluator-and-llm-summary) | Next   |
-| 8    | [Reports](#8-reports)                                                                                  |        |
+| 8    | [Reports](#8-reports)                                                                                  | Done   |
 | 9    | [OIDC sign-in](#9-oidc-sign-in)                                                                        | Done   |
 | 10   | [SCIM and file import](#10-scim-and-file-import)                                                       | Done   |
 | 11   | [Logs](#11-logs)                                                                                       | Done   |

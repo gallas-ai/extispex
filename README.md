@@ -199,6 +199,15 @@ cd examples/typescript && API_KEY=$EXTISPEX_API_KEY deno task run-dataset
 
 The script exits with 0 only when the run's verdict is `passed`.
 
+### Reports
+
+A finished run can send a Report by email over your SMTP server and to a Teams channel through a
+Workflows webhook, for every run or only for runs that did not pass. Set them up under **Runs** →
+**Report settings**; each run's page shows how its Reports were delivered. The SMTP password and the
+webhook URL are stored encrypted. Separate services send only to the addresses in
+`EVALUATION_REPORT_ALLOWED_DESTINATIONS`, such as `smtp.company.example:587,*.logic.azure.com`, and
+link to the UI at `PUBLIC_UI_URL`; the local image allows any and links to `localhost`.
+
 ## Container images
 
 Images are published to the GitHub Container Registry as `ghcr.io/gallas-ai/extispex-<service>`. The

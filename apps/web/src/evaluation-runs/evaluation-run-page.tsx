@@ -1,20 +1,26 @@
 import type {
+  EvaluationRunSummary,
   EvaluatorResult,
   IterationAttempt,
   IterationResult,
+  ReportChannel,
+  ReportDelivery,
   TestCaseResult,
   TranscriptStep,
 } from "@extispex/contracts";
-import { useCallback, useState } from "react";
-import { Link, useParams } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router";
 import type { ApiCredentials } from "../api/api-request.ts";
 import {
   getEvaluationRun,
+  getTestCaseResult,
   listIterationResults,
+  listReportDeliveries,
   listTestCaseResults,
 } from "../api/evaluation-api.ts";
 import { serializeTracesUrlState } from "../navigation/traces-url-state.ts";
 import { Breadcrumbs } from "../prompts/prompt-parts.tsx";
+import { REPORT_SETTINGS_PATH } from "../reports/report-settings-page.tsx";
 import { useAccess } from "../sign-in/access-context.ts";
 import { AlertIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
@@ -31,6 +37,7 @@ interface EvaluationRunPageProps {
 
 export function EvaluationRunPage({ credentials, onSignInRequired }: EvaluationRunPageProps) {
   const runId = useParams().runId as string;
+  const linkedTestCaseName = useSearchParams()[0].get("testCase");
   const loadRun = useCallback(() => getEvaluationRun(credentials, runId), [credentials, runId]);
   const [runState, reloadRun] = useApiResource(loadRun);
   usePollingWhile(
@@ -69,6 +76,7 @@ export function EvaluationRunPage({ credentials, onSignInRequired }: EvaluationR
   }
 
   const run = runState.resource;
+  const refreshKey = `${run.status}:${run.completedIterations}`;
   return (
     <div className="page page-constrained">
       {breadcrumbs(run.datasetName)}
@@ -86,10 +94,137 @@ export function EvaluationRunPage({ credentials, onSignInRequired }: EvaluationR
           <VerdictBadge status={run.verdict} />
         </div>
       </div>
-      <TestCaseResults
+      {linkedTestCaseName !== null && (
+        <LinkedTestCase
+          credentials={credentials}
+          runId={run.id}
+          refreshKey={refreshKey}
+          testCaseName={linkedTestCaseName}
+        />
+      )}
+      <ReportDeliveries credentials={credentials} run={run} />
+      <TestCaseResults credentials={credentials} runId={run.id} refreshKey={refreshKey} />
+    </div>
+  );
+}
+
+const CHANNEL_LABELS: Record<ReportChannel, string> = { email: "Email", teams: "Teams" };
+
+function describeDelivery(delivery: ReportDelivery): string {
+  const formatTime = (isoTime: string) => new Date(isoTime).toLocaleString();
+  switch (delivery.status) {
+    case "delivered":
+      return `Delivered ${formatTime(delivery.deliveredAt!)}` +
+        (delivery.attempts > 1 ? ` on attempt ${delivery.attempts}.` : ".");
+    case "sending":
+      return `Sending, attempt ${delivery.attempts}.`;
+    case "failed":
+      return `Gave up after ${delivery.attempts} attempts: ${delivery.lastError}`;
+    case "pending":
+      return delivery.nextAttemptAt === null
+        ? "Waiting to be sent."
+        : `Attempt ${delivery.attempts} failed, trying again ${
+          formatTime(delivery.nextAttemptAt)
+        }: ${delivery.lastError}`;
+  }
+}
+
+/** Where the run's Report went. A delivery never changes the run's result. */
+function ReportDeliveries(
+  { credentials, run }: { credentials: ApiCredentials; run: EvaluationRunSummary },
+) {
+  const loadDeliveries = useCallback(
+    () => listReportDeliveries(credentials, run.id),
+    // A run gets its deliveries when it finishes.
+    [credentials, run.id, run.status],
+  );
+  const [deliveriesState, reloadDeliveries] = useApiResource(loadDeliveries);
+  const deliveries = deliveriesState.status === "loaded"
+    ? deliveriesState.resource.reportDeliveries
+    : [];
+  usePollingWhile(
+    deliveries.some((delivery) => delivery.status === "pending" || delivery.status === "sending"),
+    reloadDeliveries,
+  );
+  return (
+    <section className="panel report-deliveries" aria-label="Reports">
+      <header className="report-deliveries-header">
+        <h2 className="panel-title">Reports</h2>
+        <Link className="report-deliveries-settings" to={REPORT_SETTINGS_PATH}>
+          Report settings
+        </Link>
+      </header>
+      {deliveriesState.status === "failed" && (
+        <p className="status-text report-deliveries-note" role="alert">
+          {deliveriesState.message}
+        </p>
+      )}
+      {deliveriesState.status === "loaded" && deliveries.length === 0 && (
+        <p className="status-text report-deliveries-note">
+          {run.status === "running"
+            ? "Reports go out when the run finishes."
+            : "No Report was sent for this run."}
+        </p>
+      )}
+      {deliveries.length > 0 && (
+        <ul className="report-delivery-list">
+          {deliveries.map((delivery) => (
+            <li key={delivery.channel} className="report-delivery">
+              <span className="report-delivery-channel">{CHANNEL_LABELS[delivery.channel]}</span>
+              <span
+                className={`status-badge ${
+                  delivery.status === "delivered"
+                    ? "status-badge-ok"
+                    : delivery.status === "failed"
+                    ? "status-badge-error"
+                    : "status-badge-unset"
+                }`}
+              >
+                {delivery.status === "delivered"
+                  ? "Delivered"
+                  : delivery.status === "failed"
+                  ? "Failed"
+                  : delivery.status === "sending"
+                  ? "Sending"
+                  : "Pending"}
+              </span>
+              <span className="status-text report-delivery-detail">
+                {describeDelivery(delivery)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** The Test Case a Report linked to, opened above the others whichever page it is on. */
+function LinkedTestCase(
+  { credentials, runId, refreshKey, testCaseName }: ResultsProps & { testCaseName: string },
+) {
+  const loadTestCase = useCallback(
+    () => getTestCaseResult(credentials, runId, testCaseName),
+    [credentials, runId, testCaseName],
+  );
+  const [testCaseState, reloadTestCase] = useApiResource(loadTestCase);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const isLoaded = testCaseState.status === "loaded";
+  useEffect(() => {
+    if (isLoaded) panelRef.current?.scrollIntoView({ block: "start" });
+  }, [isLoaded]);
+  if (testCaseState.status === "loading") return null;
+  if (testCaseState.status === "failed") {
+    return <PageProblem message={testCaseState.message} onRetry={reloadTestCase} />;
+  }
+  return (
+    <div className="linked-test-case" ref={panelRef}>
+      <TestCaseResultPanel
         credentials={credentials}
-        runId={run.id}
-        refreshKey={`${run.status}:${run.completedIterations}`}
+        runId={runId}
+        refreshKey={refreshKey}
+        testCase={testCaseState.resource}
+        isInitiallyOpen
       />
     </div>
   );
@@ -169,9 +304,12 @@ function LoadMoreButton(
 }
 
 function TestCaseResultPanel(
-  { credentials, runId, refreshKey, testCase }: ResultsProps & { testCase: TestCaseResult },
+  { credentials, runId, refreshKey, testCase, isInitiallyOpen = false }: ResultsProps & {
+    testCase: TestCaseResult;
+    isInitiallyOpen?: boolean;
+  },
 ) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(isInitiallyOpen);
   return (
     <section className="panel test-case-result" aria-label={`Test Case ${testCase.name}`}>
       <header className="test-case-result-header">

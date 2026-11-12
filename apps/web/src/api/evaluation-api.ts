@@ -9,12 +9,16 @@ import type {
   ListDatasetsResponse,
   ListEvaluationRunsResponse,
   ListIterationResultsResponse,
+  ListReportDeliveriesResponse,
   ListTargetsResponse,
   ListTestCaseResultsResponse,
   ListTestCasesResponse,
+  ReportSettings,
   Target,
   TestCase,
   TestCaseDefinitionInput,
+  TestCaseResult,
+  UpdateReportSettingsRequest,
   UpdateTargetRequest,
 } from "@extispex/contracts";
 import { type ApiCredentials, requestJson } from "./api-request.ts";
@@ -170,4 +174,33 @@ export function updateTarget(
 
 export function deleteTarget(credentials: ApiCredentials, targetName: string): Promise<null> {
   return requestJson(credentials, targetPath(targetName), { method: "DELETE" });
+}
+
+export function getTestCaseResult(
+  credentials: ApiCredentials,
+  runId: string,
+  testCaseName: string,
+): Promise<TestCaseResult> {
+  return requestJson(
+    credentials,
+    `${evaluationRunPath(runId)}/test-cases/${encodeURIComponent(testCaseName)}`,
+  );
+}
+
+export function listReportDeliveries(
+  credentials: ApiCredentials,
+  runId: string,
+): Promise<ListReportDeliveriesResponse> {
+  return requestJson(credentials, `${evaluationRunPath(runId)}/report-deliveries`);
+}
+
+export function getReportSettings(credentials: ApiCredentials): Promise<ReportSettings> {
+  return requestJson(credentials, "/v1/report-settings");
+}
+
+export function updateReportSettings(
+  credentials: ApiCredentials,
+  request: UpdateReportSettingsRequest,
+): Promise<ReportSettings> {
+  return requestJson(credentials, "/v1/report-settings", { method: "PUT", body: request });
 }

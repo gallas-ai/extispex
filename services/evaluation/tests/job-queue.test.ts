@@ -1,8 +1,13 @@
 import { assert, assertEquals } from "@std/assert";
 import { createStructuredLogger } from "@extispex/service-runtime";
 import { listTestDatabases } from "@extispex/service-storage/testing";
-import { type AttemptJob, openEvaluationDatabase, openJobQueue } from "../src/create-service.ts";
+import { type EvaluationJob, openEvaluationDatabase, openJobQueue } from "../src/create-service.ts";
 import { JOB_RETRY_LIMIT } from "../src/job-queue/job-queue.ts";
+
+/** The test queues only attempt jobs; a Report job has no Iteration. */
+function iterationIdOf(job: EvaluationJob): string {
+  return "iterationId" in job ? job.iterationId : "";
+}
 
 const logger = createStructuredLogger("evaluation-queue-test");
 
@@ -26,7 +31,7 @@ for (const testDatabase of listTestDatabases("evaluation")) {
       let deliveredAt: number | null = null;
       try {
         await jobQueue.startWorking((job) => {
-          if (job.iterationId === iterationId) deliveredAt = Date.now();
+          if (iterationIdOf(job) === iterationId) deliveredAt = Date.now();
           return Promise.resolve();
         });
         const enqueuedAt = Date.now();
@@ -52,12 +57,12 @@ for (const testDatabase of listTestDatabases("evaluation")) {
       const database = await openEvaluationDatabase(testDatabase.url);
       const jobQueue = await openJobQueue(testDatabase.url, database, logger);
       const iterationPrefix = crypto.randomUUID();
-      const deliveries: AttemptJob[] = [];
+      const deliveries: EvaluationJob[] = [];
       try {
         await jobQueue.startWorking((job) => {
-          if (!job.iterationId.startsWith(iterationPrefix)) return Promise.resolve();
+          if (!iterationIdOf(job).startsWith(iterationPrefix)) return Promise.resolve();
           deliveries.push(job);
-          return job.iterationId.endsWith("failing")
+          return iterationIdOf(job).endsWith("failing")
             ? Promise.reject(new Error("Expected failure"))
             : Promise.resolve();
         });
@@ -66,15 +71,15 @@ for (const testDatabase of listTestDatabases("evaluation")) {
           { iterationId: `${iterationPrefix}-failing`, attemptNumber: 2 },
         ]);
         const countFailing = () =>
-          deliveries.filter((job) => job.iterationId.endsWith("failing")).length;
+          deliveries.filter((job) => iterationIdOf(job).endsWith("failing")).length;
         await waitUntil(() =>
           countFailing() === JOB_RETRY_LIMIT + 1 &&
-          deliveries.some((job) => job.iterationId.endsWith("working"))
+          deliveries.some((job) => iterationIdOf(job).endsWith("working"))
         );
         // Long enough for a retry beyond the limit to have shown up.
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 1_500));
         assertEquals(countFailing(), JOB_RETRY_LIMIT + 1);
-        assertEquals(deliveries.filter((job) => job.iterationId.endsWith("working")).length, 1);
+        assertEquals(deliveries.filter((job) => iterationIdOf(job).endsWith("working")).length, 1);
       } finally {
         await jobQueue.stop();
         await database.close();
