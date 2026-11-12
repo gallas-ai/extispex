@@ -47,6 +47,7 @@ try {
   const ingestion = await measureIngestion(deployment, loadClient, {
     senderCount: 8,
     warmUpRequestsPerSender: 3,
+    roundCount: 3,
     requestsPerSender: scaled(75),
   });
   console.log("Measuring query latency.");
@@ -54,7 +55,7 @@ try {
     deployment,
     loadClient,
     ingestion.ingestedData,
-    { warmUpRequests: 10, measuredRequests: scaled(150) },
+    { passCount: 3, warmUpRequests: 10, measuredRequests: scaled(100) },
   );
   console.log("Measuring the evaluation job queue.");
   const jobQueueMeasurements = await measureJobQueue(deployment, loadClient, {

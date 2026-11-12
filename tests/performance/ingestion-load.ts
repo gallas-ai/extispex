@@ -1,7 +1,8 @@
 /**
  * Ingestion throughput: several senders, each like one instrumented process, send a fixed number
- * of OTLP/JSON requests to Telemetry's OTLP/HTTP endpoint. The amount of data is fixed, so that the
- * queries that follow read the same amount in every run.
+ * of OTLP/JSON requests to Telemetry's OTLP/HTTP endpoint, in several rounds. The best round is the
+ * measurement, because a shared runner's hiccups only ever make a round slower. The amount of data
+ * is fixed, so that the queries that follow read the same amount in every run.
  */
 import type { RunningDeployment } from "@extispex/e2e-tests";
 import type { Measurement } from "./performance-results.ts";
@@ -11,6 +12,8 @@ export interface IngestionSettings {
   senderCount: number;
   /** Unmeasured requests per sender first, so that connections, caches and partitions exist. */
   warmUpRequestsPerSender: number;
+  /** Measured rounds, each of `requestsPerSender` requests from every sender. */
+  roundCount: number;
   requestsPerSender: number;
 }
 
@@ -50,7 +53,8 @@ export async function measureIngestion(
   loadClient: LoadClient,
   settings: IngestionSettings,
 ): Promise<{ measurements: Measurement[]; ingestedData: IngestedData }> {
-  const totalRequestsPerSender = settings.warmUpRequestsPerSender + settings.requestsPerSender;
+  const totalRequestsPerSender = settings.warmUpRequestsPerSender +
+    settings.roundCount * settings.requestsPerSender;
   const metricBaseMilliseconds = Date.now() -
     (totalRequestsPerSender + 6) * METRIC_EXPORT_INTERVAL_SECONDS * 1_000;
   const ingestedData: IngestedData = {
@@ -90,17 +94,23 @@ async function runIngestionScenario(
       }
     });
   await sendRequests(0, settings.warmUpRequestsPerSender);
-  const startedAt = performance.now();
-  await sendRequests(settings.warmUpRequestsPerSender, settings.requestsPerSender);
-  const elapsedSeconds = (performance.now() - startedAt) / 1_000;
-  const recordCount = settings.senderCount * settings.requestsPerSender *
+  const recordsPerRound = settings.senderCount * settings.requestsPerSender *
     scenario.recordsPerRequest;
+  const roundThroughputs: number[] = [];
+  for (let roundIndex = 0; roundIndex < settings.roundCount; roundIndex++) {
+    const startedAt = performance.now();
+    await sendRequests(
+      settings.warmUpRequestsPerSender + roundIndex * settings.requestsPerSender,
+      settings.requestsPerSender,
+    );
+    roundThroughputs.push(recordsPerRound / ((performance.now() - startedAt) / 1_000));
+  }
   return {
     id: scenario.id,
-    description: scenario.description,
+    description: `${scenario.description}, best of ${settings.roundCount} rounds`,
     kind: "throughput",
     unit: scenario.unit,
-    value: Math.round(recordCount / elapsedSeconds),
+    value: Math.round(Math.max(...roundThroughputs)),
   };
 }
 
