@@ -55,8 +55,14 @@ export interface ReportFacts {
   testCaseCounts: Record<Verdict, number>;
   /** Failed Test Cases first, then those that ended as Error, each in the run's order. */
   unsuccessfulTestCases: UnsuccessfulTestCase[];
-  /** Null when the run has no LLM Summary. */
+  /** Null when the run has no LLM Summary, or not yet. */
   llmSummary: string | null;
+}
+
+/** Whether a delivery should wait for its run's LLM Summary. */
+export interface LlmSummaryWait {
+  isLlmSummaryPending: boolean;
+  finishedAt: Date;
 }
 
 export interface ReportDeliveryRepository {
@@ -74,6 +80,10 @@ export interface ReportDeliveryRepository {
   claimStalledDeliveries(cutoff: Date, claimedAt: Date): Promise<DeliverReportJob[]>;
   /** Null when the run does not exist or has not finished. */
   readReportFacts(runId: string): Promise<ReportFacts | null>;
+  /** Null when the delivery or its run no longer exists, or the run has not finished. */
+  readLlmSummaryWait(deliveryId: string): Promise<LlmSummaryWait | null>;
+  /** A delivery that waits for the LLM Summary is due again later, so it does not look stalled. */
+  postponeDelivery(deliveryId: string, dueAt: Date): Promise<void>;
 }
 
 /**
@@ -244,9 +254,28 @@ export function createReportDeliveryRepository(
             totalIterations: iterations.length,
           };
         }),
-        // The LLM Summary arrives with roadmap step 7; until then a Report has none.
-        llmSummary: null,
+        llmSummary: runRow.summaryStatus === "completed" ? runRow.summaryText ?? null : null,
       };
+    },
+
+    async readLlmSummaryWait(deliveryId) {
+      const entityManager = database.orm.em.fork();
+      const row = await entityManager.findOne(ReportDeliveryRecord, { id: deliveryId });
+      if (row === null) return null;
+      const runRow = await entityManager.findOne(EvaluationRunRecord, { id: row.runId });
+      if (runRow?.finishedAt == null) return null;
+      return {
+        isLlmSummaryPending: runRow.summaryStatus === "pending" ||
+          runRow.summaryStatus === "generating",
+        finishedAt: runRow.finishedAt,
+      };
+    },
+
+    async postponeDelivery(deliveryId, dueAt) {
+      await database.orm.em.fork().nativeUpdate(ReportDeliveryRecord, {
+        id: deliveryId,
+        status: "pending",
+      }, { dueAt });
     },
   };
 }

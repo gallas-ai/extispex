@@ -14,6 +14,13 @@ export const REPORT_DELIVERY_ATTEMPTS = 5;
 export const DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS = 60_000;
 /** A delivery whose job has not run this long after it was due is queued again. */
 const STALLED_DELIVERY_MILLISECONDS = 120_000;
+/**
+ * A Report waits this long after the run finished for its LLM Summary, which is written after the
+ * run ends; then it goes out without one.
+ */
+export const LLM_SUMMARY_WAIT_MILLISECONDS = 300_000;
+/** How often a waiting Report looks again whether the LLM Summary is there. */
+export const LLM_SUMMARY_POLL_MILLISECONDS = 5_000;
 
 export interface ReportDelivererDependencies {
   reportDeliveryRepository: ReportDeliveryRepository;
@@ -65,6 +72,19 @@ export function createReportDeliverer(dependencies: ReportDelivererDependencies)
 
   return {
     async deliverReport(job) {
+      const summaryWait = await reportDeliveryRepository.readLlmSummaryWait(job.deliveryId);
+      const now = readCurrentTime();
+      if (
+        summaryWait?.isLlmSummaryPending &&
+        now.getTime() - summaryWait.finishedAt.getTime() < LLM_SUMMARY_WAIT_MILLISECONDS
+      ) {
+        await reportDeliveryRepository.postponeDelivery(
+          job.deliveryId,
+          new Date(now.getTime() + LLM_SUMMARY_POLL_MILLISECONDS),
+        );
+        await jobQueue.enqueue([job], { delayMilliseconds: LLM_SUMMARY_POLL_MILLISECONDS });
+        return;
+      }
       const claim = await reportDeliveryRepository.claimDelivery(job.deliveryId, readCurrentTime());
       if (claim === null) return;
       let result: DeliveryResult;

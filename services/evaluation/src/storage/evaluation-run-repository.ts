@@ -24,7 +24,6 @@ import { decideRunVerdict, decideTestCaseOutcome } from "../evaluation-runs/mod.
 import type { ExecutionResult } from "../iterations/mod.ts";
 import type {
   AttemptJob,
-  DeliverReportJob,
   EvaluateAttemptJob,
   EvaluationJob,
   ExecuteAttemptJob,
@@ -1147,7 +1146,7 @@ export function createEvaluationRunRepository(
         id: { $in: iterationRows.map((iterationRow) => iterationRow.id) },
         status: { $in: ["evaluating", "executing"] },
       }, { evaluationRequestedAt: claimedAt });
-      return iterationRows.map((iterationRow): EvaluationJob => ({
+      return iterationRows.map((iterationRow): AttemptJob => ({
         ...(iterationRow.status === "executing" ? { kind: "execute" } : {}),
         iterationId: iterationRow.id,
         attemptNumber: iterationRow.currentAttempt,

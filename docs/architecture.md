@@ -593,6 +593,9 @@ the SMTP client.
   (`EVALUATION_REPORT_TIMEOUT_MILLISECONDS`). The maintenance task queues a delivery again that is
   more than two minutes past due. `GET /v1/evaluation-runs/{id}/report-deliveries` and the run page
   show each channel's status, attempts and last error.
+- **LLM Summary:** it is written after the run finishes, so a delivery whose run's LLM Summary is
+  still pending looks again every 5 seconds, without counting an attempt, for up to 5 minutes after
+  the run finished; then the Report goes out without it. Added in roadmap step 7.
 - **Allowed destinations:** SMTP servers and webhooks are addresses that users enter, so the worker
   checks them like Targets, against `EVALUATION_REPORT_ALLOWED_DESTINATIONS` in the same format, for
   example `smtp.company.example:587,*.logic.azure.com,*.environment.api.powerplatform.com`. Separate
@@ -1055,6 +1058,7 @@ The LLM providers, Grading Evaluator and LLM Summary step added these checks on 
 | Grading Evaluators against fake providers, on both databases        | A Prompt Version's verdict, a whole Session's Transcript, Jev's yes-or-no, score and choice questions, Anthropic's request shape, and spans only with `includeSpans`                                    |
 | Unusable answers                                                    | An invalid verdict, a refusal, a refused key and a missing provider, prompt or Prompt Variable end as Error with the reason; a 429 is tried again within the call                                       |
 | LLM Summaries on both databases                                     | Written with the default prompt or a Prompt Version, `not_configured` without a provider, retried and then `failed`, a lost job queued again, a repeated job ignored                                    |
+| The LLM Summary in a Report                                         | Email (text and HTML) and the Teams card carry it; a delivery waits while it is pending and goes out without it after 5 minutes                                                                         |
 | Provider API keys at rest                                           | Stored only in sealed form, never returned, kept, replaced or removed on change; a deleted Project's providers and settings are removed                                                                 |
 | Real providers, run locally with keys                               | `gpt-4.1-mini` through OpenAI and `jev-1.14.0` through TypeSafe pass the Transcript that names the refund period and fail the one that does not                                                         |
 | Through the Gateway, with a fake provider                           | A Session's Transcript judged by a Prompt Version and by Jev, and the LLM Summary written, in all-in-one and in separate services                                                                       |

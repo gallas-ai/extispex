@@ -11,11 +11,6 @@ function iterationIdOf(job: EvaluationJob): string {
 
 const logger = createStructuredLogger("evaluation-queue-test");
 
-/** These tests queue only attempt jobs. */
-function iterationIdOf(job: EvaluationJob): string {
-  return "iterationId" in job ? job.iterationId : "";
-}
-
 async function waitUntil(condition: () => boolean, timeoutMilliseconds = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMilliseconds;
   while (!condition()) {
