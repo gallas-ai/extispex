@@ -40,7 +40,8 @@ await cipher.open(sealed, otherTargetId); // rejects
   before stops working within five minutes.
 - Signing keys stored in plain text by an earlier version are encrypted when Identity starts. The
   update applies only to a value that is still plain text, so replicas starting together are safe.
-- Rotating the master key is not built. The version in the stored prefix leaves room for a key ID
-  and for re-encrypting values with a new key.
+- Rotating the master key was not built here. The version in the stored prefix left room for a key
+  ID, which [ADR 0020](0020-key-ids-in-sealed-values-and-two-step-signing-key-rotation.md) added,
+  together with re-encrypting values with a new key.
 - The binding to a record means a sealed value copied to another row does not open, so restoring one
   table from an older backup keeps working only for rows whose IDs did not change.

@@ -63,6 +63,15 @@ app.kubernetes.io/component: {{ .component }}
     secretKeyRef:
       name: {{ .Values.masterKey.existingSecret }}
       key: {{ .Values.masterKey.secretKey }}
+{{- with .Values.masterKey.previous }}
+{{- if .existingSecret }}
+- name: PREVIOUS_MASTER_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ .existingSecret }}
+      key: {{ .secretKey }}
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{/* Identity's address and the client secret of one service; call with (dict "root" $ "client" "prompt"). */}}

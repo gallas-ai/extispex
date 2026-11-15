@@ -14,6 +14,8 @@ export * from "./identity/directory-routes.ts";
 export * from "./identity/project-contracts.ts";
 export * from "./identity/project-lifecycle.ts";
 export * from "./identity/project-routes.ts";
+export * from "./identity/signing-key-contracts.ts";
+export * from "./identity/signing-key-routes.ts";
 export * from "./prompt/prompt-contracts.ts";
 export * from "./prompt/prompt-routes.ts";
 export * from "./telemetry/attribute-filter.ts";

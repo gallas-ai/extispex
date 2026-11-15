@@ -7,7 +7,11 @@ import {
   type StructuredLogger,
 } from "@extispex/service-runtime";
 import { DEFAULT_PASSWORD_HASH_ITERATIONS } from "./accounts/mod.ts";
-import { createAccessTokenSigner, registerInternalTokenRoutes } from "./access-tokens/mod.ts";
+import {
+  createAccessTokenSigner,
+  registerInternalTokenRoutes,
+  registerSigningKeyRoutes,
+} from "./access-tokens/mod.ts";
 import {
   type IdentityEnvironment,
   registerAccessRoutes,
@@ -44,7 +48,12 @@ export {
   type FirstAdministrator,
   parseServiceClients,
 } from "./accounts/mod.ts";
-export { createSigningKeyCipher, protectStoredSigningKeys } from "./access-tokens/mod.ts";
+export {
+  createSigningKeyCipher,
+  DEFAULT_SIGNING_KEY_PUBLICATION_SECONDS,
+  protectStoredSigningKeys,
+  resealSigningKeys,
+} from "./access-tokens/mod.ts";
 export {
   generateApiKey,
   generateRandomCharacters,
@@ -74,6 +83,11 @@ export interface IdentityServiceDependencies {
   fetchFromOidcProvider?: typeof fetch;
   logger: StructuredLogger;
   readCurrentTime?: () => Date;
+  /**
+   * How long a new signing key is published before it may sign, from
+   * `SIGNING_KEY_PUBLICATION_SECONDS`; a minute by default, shortened by tests.
+   */
+  signingKeyPublicationSeconds?: number;
   /** PBKDF2 iterations for new password hashes; tests lower it to stay fast. */
   passwordHashIterations?: number;
   /** How often `runDataLifecycle` runs; its lease lasts two intervals. */
@@ -111,6 +125,7 @@ export function createIdentityService(dependencies: IdentityServiceDependencies)
     dependencies.database,
     dependencies.signingKeyCipher,
     readCurrentTime,
+    { signingKeyPublicationSeconds: dependencies.signingKeyPublicationSeconds },
   );
   const signInRepository = createSignInRepository(dependencies.database);
   const browserSignIns = createBrowserSignIns(signInRepository, readCurrentTime);
@@ -160,6 +175,7 @@ export function createIdentityService(dependencies: IdentityServiceDependencies)
     passwordHashIterations,
     readCurrentTime,
   });
+  registerSigningKeyRoutes(app, { accessTokenSigner });
   registerDirectoryRoutes(app, {
     directoryTokenRepository,
     directoryImportRepository: createDirectoryImportRepository(dependencies.database),

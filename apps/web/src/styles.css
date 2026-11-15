@@ -3867,6 +3867,33 @@ textarea {
   resize: vertical;
 }
 
+/* Signing keys */
+
+.signing-key-summary {
+  margin: 0;
+  padding: 0 16px 4px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.signing-key-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px 12px;
+}
+
+.signing-key-table code {
+  overflow-wrap: anywhere;
+}
+
+.signing-key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 /* Directory sync */
 
 .directory-summary {

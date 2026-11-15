@@ -52,7 +52,10 @@ characters) and `BOOTSTRAP_PROJECT_API_KEY` (at least 32 characters) before the 
 
 The image also creates `/data/master-key`, which encrypts Target credentials, LLM provider API keys
 and the key that signs access tokens. Keep the volume, or set `MASTER_KEY`
-(`openssl rand -base64 32`) yourself.
+(`openssl rand -base64 32`) yourself. To replace it, start once with the new key as `MASTER_KEY` and
+the old one as `PREVIOUS_MASTER_KEY`: everything stored is encrypted again with the new key at
+start, and from then on the new key alone is enough. Keep setting `MASTER_KEY`, or write the new key
+to `/data/master-key`.
 
 ## Projects, users and Roles
 
@@ -226,7 +229,8 @@ own image on your PostgreSQL, as non-root containers with whatever UID the clust
 the master key and the database URLs from Secrets you create first, runs each service's database
 migrations in a Job before every install and upgrade, and exposes the UI, OTLP/HTTP and OTLP/gRPC
 through an Ingress or an OpenShift Route. The worker can reach Targets, LLM providers and Report
-webhooks through an HTTP proxy.
+webhooks through an HTTP proxy. Its README describes rotating the master key; Instance admins rotate
+the key that signs access tokens on the **Access** page.
 
 ## Container images
 

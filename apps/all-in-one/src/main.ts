@@ -4,16 +4,15 @@
  */
 import {
   createEvaluationApiService,
+  createEvaluationSecretCiphers,
   createEvaluationWorker,
   DEFAULT_LLM_TIMEOUT_MILLISECONDS,
   DEFAULT_REPORT_RETRY_DELAY_MILLISECONDS,
   DEFAULT_TARGET_TIMEOUT_MILLISECONDS,
   DEFAULT_TRACE_COMPLETION_TIMING,
-  LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
   openEvaluationDatabase,
   openJobQueue,
-  REPORT_CHANNEL_CIPHER_PURPOSE,
-  TARGET_CREDENTIAL_CIPHER_PURPOSE,
+  resealEvaluationSecrets,
 } from "@extispex/evaluation-service";
 import { createGatewayService } from "@extispex/gateway-service";
 import { MINIMUM_PASSWORD_LENGTH } from "@extispex/contracts";
@@ -23,6 +22,7 @@ import {
   createIdentityService,
   createSigningKeyCipher,
   DEFAULT_FIRST_ADMINISTRATOR_EMAIL,
+  DEFAULT_SIGNING_KEY_PUBLICATION_SECONDS,
   generateApiKey,
   generateRandomCharacters,
   generateServiceClientSecret,
@@ -31,6 +31,7 @@ import {
   openIdentityDatabase,
   protectStoredSigningKeys,
   readOidcSettings,
+  resealSigningKeys,
 } from "@extispex/identity-service";
 import { createPromptService, openPromptDatabase } from "@extispex/prompt-service";
 import { createInProcessServiceClient } from "@extispex/service-client";
@@ -38,10 +39,10 @@ import {
   createIdentityProjectLifecycleSource,
   createIdentityRequestAuthenticator,
   createIdentityServiceTokenSource,
-  createSecretCipher,
   createServiceTokenClient,
   createStructuredLogger,
   generateMasterKey,
+  type MasterKeys,
   readDataLifecycleIntervalMilliseconds,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
@@ -62,7 +63,13 @@ import {
 const logger = createStructuredLogger("all-in-one");
 const dataDirectory = readOptionalEnvironmentVariable("DATA_DIRECTORY") ?? "./data";
 await Deno.mkdir(dataDirectory, { recursive: true });
-const masterKey = await readOrCreateMasterKey();
+// During a rotation, PREVIOUS_MASTER_KEY still opens what the old key sealed, and every stored
+// secret is sealed again with the current key below, at start: this process is the only one.
+const previousMasterKey = readOptionalEnvironmentVariable("PREVIOUS_MASTER_KEY");
+const masterKey: MasterKeys = {
+  current: await readOrCreateMasterKey(),
+  ...(previousMasterKey === undefined ? {} : { previous: previousMasterKey }),
+};
 
 const identityDatabase = await openIdentityDatabase(`sqlite:${dataDirectory}/identity.sqlite`);
 // The services in this process get service tokens like separate services do, with secrets that
@@ -75,9 +82,18 @@ const serviceClientSecrets = new Map([
 const signingKeyCipher = await createSigningKeyCipher(masterKey);
 const dataLifecycleIntervalMilliseconds = readDataLifecycleIntervalMilliseconds();
 await protectStoredSigningKeys(identityDatabase, signingKeyCipher);
+if (previousMasterKey !== undefined) {
+  logger.info("Sealed the signing keys with the current master key", {
+    signingKeys: await resealSigningKeys(identityDatabase, signingKeyCipher),
+  });
+}
 const identityService = createIdentityService({
   database: identityDatabase,
   signingKeyCipher,
+  signingKeyPublicationSeconds: readPositiveIntegerEnvironmentVariable(
+    "SIGNING_KEY_PUBLICATION_SECONDS",
+    DEFAULT_SIGNING_KEY_PUBLICATION_SECONDS,
+  ),
   // Local accounts are how people sign in to the local image.
   areLocalAccountsEnabled: true,
   serviceClientSecrets,
@@ -132,16 +148,16 @@ const evaluationJobQueue = await openJobQueue(
   evaluationDatabase,
   evaluationLogger,
 );
-const targetCredentialCipher = await createSecretCipher(
-  masterKey,
-  TARGET_CREDENTIAL_CIPHER_PURPOSE,
-);
-const reportChannelCipher = await createSecretCipher(masterKey, REPORT_CHANNEL_CIPHER_PURPOSE);
+const evaluationCiphers = await createEvaluationSecretCiphers(masterKey);
+if (previousMasterKey !== undefined) {
+  logger.info("Sealed Evaluation's secrets with the current master key", {
+    ...(await resealEvaluationSecrets(evaluationDatabase, evaluationCiphers)),
+  });
+}
+const targetCredentialCipher = evaluationCiphers.targetCredential;
+const reportChannelCipher = evaluationCiphers.reportChannel;
 const gatewayPort = readPortEnvironmentVariable("GATEWAY_PORT", 8080);
-const llmProviderApiKeyCipher = await createSecretCipher(
-  masterKey,
-  LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
-);
+const llmProviderApiKeyCipher = evaluationCiphers.llmProviderApiKey;
 const evaluationApiService = createEvaluationApiService({
   database: evaluationDatabase,
   jobQueue: evaluationJobQueue,

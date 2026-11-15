@@ -39,13 +39,16 @@ import {
 } from "../src/create-service.ts";
 import { type FakeLlmProvider, startFakeLlmProvider } from "./fixtures/fake-llm-provider.ts";
 
+/** The master key every test cipher derives from, as one Instance's are. */
+export const TEST_MASTER_KEY = generateMasterKey();
+
 export const TEST_TARGET_CREDENTIAL_CIPHER = await createSecretCipher(
-  generateMasterKey(),
+  TEST_MASTER_KEY,
   TARGET_CREDENTIAL_CIPHER_PURPOSE,
 );
 
 export const TEST_REPORT_CHANNEL_CIPHER = await createSecretCipher(
-  generateMasterKey(),
+  TEST_MASTER_KEY,
   REPORT_CHANNEL_CIPHER_PURPOSE,
 );
 
@@ -53,7 +56,7 @@ export const TEST_REPORT_CHANNEL_CIPHER = await createSecretCipher(
 export const TEST_PUBLIC_UI_URL = "https://extispex.example";
 
 export const TEST_LLM_PROVIDER_API_KEY_CIPHER = await createSecretCipher(
-  generateMasterKey(),
+  TEST_MASTER_KEY,
   LLM_PROVIDER_API_KEY_CIPHER_PURPOSE,
 );
 

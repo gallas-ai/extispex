@@ -19,6 +19,13 @@ imagePullSecrets: []
 masterKey:
   existingSecret: ""
   secretKey: master-key
+  # During a rotation, the master key being replaced: point existingSecret above at the new key and
+  # this at the old one. Identity and Evaluation then open values sealed with either, and a Job per
+  # service seals every stored secret again with the new key after the upgrade. Remove it with the
+  # next upgrade, once those Jobs succeeded. See README.md.
+  previous:
+    existingSecret: ""
+    secretKey: master-key
 
 # The customer's PostgreSQL. The chart does not install it. One Secret holds each service's
 # connection URL; the databases may share one server. The migration Jobs create a missing database
@@ -69,6 +76,8 @@ dataLifecycle:
 
 identity:
   replicas: 1
+  # How long a new signing key is published before it may sign, in seconds. Empty keeps 60.
+  signingKeyPublicationSeconds: ""
   # "enabled" lets users sign in with a password that Identity stores, such as a break-glass admin.
   localAccounts: disabled
   oidc:

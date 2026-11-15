@@ -134,6 +134,8 @@ jobs:
         run: |
           kubectl -n extispex exec deployment/egress-proxy -- cat /var/log/squid/access.log |
             grep "sample-target.extispex.svc.cluster.local:8090/evaluate"
+      - name: Rotate the master key, then sign in with the new key alone
+        run: deploy/helm/kind/rotate-master-key.sh
       - name: Cluster state
         if: failure()
         run: |

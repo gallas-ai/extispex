@@ -10,6 +10,8 @@ bootstrap:
   existingSecret: extispex-bootstrap
 identity:
   localAccounts: enabled
+  # A new signing key may sign after two seconds, so that the rotation tests stay short.
+  signingKeyPublicationSeconds: "2"
 # Short, as in the other e2e deployments, so that the retention tests see data go within seconds.
 dataLifecycle:
   intervalMilliseconds: "1000"

@@ -22,7 +22,7 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 11   | [Logs](#11-logs)                                                                                       | Done   |
 | 12   | [Metrics](#12-metrics)                                                                                 | Done   |
 | 13   | [Retention and Project deletion](#13-retention-and-project-deletion)                                   | Done   |
-| 14   | [Helm chart](#14-helm-chart)                                                                           |        |
+| 14   | [Helm chart](#14-helm-chart)                                                                           | Done   |
 | 15   | [Nightly performance test and module boundaries](#15-nightly-performance-test-and-module-boundaries)   | Done   |
 
 Update this table at the end of each session.

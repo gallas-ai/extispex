@@ -2,9 +2,11 @@ import type { ServiceClient, ServiceRequestHandler } from "@extispex/service-cli
 import { createBackgroundLease } from "@extispex/service-storage";
 import {
   createDeletedProjectRemoval,
+  createSecretCipher,
   createServiceHttpApp,
   DEFAULT_DATA_LIFECYCLE_INTERVAL_MILLISECONDS,
   type DeletedProjectRemovalOutcome,
+  type MasterKeys,
   type ProjectAccessEnvironment,
   type ProjectLifecycleSource,
   type RequestAuthenticator,
@@ -48,6 +50,7 @@ import {
   createReportSettingsRepository,
   createTargetRepository,
   type EvaluationDatabase,
+  type EvaluationSecretCiphers,
   removeEvaluationProjectData,
 } from "./storage/mod.ts";
 import {
@@ -83,6 +86,11 @@ export {
 export { DEFAULT_LLM_TIMEOUT_MILLISECONDS } from "./llm-providers/mod.ts";
 export type { ProxyEnvironment } from "./targets/mod.ts";
 export {
+  type EvaluationResealOutcome,
+  type EvaluationSecretCiphers,
+  resealEvaluationSecrets,
+} from "./storage/mod.ts";
+export {
   type EvaluationDatabase,
   migrateEvaluationDatabase,
   openEvaluationDatabase,
@@ -102,6 +110,17 @@ export const LLM_PROVIDER_API_KEY_CIPHER_PURPOSE = "evaluation-llm-provider-api-
  * `EVALUATION_LLM_PROVIDER_ALLOWED_DESTINATIONS`. Azure OpenAI and local models need their own
  * entries.
  */
+/** The ciphers of every purpose Evaluation seals values for, from the master keys. */
+export async function createEvaluationSecretCiphers(
+  masterKeys: string | MasterKeys,
+): Promise<EvaluationSecretCiphers> {
+  return {
+    targetCredential: await createSecretCipher(masterKeys, TARGET_CREDENTIAL_CIPHER_PURPOSE),
+    reportChannel: await createSecretCipher(masterKeys, REPORT_CHANNEL_CIPHER_PURPOSE),
+    llmProviderApiKey: await createSecretCipher(masterKeys, LLM_PROVIDER_API_KEY_CIPHER_PURPOSE),
+  };
+}
+
 export const DEFAULT_LLM_PROVIDER_ALLOWED_DESTINATIONS =
   "api.openai.com:443,api.anthropic.com:443,api.typesafe.ai:443";
 
