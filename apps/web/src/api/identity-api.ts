@@ -11,10 +11,12 @@ import type {
   ListGroupsResponse,
   ListProjectsResponse,
   ListRoleAssignmentsResponse,
+  ListSigningKeysResponse,
   ListUsersResponse,
   Project,
   Role,
   RoleAssignment,
+  SigningKey,
   UpdateProjectRequest,
   UpdateUserRequest,
   User,
@@ -218,5 +220,28 @@ export function importDirectoryFile(
   return requestJson(credentials, "/v1/directory/imports", {
     method: "POST",
     textBody: { text, contentType },
+  });
+}
+
+export function listSigningKeys(credentials: ApiCredentials): Promise<ListSigningKeysResponse> {
+  return requestJson(credentials, "/v1/signing-keys");
+}
+
+export function addSigningKey(credentials: ApiCredentials): Promise<SigningKey> {
+  return requestJson(credentials, "/v1/signing-keys", { method: "POST" });
+}
+
+export function activateSigningKey(
+  credentials: ApiCredentials,
+  keyId: string,
+): Promise<SigningKey> {
+  return requestJson(credentials, `/v1/signing-keys/${encodeURIComponent(keyId)}/activation`, {
+    method: "POST",
+  });
+}
+
+export function retireSigningKey(credentials: ApiCredentials, keyId: string): Promise<SigningKey> {
+  return requestJson(credentials, `/v1/signing-keys/${encodeURIComponent(keyId)}`, {
+    method: "DELETE",
   });
 }

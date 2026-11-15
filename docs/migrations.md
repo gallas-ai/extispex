@@ -33,12 +33,5 @@ A branch adds its rows when it starts and leaves them when it merges, so paralle
 edit the same rows. Whoever merges the last listed branch clears the table. A number that is neither
 in this table nor on `main` is free.
 
-| Service    | Number | Branch               | Roadmap step                       |
-| ---------- | ------ | -------------------- | ---------------------------------- |
-| evaluation | 0004   | `feat/llm-providers` | 7. LLM providers                   |
-| evaluation | 0005   | `feat/reports`       | 8. Reports                         |
-| evaluation | 0006   | `feat/retention`     | 13. Retention and Project deletion |
-| identity   | 0005   | `feat/retention`     | 13. Retention and Project deletion |
-| identity   | 0006   | `feat/key-rotation`  | 14. Helm chart (key rotation)      |
-| prompt     | 0002   | `feat/retention`     | 13. Retention and Project deletion |
-| telemetry  | 0005   | `feat/retention`     | 13. Retention and Project deletion |
+| Service | Number | Branch | Roadmap step |
+| ------- | ------ | ------ | ------------ |

@@ -723,7 +723,13 @@ sequenceDiagram
   database, so every replica signs with the same key. The private key is encrypted with the master
   key since step 6, so reading the database is not enough to sign tokens. Services read the public
   keys from `GET /internal/v1/jwks.json`, keep them in memory, and read them again for a token with
-  an unknown key ID, at most every 30 seconds. Rotation is not built; the key ID allows adding it.
+  an unknown key ID, at most every 30 seconds.
+- **Rotating the signing key** (step 14): an Instance admin adds a key on the Access page or with
+  `POST /v1/signing-keys`. It is published at once and may sign after a minute
+  (`SIGNING_KEY_PUBLICATION_SECONDS`), when every service can have read it; activating it makes it
+  sign. The key it replaces retires and stays published for the longest token lifetime, plus the 30
+  seconds other replicas keep their signing key, plus a minute for clocks, and is then removed. See
+  [ADR 0020](adr/0020-key-ids-in-sealed-values-and-two-step-signing-key-rotation.md).
 - **Sign-in:** the cookie holds 256 random bits, and Identity stores only their SHA-256 hash. A
   sign-in ends after 12 hours without a new access token, or when the user signs out or is
   deactivated. The cookie is `Secure` when the browser used HTTPS, which the Gateway passes in
@@ -875,6 +881,13 @@ keys are encrypted with AES-256-GCM, each purpose with its own key derived from 
 from `MASTER_KEY`, a Kubernetes Secret in production, which Identity, the Evaluation API and the
 worker need. The local image generates it into `/data/master-key` on first start. See
 [ADR 0013](adr/0013-secrets-sealed-with-keys-derived-from-one-master-key.md).
+
+Since step 14 a sealed value names the master key that sealed it, `aes256gcm.v2.<key ID>.…`, with an
+ID derived from the key. To rotate, `MASTER_KEY` becomes the new key and `PREVIOUS_MASTER_KEY` the
+old one, which still opens; each service's `reseal-secrets` command, a Helm hook Job in the chart
+and a step at start in the all-in-one process, seals every stored value again with the new key; then
+the old key is removed. See
+[ADR 0020](adr/0020-key-ids-in-sealed-values-and-two-step-signing-key-rotation.md).
 
 ### Known risks to design for
 
@@ -1078,6 +1091,16 @@ repository.
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
 
+The key rotation part of the Helm chart step added these checks on 2026-11-12.
+
+| Tested                                        | Result                                                                                                                                                     |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sealed values with key IDs                    | Opened by the key they name, with a message naming both variables otherwise; values from before key IDs open with either key                               |
+| Resealing on SQLite and PostgreSQL            | Signing keys, Target credentials, SMTP passwords, Teams webhook URLs and LLM provider API keys open with the new key alone; a second run changes nothing   |
+| Signing key rotation on SQLite and PostgreSQL | A new key is published, refused until its publication time, then signs; the old key's tokens keep working and the key is removed after 390 s               |
+| Signing key rotation through the Gateway      | Prompt accepts tokens of both keys after the switch, and the Access page rotates a key, in every e2e deployment                                            |
+| A master key rotation in kind, in CI          | The reseal Jobs seal the signing keys and Target credentials again after the upgrade, and with the previous key removed Identity starts and people sign in |
+
 The Helm chart step added these checks on 2026-11-11.
 
 | Tested                                                 | Result                                                                                                                                        |
@@ -1270,7 +1293,9 @@ The Prompt service step added these checks on 2026-11-07.
 - Service tokens across the network in the all-in-one deployment: its services call Identity in the
   process, and no other client reaches Identity's internal API there. The all-in-one e2e tests cover
   them only indirectly, because API key resolution needs one
-- Signing key rotation, which is not built, and many replicas creating the first signing key at once
+- Many replicas creating the first signing key at once, and a signing key rotation with several
+  Identity replicas: the tests run one, and the 30 seconds before another replica signs with the new
+  key are reasoned, not measured
 - OIDC with Microsoft Entra ID, Okta or any provider other than Keycloak. Entra replaces the groups
   claim with a link to Microsoft Graph for a user in more than 200 groups, which Extispex does not
   follow, and such a user gets no Company groups
@@ -1307,7 +1332,8 @@ The Prompt service step added these checks on 2026-11-07.
 - Sending logs from Python: only the TypeScript helper has a log record processor
 - Targets that answer slowly under load: a worker handles four jobs at once, calls and evaluations
   together, so many slow Targets delay evaluations
-- Rotating the master key, which is not built
+- A master key rotation on a large Instance: `reseal-secrets` handles each value in turn, which was
+  not measured beyond a few values
 - The allowlist with real DNS records and IPv6 Targets beyond the unit tests
 - Server-Driven Execution in the all-in-one image and Docker Compose, where the worker must reach
   the Target from inside a container; the e2e tests run it only in the all-in-one process and
@@ -1369,3 +1395,4 @@ The remaining steps and their order are in [roadmap.md](roadmap.md).
 - [ADR 0018: Data removed in leased periodic runs, shared days dropped only past every Project](adr/0018-data-lifecycle-through-leased-periodic-runs.md)
 - [ADR 0021: Nightly performance compared with the previous run, kept as a workflow artifact](adr/0021-nightly-performance-compared-with-the-previous-run.md)
 - [ADR 0019: Migrations run in a Helm hook Job, and services in the chart only check them](adr/0019-migrations-in-a-helm-hook-job-and-services-that-only-check.md)
+- [ADR 0020: Sealed values name their master key, and signing keys rotate in two steps](adr/0020-key-ids-in-sealed-values-and-two-step-signing-key-rotation.md)

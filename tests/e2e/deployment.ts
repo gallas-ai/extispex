@@ -91,6 +91,8 @@ const TRACE_COMPLETION_ENVIRONMENT = {
  * removal of a deleted Project's data show within a test. An external deployment needs the same.
  */
 const DATA_LIFECYCLE_ENVIRONMENT = { DATA_LIFECYCLE_INTERVAL_MILLISECONDS: "1000" };
+/** A new signing key may sign after two seconds instead of a minute. */
+const SIGNING_KEY_ENVIRONMENT = { SIGNING_KEY_PUBLICATION_SECONDS: "2" };
 const SERVICE_PERMISSIONS = [
   "--allow-net",
   "--allow-env",
@@ -144,6 +146,7 @@ async function startAllInOneDeployment(): Promise<RunningDeployment> {
     TELEMETRY_GRPC_TLS_PRIVATE_KEY_FILE: tlsFiles.privateKeyFile,
     ...TRACE_COMPLETION_ENVIRONMENT,
     ...DATA_LIFECYCLE_ENVIRONMENT,
+    ...SIGNING_KEY_ENVIRONMENT,
     ...createOidcEnvironment(gatewayPort),
   });
   const deployment = {
@@ -199,6 +202,7 @@ async function startServicesDeployment(): Promise<RunningDeployment> {
     BOOTSTRAP_ADMIN_PASSWORD: E2E_ADMIN.password,
     IDENTITY_PORT: String(identityPort),
     ...DATA_LIFECYCLE_ENVIRONMENT,
+    ...SIGNING_KEY_ENVIRONMENT,
     ...createOidcEnvironment(gatewayPort),
   });
   const telemetryProcess = startDenoProcess("telemetry", "services/telemetry/src/main.ts", {

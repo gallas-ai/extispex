@@ -1,3 +1,4 @@
+import { signingKeyRoutes } from "./signing-key-routes.ts";
 import { createRoute } from "@hono/zod-openapi";
 import { z } from "zod";
 import { accessTokenSecurity, describeErrorResponse } from "../openapi-route-parts.ts";
@@ -172,6 +173,7 @@ export const revokeApiKeyRoute = createRoute({
 export const identityPublicRoutes = [
   ...accessRoutes,
   ...directoryRoutes,
+  ...signingKeyRoutes,
   createProjectRoute,
   listProjectsRoute,
   getProjectRoute,

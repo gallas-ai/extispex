@@ -14,6 +14,10 @@
 {{ include "extispex.masterKeyEnv" . }}
 - name: LOCAL_ACCOUNTS
   value: {{ .Values.identity.localAccounts | quote }}
+{{- with .Values.identity.signingKeyPublicationSeconds }}
+- name: SIGNING_KEY_PUBLICATION_SECONDS
+  value: {{ . | quote }}
+{{- end }}
 {{- range list "telemetry" "prompt" "evaluation" }}
 - name: {{ upper . }}_CLIENT_SECRET
   valueFrom:

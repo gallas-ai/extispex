@@ -49,4 +49,17 @@ rendered="$(helm template extispex "$chart" "${required[@]}" --set proxy.httpsPr
 grep -q 'value: "localhost,127.0.0.1,::1,extispex-identity,.*,.company.example"' <<< "$rendered" ||
   fail "NO_PROXY should keep the chart's Services direct and add proxy.noProxy"
 
+rendered="$(helm template extispex "$chart" "${required[@]}")"
+[ "$(grep -c "reseal-secrets.ts" <<< "$rendered" || true)" = 0 ] ||
+  fail "no reseal Job should render outside a master key rotation"
+if grep -q "PREVIOUS_MASTER_KEY" <<< "$rendered"; then fail "no previous master key by default"; fi
+rendered="$(helm template extispex "$chart" "${required[@]}" \
+  --set masterKey.previous.existingSecret=old-master-key)"
+[ "$(grep -c "reseal-secrets.ts" <<< "$rendered")" = 2 ] ||
+  fail "a rotation should reseal Identity's and Evaluation's secrets"
+grep -q "helm.sh/hook: post-install,post-upgrade" <<< "$rendered" ||
+  fail "the reseal Jobs should run after the upgrade"
+[ "$(grep -c "name: PREVIOUS_MASTER_KEY" <<< "$rendered")" = 5 ] ||
+  fail "Identity, the Evaluation API and worker and both reseal Jobs need the previous key"
+
 echo "check-chart: the chart renders as expected"

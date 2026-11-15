@@ -33,3 +33,8 @@ export {
   type ReportSettingsRepository,
 } from "./report-settings-repository.ts";
 export { createTargetRepository, type TargetRepository } from "./target-repository.ts";
+export {
+  type EvaluationResealOutcome,
+  type EvaluationSecretCiphers,
+  resealEvaluationSecrets,
+} from "./sealed-secret-resealing.ts";

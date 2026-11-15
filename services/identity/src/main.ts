@@ -4,8 +4,10 @@ import {
   InvalidConfigurationError,
   readDatabaseMigrationMode,
   readDataLifecycleIntervalMilliseconds,
+  readMasterKeys,
   readOptionalEnvironmentVariable,
   readPortEnvironmentVariable,
+  readPositiveIntegerEnvironmentVariable,
   readRequiredEnvironmentVariable,
   readSecretEnvironmentVariable,
   runOnTerminationSignal,
@@ -16,6 +18,7 @@ import {
   createFirstProjectIfNone,
   createIdentityService,
   createSigningKeyCipher,
+  DEFAULT_SIGNING_KEY_PUBLICATION_SECONDS,
   MINIMUM_CONFIGURED_KEY_LENGTH,
   openIdentityDatabase,
   parseServiceClients,
@@ -49,9 +52,8 @@ if (bootstrapAdminEmail !== undefined && !areLocalAccountsEnabled) {
   );
 }
 
-const signingKeyCipher = await createSigningKeyCipher(
-  readRequiredEnvironmentVariable("MASTER_KEY"),
-);
+// MASTER_KEY seals; PREVIOUS_MASTER_KEY, during a rotation, still opens.
+const signingKeyCipher = await createSigningKeyCipher(readMasterKeys());
 const database = await openIdentityDatabase(
   readRequiredEnvironmentVariable("IDENTITY_DATABASE_URL"),
   readDatabaseMigrationMode(),
@@ -83,6 +85,10 @@ const dataLifecycleIntervalMilliseconds = readDataLifecycleIntervalMilliseconds(
 const identityService = createIdentityService({
   database,
   signingKeyCipher,
+  signingKeyPublicationSeconds: readPositiveIntegerEnvironmentVariable(
+    "SIGNING_KEY_PUBLICATION_SECONDS",
+    DEFAULT_SIGNING_KEY_PUBLICATION_SECONDS,
+  ),
   areLocalAccountsEnabled,
   serviceClientSecrets,
   oidcSettings: readOidcSettings(readOptionalEnvironmentVariable),

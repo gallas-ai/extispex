@@ -1,0 +1,54 @@
+{{- /*
+During a master key rotation (masterKey.previous.existingSecret set), one Job per service that
+stores sealed values seals them again with the new master key, after the upgrade rolled out. The
+command replaces only values that are still the ones it read, so running replicas lose nothing.
+*/}}
+{{- if .Values.masterKey.previous.existingSecret }}
+{{- range $index, $service := list "identity" "evaluation" }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "extispex.fullname" $ }}-reseal-{{ $service }}
+  labels:
+    {{- include "extispex.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: reseal-{{ $service }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: {{ $index | quote }}
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ $.Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ $.Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "extispex.selectorLabels" (dict "root" $ "component" (printf "reseal-%s" $service)) | nindent 8 }}
+    spec:
+      {{- include "extispex.podSpecCommon" $ | nindent 6 }}
+      restartPolicy: Never
+      containers:
+        - name: reseal
+          image: {{ include "extispex.image" (dict "root" $ "image" $service) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            {{- include "extispex.denoCommand" (printf "services/%s/src/reseal-secrets.ts" $service) | nindent 12 }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          env:
+            - name: NO_COLOR
+              value: "1"
+            - name: DATABASE_MIGRATIONS
+              value: check
+            {{- include "extispex.databaseUrlEnv" (dict "root" $ "service" $service) | nindent 12 }}
+            {{- include "extispex.masterKeyEnv" $ | nindent 12 }}
+          {{- with $.Values.migrations.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- include "extispex.tmpVolumeMount" $ | nindent 12 }}
+      volumes:
+        {{- include "extispex.tmpVolume" $ | nindent 8 }}
+{{- end }}
+{{- end }}

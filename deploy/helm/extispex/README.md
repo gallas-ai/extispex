@@ -81,6 +81,17 @@ inside the Instance stay direct.
 Through a proxy, the proxy resolves the destination's name, so the allowlist must name the host: a
 CIDR range then allows only an address written in the URL.
 
+## Rotating the master key
+
+1. Create a Secret with a new key, and upgrade with `masterKey.existingSecret` naming it and
+   `masterKey.previous.existingSecret` naming the old one. Identity and Evaluation then open values
+   sealed with either key, and after the rollout a Job per service seals every stored secret again
+   with the new key (`kubectl logs job/<release>-reseal-identity` and `-reseal-evaluation`).
+2. Once both Jobs succeeded, upgrade without `masterKey.previous`, and delete the old Secret.
+
+Signing keys rotate on the Access page instead: add a key, and let it sign a minute later. The key
+it replaces is removed once the tokens it signed have expired.
+
 ## First start
 
 `bootstrap.existingSecret` names a Secret with `project-api-key` (the first Project's API key, at

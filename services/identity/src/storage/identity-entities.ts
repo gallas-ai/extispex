@@ -251,8 +251,9 @@ export const SignInThrottleRecord = defineEntity({
 });
 
 /**
- * A key pair that signs access tokens, as JSON Web Keys. Every replica signs with the oldest key,
- * and the JWKS endpoint publishes all of them, so a key can be added before the old one goes.
+ * A key pair that signs access tokens, as JSON Web Keys. The key with the latest activation signs;
+ * the JWKS endpoint publishes every key, so a key can be added before it signs, and a retired key
+ * stays published until the tokens it signed have expired.
  */
 export const SigningKeyRecord = defineEntity({
   name: "SigningKeyRecord",
@@ -263,5 +264,9 @@ export const SigningKeyRecord = defineEntity({
     sealedPrivateKeyJwk: p.text().fieldName("private_key_jwk"),
     publicKeyJwk: p.text(),
     createdAt: p.datetime(),
+    /** When an Instance admin chose it to sign; null for a key that never did, or from step 3. */
+    activatedAt: p.datetime().nullable(),
+    /** When another key replaced it. */
+    retiredAt: p.datetime().nullable(),
   },
 });

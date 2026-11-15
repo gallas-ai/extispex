@@ -4,6 +4,7 @@ import {
   createSecretCipher,
   createStructuredLogger,
   readDatabaseMigrationMode,
+  readMasterKeys,
   readPortEnvironmentVariable,
   readRequiredEnvironmentVariable,
   runOnTerminationSignal,
@@ -25,7 +26,8 @@ const database = await openEvaluationDatabase(
   readDatabaseMigrationMode(),
 );
 const jobQueue = await openJobQueue(databaseUrl, database, logger);
-const masterKey = readRequiredEnvironmentVariable("MASTER_KEY");
+// MASTER_KEY seals; PREVIOUS_MASTER_KEY, during a rotation, still opens.
+const masterKey = readMasterKeys();
 const evaluationApi = createEvaluationApiService({
   database,
   jobQueue,

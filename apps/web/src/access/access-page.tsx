@@ -1,4 +1,4 @@
-import type { DirectoryStatus, Group, User } from "@extispex/contracts";
+import type { DirectoryStatus, Group, SigningKey, User } from "@extispex/contracts";
 import { type FormEvent, useCallback, useState } from "react";
 import {
   addGroupMember,
@@ -7,6 +7,7 @@ import {
   deleteGroup,
   getDirectoryStatus,
   listGroups,
+  listSigningKeys,
   listUsers,
   removeGroupMember,
   setCompanyGroups,
@@ -16,6 +17,7 @@ import { getSignInOptions } from "../api/sign-in-api.ts";
 import { useAccess } from "../sign-in/access-context.ts";
 import { MINIMUM_PASSWORD_LENGTH } from "./access-rules.ts";
 import { DirectoryPanel } from "./directory-panel.tsx";
+import { SigningKeysPanel } from "./signing-keys-panel.tsx";
 import { AlertIcon, PlusIcon, ShieldIcon, TrashIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useApiResource } from "../ui/use-api-resource.ts";
@@ -25,23 +27,26 @@ interface AccessDirectory {
   groups: Group[];
   isOidcEnabled: boolean;
   directoryStatus: DirectoryStatus;
+  signingKeys: SigningKey[];
 }
 
 /** Users and Groups, for Instance admins. Roles are given per Project, on each Project's page. */
 export function AccessPage() {
   const { credentials, showSignIn } = useAccess();
   const loadDirectory = useCallback(async (): Promise<AccessDirectory> => {
-    const [{ users }, { groups }, signInOptions, directoryStatus] = await Promise.all([
+    const [{ users }, { groups }, signInOptions, directoryStatus, { keys }] = await Promise.all([
       listUsers(credentials),
       listGroups(credentials),
       getSignInOptions(),
       getDirectoryStatus(credentials),
+      listSigningKeys(credentials),
     ]);
     return {
       users,
       groups,
       isOidcEnabled: signInOptions.oidcProviderName !== null,
       directoryStatus,
+      signingKeys: keys,
     };
   }, [credentials]);
   const [directoryState, reloadDirectory] = useApiResource(loadDirectory);
@@ -83,6 +88,7 @@ export function AccessPage() {
             onChange={reloadDirectory}
           />
           <UsersPanel users={directoryState.resource.users} onChange={reloadDirectory} />
+          <SigningKeysPanel keys={directoryState.resource.signingKeys} onChange={reloadDirectory} />
         </>
       )}
     </div>

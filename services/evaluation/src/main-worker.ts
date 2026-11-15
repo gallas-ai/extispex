@@ -7,6 +7,7 @@ import {
   createStructuredLogger,
   readDatabaseMigrationMode,
   readDataLifecycleIntervalMilliseconds,
+  readMasterKeys,
   readOptionalEnvironmentVariable,
   readPositiveIntegerEnvironmentVariable,
   readRequiredEnvironmentVariable,
@@ -45,7 +46,8 @@ const serviceTokens = createIdentityServiceTokenSource({
   clientSecret: readRequiredEnvironmentVariable("IDENTITY_CLIENT_SECRET"),
 });
 const dataLifecycleIntervalMilliseconds = readDataLifecycleIntervalMilliseconds();
-const masterKey = readRequiredEnvironmentVariable("MASTER_KEY");
+// MASTER_KEY seals; PREVIOUS_MASTER_KEY, during a rotation, still opens.
+const masterKey = readMasterKeys();
 const evaluationWorker = createEvaluationWorker({
   database,
   jobQueue,
