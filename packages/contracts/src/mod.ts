@@ -25,5 +25,6 @@ export * from "./telemetry/log-routes.ts";
 export * from "./telemetry/metric-contracts.ts";
 export * from "./telemetry/metric-routes.ts";
 export * from "./telemetry/rejected-telemetry-contracts.ts";
+export * from "./telemetry/session-contracts.ts";
 export * from "./telemetry/trace-contracts.ts";
 export * from "./telemetry/trace-routes.ts";

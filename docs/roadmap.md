@@ -24,6 +24,7 @@ working session that ends with a merged pull request and green CI. Terms are def
 | 13   | [Retention and Project deletion](#13-retention-and-project-deletion)                                   | Done   |
 | 14   | [Helm chart](#14-helm-chart)                                                                           | Done   |
 | 15   | [Nightly performance test and module boundaries](#15-nightly-performance-test-and-module-boundaries)   | Done   |
+| 16   | [Session conversation](#16-session-conversation)                                                       | Done   |
 
 Update this table at the end of each session.
 
@@ -489,3 +490,28 @@ deployments.
 
 **Done when:** the nightly workflow runs and fails on a deliberate regression, and both new
 architecture checks run in CI.
+
+## 16. Session conversation
+
+**Goal:** A Session reads as the conversation it was: what the user wrote, what the application
+answered, and how each trace went.
+
+**Architecture:** [Session conversation](architecture.md#session-conversation)
+
+**Scope:**
+
+- `GET /v1/sessions/{sessionId}` in Telemetry, reading messages from the OpenTelemetry GenAI
+  attributes when queried, with no migration.
+- UI: the Traces page shows a Session ID filter as the conversation, with a switch back to the
+  table. Session IDs in the trace table, the trace detail and the run detail link to it.
+- The TypeScript and Python examples send `gen_ai.input.messages` and `gen_ai.output.messages`.
+
+**Decisions made:**
+
+- A Session stays a filter on the Traces page rather than a page of its own.
+- Messages come from the GenAI semantic conventions, not from attributes of our own, and no helper
+  writes them.
+- No new glossary term: a conversation consists of traces, and its messages carry their GenAI roles.
+
+**Done when:** a two-trace Session with messages is shown as a conversation in the browser, in both
+deployments.

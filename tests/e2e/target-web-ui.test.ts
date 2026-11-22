@@ -6,6 +6,7 @@ import {
   assertNoPageErrors,
   launchBrowser,
   openUi,
+  waitForCondition,
 } from "./browser.ts";
 import { startDeployment } from "./deployment.ts";
 import { canRunSampleTarget, SAMPLE_TARGET_TOKEN, startSampleTarget } from "./sample-target.ts";
@@ -104,6 +105,17 @@ Deno.test({
             "The Output of step 1 matches /ships today/.",
           );
           await sweepWidths(page, "a run with a Transcript");
+
+          // The Iteration's Session opens as the conversation the Target's spans tell.
+          await page.setViewportSize({ width: 1440, height: 900 });
+          await page.getByRole("link", { name: "View Session" }).first().click();
+          const conversationTraces = page.locator(".conversation-trace");
+          await waitForCondition(
+            "both steps' traces are in the conversation",
+            async () => (await conversationTraces.count()) === 2,
+          );
+          assertStringIncludes(await conversationTraces.first().innerText(), "Where is my order?");
+          assertStringIncludes(await conversationTraces.nth(1).innerText(), "cancel_order");
           assertNoPageErrors(uiSession);
           await uiSession.close();
         },

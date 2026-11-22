@@ -7,6 +7,7 @@ import {
 } from "../openapi-route-parts.ts";
 import { telemetryLogRoutes } from "./log-routes.ts";
 import { telemetryMetricRoutes } from "./metric-routes.ts";
+import { sessionConversationResponseSchema } from "./session-contracts.ts";
 import {
   listTracesQuerySchema,
   listTracesResponseSchema,
@@ -48,10 +49,30 @@ export const getTraceRoute = createRoute({
   },
 });
 
+export const getSessionConversationRoute = createRoute({
+  method: "get",
+  path: "/v1/sessions/{sessionId}",
+  summary: "Get a Session as a conversation: its traces, oldest first, with their messages.",
+  tags: ["Traces"],
+  security: projectDataSecurity,
+  request: {
+    params: z.object({ sessionId: z.string().min(1) }),
+  },
+  responses: {
+    200: {
+      description: "The Session's summary and its first traces, with their messages.",
+      content: { "application/json": { schema: sessionConversationResponseSchema } },
+    },
+    ...commonErrorResponses,
+    404: describeErrorResponse("No spans are stored for this Session."),
+  },
+});
+
 /** The Telemetry endpoints reachable through the Gateway. OTLP ingestion bypasses it. */
 export const telemetryPublicRoutes = [
   listTracesRoute,
   getTraceRoute,
+  getSessionConversationRoute,
   ...telemetryLogRoutes,
   ...telemetryMetricRoutes,
 ];

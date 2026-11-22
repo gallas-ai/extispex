@@ -1,7 +1,7 @@
 import type { TraceSummary } from "@extispex/contracts";
 import { type KeyboardEvent, type MouseEvent, useEffect, useRef } from "react";
 import { CopyButton } from "../ui/copy-button.tsx";
-import { FilterIcon } from "../ui/icons.tsx";
+import { SessionIcon } from "../ui/icons.tsx";
 import { useNow } from "../ui/use-now.ts";
 import {
   formatDuration,
@@ -102,27 +102,20 @@ export function TraceTable(
                   </span>
                 </td>
                 <td className="column-session">
-                  {trace.sessionId === null
-                    ? <span className="text-subtle">—</span>
-                    : (
-                      <span className="identifier-with-actions">
-                        <code className="identifier" title={trace.sessionId}>
-                          {trace.sessionId}
-                        </code>
-                        <button
-                          type="button"
-                          className="icon-button reveal-on-row-hover"
-                          onClick={(clickEvent: MouseEvent) => {
-                            clickEvent.stopPropagation();
-                            onFilterBySession(trace.sessionId as string);
-                          }}
-                          aria-label="Show this Session's traces"
-                          title="Show this Session's traces"
-                        >
-                          <FilterIcon size={13} />
-                        </button>
-                      </span>
-                    )}
+                  {trace.sessionId === null ? <span className="text-subtle">—</span> : (
+                    <button
+                      type="button"
+                      className="identifier-link"
+                      onClick={(clickEvent: MouseEvent) => {
+                        clickEvent.stopPropagation();
+                        onFilterBySession(trace.sessionId as string);
+                      }}
+                      title={`Show Session ${trace.sessionId} as a conversation`}
+                    >
+                      <SessionIcon size={13} />
+                      <code className="identifier">{trace.sessionId}</code>
+                    </button>
+                  )}
                 </td>
                 <td className="column-correlation">
                   <span className="identifier-with-actions">

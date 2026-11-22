@@ -8,6 +8,7 @@ Deno.test("an empty query string means no filters and no open trace", () => {
     sessionId: "",
     traceId: null,
     spanId: null,
+    sessionView: "conversation",
   });
 });
 
@@ -17,6 +18,7 @@ Deno.test("the URL state survives a round trip and leaves out empty values", () 
     sessionId: "support chat/1",
     traceId: "bcc26b93",
     spanId: null,
+    sessionView: "conversation" as const,
   };
   const serialized = serializeTracesUrlState(urlState);
   assertEquals(serialized, "?sessionId=support+chat%2F1&traceId=bcc26b93");
@@ -25,7 +27,27 @@ Deno.test("the URL state survives a round trip and leaves out empty values", () 
 
 Deno.test("no state serializes to an empty query string", () => {
   assertEquals(
-    serializeTracesUrlState({ correlationId: "", sessionId: "", traceId: null, spanId: null }),
+    serializeTracesUrlState({
+      correlationId: "",
+      sessionId: "",
+      traceId: null,
+      spanId: null,
+      sessionView: "conversation",
+    }),
     "",
   );
+});
+
+Deno.test("only the table view of a Session is kept in the URL", () => {
+  const urlState = {
+    correlationId: "",
+    sessionId: "chat-7",
+    traceId: null,
+    spanId: null,
+    sessionView: "table" as const,
+  };
+  const serialized = serializeTracesUrlState(urlState);
+  assertEquals(serialized, "?sessionId=chat-7&view=table");
+  assertEquals(parseTracesUrlState(serialized), urlState);
+  assertEquals(parseTracesUrlState("?sessionId=chat-7&view=other").sessionView, "conversation");
 });

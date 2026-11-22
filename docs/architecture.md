@@ -242,6 +242,32 @@ storage and the query.
 Telemetry storage sits behind its own interface, so another store such as ClickHouse can be added if
 measurements show a need for it.
 
+### Session conversation
+
+Built in roadmap step 16. A Session has no page of its own: on the Traces page, a Session ID filter
+switches the table to the conversation, oldest trace first, and `view=table` in the URL switches
+back. Each trace shows the user's message, the assistant's reply, the tools it called, its spans,
+duration, tokens and first error, and opens its trace detail. Traces with the filtered Correlation
+ID are highlighted, and Live adds new traces at the bottom. The Session ID in the trace table and in
+the trace detail, and the Session of an Iteration in the run detail, link to this view.
+
+`GET /v1/sessions/{sessionId}` answers with a summary and the Session's first 500 traces, and
+`truncated` when it has more. It answers 404 for a Session with no stored spans. Messages are read
+when the Session is queried, from the OpenTelemetry GenAI attributes that the application already
+sends, so no attribute of our own is needed and data stored earlier is shown too:
+
+| What              | Read from                                                                                                                                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User's message    | The last `user` message in `gen_ai.input.messages` of the root span, or else of the earliest span that has the attribute. A `chat` span carries the whole history, so only its last user message is new. |
+| Assistant's reply | The last `assistant` message in `gen_ai.output.messages` of the root span, or else of the latest span that has the attribute.                                                                            |
+| Tools called      | `gen_ai.tool.name` of the trace's spans, in start order.                                                                                                                                                 |
+| Tokens            | `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens` of the spans that report usage and have no descendant that reports it, so a parent that adds up its children's usage is not counted twice.  |
+| Error             | Spans with status `error`, and the status message of the earliest of them.                                                                                                                               |
+
+A message attribute is a JSON string, as OpenTelemetry sends structured values on spans, or an
+array; only its `text` parts are shown, as plain text without Markdown. `system` and `tool` messages
+stay in the span details. A trace without messages is shown with its name and statistics only.
+
 ## 5. Evaluation
 
 ### Execution modes
@@ -1090,6 +1116,14 @@ repository.
 | TypeScript and Python examples                                 | Both send a two-step conversation that appears under one Session ID                    |
 | Web UI in headless Chromium (added 2026-11-07)                 | Main flows work and nothing scrolls sideways from 360px to 2,000px, in all deployments |
 | `better-sqlite3` in CI on GitHub (2026-11-07)                  | Works on Linux x64 on the `ubuntu-24.04` runner, including the all-in-one image        |
+
+The Session conversation step added these checks on 2026-11-22.
+
+| Tested                                           | Result                                                                                                                                                                          |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/sessions/{sessionId}` on both databases | Messages from the root span or else from the chat spans, as a JSON string or an array, tools, tokens without double counting, errors, the 500-trace limit and Project isolation |
+| The conversation in headless Chromium            | A Session shows oldest first with its messages, switches to the table and back, opens a trace, and fits 360px to 2,000px with and without an open trace, in all deployments     |
+| A Session Test Case's Session                    | Its link in the run detail opens the conversation of the sample Target's spans                                                                                                  |
 
 The key rotation part of the Helm chart step added these checks on 2026-11-12.
 

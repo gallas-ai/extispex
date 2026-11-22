@@ -10,13 +10,18 @@ export interface TracesUrlState {
   sessionId: string;
   traceId: string | null;
   spanId: string | null;
+  /** How a Session is shown; the conversation unless the URL asks for the table. */
+  sessionView: SessionView;
 }
+
+export type SessionView = "conversation" | "table";
 
 const QUERY_PARAMETER_BY_FIELD: Record<keyof TracesUrlState, string> = {
   correlationId: "correlationId",
   sessionId: "sessionId",
   traceId: "traceId",
   spanId: "spanId",
+  sessionView: "view",
 };
 
 export function parseTracesUrlState(search: string): TracesUrlState {
@@ -26,6 +31,9 @@ export function parseTracesUrlState(search: string): TracesUrlState {
     sessionId: searchParameters.get(QUERY_PARAMETER_BY_FIELD.sessionId) ?? "",
     traceId: searchParameters.get(QUERY_PARAMETER_BY_FIELD.traceId) || null,
     spanId: searchParameters.get(QUERY_PARAMETER_BY_FIELD.spanId) || null,
+    sessionView: searchParameters.get(QUERY_PARAMETER_BY_FIELD.sessionView) === "table"
+      ? "table"
+      : "conversation",
   };
 }
 
@@ -33,7 +41,8 @@ export function serializeTracesUrlState(urlState: TracesUrlState): string {
   const searchParameters = new URLSearchParams();
   for (const [field, queryParameter] of Object.entries(QUERY_PARAMETER_BY_FIELD)) {
     const fieldValue = urlState[field as keyof TracesUrlState];
-    if (fieldValue) {
+    // The conversation is the default, so only the table needs to be in the URL.
+    if (fieldValue && fieldValue !== "conversation") {
       searchParameters.set(queryParameter, fieldValue);
     }
   }

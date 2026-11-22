@@ -1,4 +1,10 @@
-import { createErrorResponse, getTraceRoute, listTracesRoute } from "@extispex/contracts";
+import {
+  createErrorResponse,
+  getSessionConversationRoute,
+  getTraceRoute,
+  listTracesRoute,
+  SESSION_CONVERSATION_TRACE_LIMIT,
+} from "@extispex/contracts";
 import {
   type ProjectAccessEnvironment,
   type RequestAuthenticator,
@@ -6,6 +12,7 @@ import {
 } from "@extispex/service-runtime";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { SpanRepository } from "../storage/mod.ts";
+import { buildSessionConversation } from "./session-conversation.ts";
 
 export interface TraceQueryRouteDependencies {
   spanRepository: SpanRepository;
@@ -19,7 +26,7 @@ export function registerTraceQueryRoutes(
   // Only the queries: OTLP ingestion shares the path /v1/traces but answers in OTLP's own format.
   app.on(
     "GET",
-    ["/v1/traces", "/v1/traces/*"],
+    ["/v1/traces", "/v1/traces/*", "/v1/sessions/*"],
     requireProjectAccess(dependencies.requestAuthenticator),
   );
 
@@ -41,5 +48,21 @@ export function registerTraceQueryRoutes(
       return context.json(createErrorResponse("not_found", `Trace ${traceId} was not found.`), 404);
     }
     return context.json({ traceId, spans }, 200);
+  });
+
+  app.openapi(getSessionConversationRoute, async (context) => {
+    const { sessionId } = context.req.valid("param");
+    const { traceSpanLists, truncated } = await dependencies.spanRepository.listSessionTraceSpans(
+      context.get("projectAccess").projectId,
+      sessionId,
+      SESSION_CONVERSATION_TRACE_LIMIT,
+    );
+    if (traceSpanLists.length === 0) {
+      return context.json(
+        createErrorResponse("not_found", `Session ${sessionId} was not found.`),
+        404,
+      );
+    }
+    return context.json(buildSessionConversation(sessionId, traceSpanLists, truncated), 200);
   });
 }

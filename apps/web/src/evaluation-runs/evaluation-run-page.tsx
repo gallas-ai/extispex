@@ -467,6 +467,20 @@ function AttemptDetails(
           />
         </p>
       )}
+      {attempt.sessionId !== null && (
+        <p className="status-text">
+          Session <code className="cell-breaks-anywhere">{attempt.sessionId}</code>{" "}
+          {expiredRetentionDays === null
+            ? <Link to={sessionPath(attempt.sessionId)}>View Session</Link>
+            : (
+              <span className="trace-unavailable" role="note">
+                Session no longer available: the Project keeps telemetry for {expiredRetentionDays}
+                {" "}
+                days.
+              </span>
+            )}
+        </p>
+      )}
       {attempt.transcript !== null
         ? <Transcript steps={attempt.transcript} expiredRetentionDays={expiredRetentionDays} />
         : attempt.output !== null && <pre className="attempt-output">{attempt.output}</pre>}
@@ -543,6 +557,18 @@ function tracesPath(correlationId: string, traceId?: string, spanId?: string): s
     sessionId: "",
     traceId: traceId ?? null,
     spanId: spanId ?? null,
+    sessionView: "conversation",
+  });
+  return `/traces${query}`;
+}
+
+function sessionPath(sessionId: string): string {
+  const query = serializeTracesUrlState({
+    correlationId: "",
+    sessionId,
+    traceId: null,
+    spanId: null,
+    sessionView: "conversation",
   });
   return `/traces${query}`;
 }
