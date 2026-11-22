@@ -10,6 +10,7 @@ Environment: API_KEY (required), the key of the Project to send to, and OTLP_HTT
 (default http://127.0.0.1:4318).
 """
 
+import json
 import os
 import sys
 import uuid
@@ -70,13 +71,22 @@ tracer_provider.add_span_processor(
 tracer = tracer_provider.get_tracer("support-bot-python-example")
 
 
+def text_messages(role, text):
+    """The OpenTelemetry GenAI message format, which the UI shows a Session's conversation from."""
+    return json.dumps([{"role": role, "parts": [{"type": "text", "content": text}]}])
+
+
 def answer_customer(customer_message):
-    with tracer.start_as_current_span("handle-message"):
+    with tracer.start_as_current_span("handle-message") as root_span:
+        root_span.set_attribute("gen_ai.input.messages", text_messages("user", customer_message))
         with tracer.start_as_current_span("chat example-model") as llm_span:
             llm_span.set_attribute("gen_ai.request.model", "example-model")
+            llm_span.set_attribute("gen_ai.usage.input_tokens", 42)
+            llm_span.set_attribute("gen_ai.usage.output_tokens", 12)
             answer = f"Answer to: {customer_message}"
-        with tracer.start_as_current_span("tool find_order"):
-            pass
+        with tracer.start_as_current_span("execute_tool find_order") as tool_span:
+            tool_span.set_attribute("gen_ai.tool.name", "find_order")
+        root_span.set_attribute("gen_ai.output.messages", text_messages("assistant", answer))
         return answer
 
 

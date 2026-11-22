@@ -50,17 +50,25 @@ const tracer = tracerProvider.getTracer("sample-target");
 /** Stands in for an LLM with tools: finding an order and cancelling it. */
 async function answerCustomer(message: string): Promise<string> {
   return await tracer.startActiveSpan("handle-message", async (rootSpan) => {
+    rootSpan.setAttribute("gen_ai.input.messages", textMessages("user", message));
     const wantsToCancel = /cancel/i.test(message);
     const toolName = wantsToCancel ? "cancel_order" : "lookup_order";
     await tracer.startActiveSpan("execute_tool", (toolSpan) => {
       toolSpan.setAttribute("gen_ai.tool.name", toolName);
       toolSpan.end();
     });
-    rootSpan.end();
-    return wantsToCancel
+    const answer = wantsToCancel
       ? "Your order is cancelled. The refund arrives within 30 days."
       : "Your order ships today.";
+    rootSpan.setAttribute("gen_ai.output.messages", textMessages("assistant", answer));
+    rootSpan.end();
+    return answer;
   });
+}
+
+/** The OpenTelemetry GenAI message format, which the UI shows a Session's conversation from. */
+function textMessages(role: "user" | "assistant", text: string): string {
+  return JSON.stringify([{ role, parts: [{ type: "text", content: text }] }]);
 }
 
 function readMessage(input: unknown): string {

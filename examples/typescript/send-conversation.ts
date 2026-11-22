@@ -66,8 +66,14 @@ const loggerProvider = new LoggerProvider({
 });
 const logger = loggerProvider.getLogger("support-bot-example");
 
+/** The OpenTelemetry GenAI message format, which the UI shows a Session's conversation from. */
+function textMessages(role: "user" | "assistant", text: string): string {
+  return JSON.stringify([{ role, parts: [{ type: "text", content: text }] }]);
+}
+
 async function answerCustomer(customerMessage: string): Promise<string> {
   return await tracer.startActiveSpan("handle-message", async (rootSpan) => {
+    rootSpan.setAttribute("gen_ai.input.messages", textMessages("user", customerMessage));
     logger.emit({
       severityNumber: SeverityNumber.INFO,
       severityText: "INFO",
@@ -75,10 +81,16 @@ async function answerCustomer(customerMessage: string): Promise<string> {
     });
     const answer = await tracer.startActiveSpan("chat example-model", (llmSpan) => {
       llmSpan.setAttribute("gen_ai.request.model", "example-model");
+      llmSpan.setAttribute("gen_ai.usage.input_tokens", 42);
+      llmSpan.setAttribute("gen_ai.usage.output_tokens", 12);
       llmSpan.end();
       return `Answer to: ${customerMessage}`;
     });
-    await tracer.startActiveSpan("tool find_order", (toolSpan) => toolSpan.end());
+    await tracer.startActiveSpan("execute_tool find_order", (toolSpan) => {
+      toolSpan.setAttribute("gen_ai.tool.name", "find_order");
+      toolSpan.end();
+    });
+    rootSpan.setAttribute("gen_ai.output.messages", textMessages("assistant", answer));
     rootSpan.end();
     return answer;
   });

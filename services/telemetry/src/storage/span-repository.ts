@@ -23,6 +23,15 @@ export interface SpanRepository {
   /** The Correlation ID's spans by start time, at most `limit`. */
   listCorrelationSpans(projectId: string, correlationId: string, limit: number): Promise<Span[]>;
   listSessionSpans(projectId: string, sessionId: string, limit: number): Promise<Span[]>;
+  /**
+   * The spans of the Session's oldest traces, at most `traceLimit` of them, each trace's spans by
+   * start time, and whether the Session has more traces.
+   */
+  listSessionTraceSpans(
+    projectId: string,
+    sessionId: string,
+    traceLimit: number,
+  ): Promise<{ traceSpanLists: Span[][]; truncated: boolean }>;
   /** Remembers the first evaluation of a Correlation ID; a later one changes nothing. */
   markCorrelationEvaluated(
     projectId: string,
@@ -199,6 +208,35 @@ export function createSpanRepository(database: TelemetryDatabase): SpanRepositor
         { orderBy: { startTimeUnixNano: "asc" }, limit },
       );
       return await toSpans(entityManager, projectId, spanRecords);
+    },
+
+    async listSessionTraceSpans(projectId, sessionId, traceLimit) {
+      const entityManager = database.orm.em.fork();
+      const traceRows = await entityManager.execute<{ trace_id: string }[]>(
+        `select trace_id
+          from spans
+          where project_id = ?
+            and trace_id in (select trace_id from spans where project_id = ? and session_id = ?)
+          group by trace_id
+          order by min(start_time_unix_nano), trace_id
+          limit ?`,
+        [projectId, projectId, sessionId, traceLimit + 1],
+      );
+      const traceIds = traceRows.slice(0, traceLimit).map((traceRow) => traceRow.trace_id);
+      if (traceIds.length === 0) return { traceSpanLists: [], truncated: false };
+      const spanRecords = await entityManager.find(
+        SpanRecord,
+        { projectId, traceId: { $in: traceIds } },
+        { orderBy: { startTimeUnixNano: "asc", spanId: "asc" } },
+      );
+      const spansByTraceId = Map.groupBy(
+        await toSpans(entityManager, projectId, spanRecords),
+        (span) => span.traceId,
+      );
+      return {
+        traceSpanLists: traceIds.map((traceId) => spansByTraceId.get(traceId) ?? []),
+        truncated: traceRows.length > traceLimit,
+      };
     },
 
     async markCorrelationEvaluated(projectId, correlationId, evaluatedAt) {

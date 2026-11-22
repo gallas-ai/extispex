@@ -7,6 +7,7 @@ import type {
   MetricAggregation,
   QueryMetricResponse,
   RejectedTelemetry,
+  SessionConversationResponse,
   TraceDetailResponse,
 } from "@extispex/contracts";
 import { type ApiCredentials, requestJson } from "./api-request.ts";
@@ -31,6 +32,13 @@ export function getTrace(
   traceId: string,
 ): Promise<TraceDetailResponse> {
   return requestJson(credentials, `/v1/traces/${encodeURIComponent(traceId)}`);
+}
+
+export function getSessionConversation(
+  credentials: ApiCredentials,
+  sessionId: string,
+): Promise<SessionConversationResponse> {
+  return requestJson(credentials, `/v1/sessions/${encodeURIComponent(sessionId)}`);
 }
 
 export interface LogQuery {

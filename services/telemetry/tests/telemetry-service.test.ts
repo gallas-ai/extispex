@@ -382,6 +382,7 @@ defineTelemetryTest("publishes an OpenAPI 3.1 document", async (telemetryService
     "/v1/metrics/attributes",
     "/v1/metrics/query",
     "/v1/rejected-telemetry",
+    "/v1/sessions/{sessionId}",
     "/v1/traces",
     "/v1/traces/{traceId}",
   ]);

@@ -177,7 +177,7 @@ function LoadedTrace(
               icon={<SessionIcon size={14} />}
               label="Session"
               value={rootSpan.sessionId}
-              filterLabel="Show this Session's traces"
+              filterLabel="Show this Session's conversation"
               onFilter={() => onFilterBySession(rootSpan.sessionId as string)}
             />
           )}

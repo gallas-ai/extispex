@@ -1,10 +1,11 @@
 /**
  * Browser tests of the web UI: the main flows, and the layout rules that keep the design intact,
- * such as which trace table columns show at which width and that nothing scrolls sideways.
+ * such as which trace table columns show at which width and that nothing scrolls sideways, in the
+ * trace table and in a Session's conversation.
  * They check rules rather than screenshots, so that they pass on every operating system's fonts.
  */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import type { Browser, Page } from "playwright-core";
+import type { Browser, Locator, Page } from "playwright-core";
 import {
   assertNoHorizontalOverflow,
   assertNoPageErrors,
@@ -39,6 +40,12 @@ const AGENT_TRACE_WATERFALL: [string, number][] = [
   ["chat claude-sonnet-5-5", 3],
 ];
 
+/** Long enough to fold in the conversation at any width. */
+const LONG_AGENT_REPLY = [
+  "Order #4512 is delayed: the orders service did not answer, so I cannot see where it is now.",
+  ...Array.from({ length: 10 }, (_, lineIndex) => `Line ${lineIndex + 1} of what to do next.`),
+].join("\n");
+
 interface SeededTraces {
   /** Session with the eight-span agent trace and one older single-span trace. */
   agentSessionId: string;
@@ -60,7 +67,11 @@ Deno.test({
       browser = await launchBrowser();
       const seededTraces = await seedTraces(deployment);
       const openBrowser = browser;
-      const agentSessionPath = `/?sessionId=${encodeURIComponent(seededTraces.agentSessionId)}`;
+      const agentConversationPath = `/?sessionId=${
+        encodeURIComponent(seededTraces.agentSessionId)
+      }`;
+      // A Session shows as its conversation unless the URL asks for the table.
+      const agentSessionPath = `${agentConversationPath}&view=table`;
 
       await testContext.step(
         "signs in and shows the first Project with the user's Role",
@@ -411,9 +422,9 @@ Deno.test({
         await page.locator(".trace-detail-panel [role=tree]").waitFor();
         await page.locator(".identifier-card")
           .filter({ hasText: "Session" })
-          .getByRole("button", { name: "Show this Session's traces" })
+          .getByRole("button", { name: "Show this Session's conversation" })
           .click();
-        await waitForTraceRows(page, 2);
+        await waitForConversationTraces(page, 2);
         const currentUrl = new URL(page.url());
         assertEquals(currentUrl.searchParams.get("sessionId"), seededTraces.otherSessionId);
         assertEquals(currentUrl.searchParams.get("correlationId"), null);
@@ -424,6 +435,134 @@ Deno.test({
         assertNoPageErrors(uiSession);
         await uiSession.close();
       });
+
+      await testContext.step("opens a Session's conversation from the trace table", async () => {
+        const uiSession = await openUi(openBrowser, deployment, {
+          width: 1440,
+          account: deployment.admin,
+          path: `/?correlationId=${encodeURIComponent(seededTraces.otherCorrelationId)}`,
+        });
+        const { page } = uiSession;
+        await waitForTraceRows(page, 1);
+        await page.locator(".trace-row .column-session .identifier-link").click();
+        await waitForConversationTraces(page, 2);
+        const currentUrl = new URL(page.url());
+        assertEquals(currentUrl.searchParams.get("sessionId"), seededTraces.otherSessionId);
+        assertEquals(currentUrl.searchParams.get("view"), null);
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
+      await testContext.step("shows a Session as a conversation, oldest trace first", async () => {
+        const uiSession = await openUi(openBrowser, deployment, {
+          width: 1440,
+          account: deployment.admin,
+          path: `${agentConversationPath}&correlationId=${
+            encodeURIComponent(seededTraces.agentCorrelationId)
+          }`,
+        });
+        const { page } = uiSession;
+        await waitForConversationTraces(page, 2);
+        assertEquals(await readStat(page, "Traces"), "2");
+        assertEquals(await readStat(page, "Traces with errors"), "1");
+        assertEquals(await readStat(page, "Tokens"), "1,834 in · 96 out");
+
+        const [olderTrace, agentTrace] = await page.locator(".conversation-trace").all();
+        assertStringIncludes(await olderTrace.innerText(), "No messages");
+        assertEquals(
+          await agentTrace.locator(".conversation-message-user .conversation-message-text")
+            .innerText(),
+          "Where is my order #4512?",
+        );
+        assertStringIncludes(
+          await agentTrace.locator(".conversation-message-assistant").innerText(),
+          "Order #4512 is delayed",
+        );
+        assertEquals(
+          (await agentTrace.locator(".conversation-tools").innerText()).trim(),
+          "find_order",
+        );
+        assertStringIncludes(
+          await agentTrace.locator(".conversation-error").innerText(),
+          "orders-api returned 503 Service Unavailable",
+        );
+        // The filtered Correlation ID marks its trace within the whole Session.
+        assertEquals(
+          await page.locator(".conversation-trace-highlighted").count(),
+          1,
+        );
+        assert(
+          (await agentTrace.getAttribute("class"))?.includes("conversation-trace-highlighted"),
+        );
+
+        // A long reply folds until it is asked for.
+        const assistantText = agentTrace.locator(
+          ".conversation-message-assistant .conversation-message-text",
+        );
+        const foldedHeight = await measureHeight(assistantText);
+        await agentTrace.getByRole("button", { name: "Show more" }).click();
+        await waitForCondition(
+          "the reply unfolds",
+          async () => (await measureHeight(assistantText)) > foldedHeight,
+        );
+
+        await agentTrace.locator(".conversation-trace-name").click();
+        await page.locator(".trace-detail-panel [role=tree]").waitFor();
+        assertEquals(await readSelectedSpanName(page), "POST /chat");
+
+        await page.getByRole("radio", { name: "Table" }).click();
+        await waitForTraceRows(page, 1);
+        assertEquals(new URL(page.url()).searchParams.get("view"), "table");
+        await page.getByRole("radio", { name: "Conversation" }).click();
+        await waitForConversationTraces(page, 2);
+        assertEquals(new URL(page.url()).searchParams.get("view"), null);
+        assertNoPageErrors(uiSession);
+        await uiSession.close();
+      });
+
+      await testContext.step(
+        "never scrolls sideways in a Session's conversation at any window width",
+        async () => {
+          const uiSession = await openUi(openBrowser, deployment, {
+            width: SWEPT_WIDTHS[0],
+            account: deployment.admin,
+            path: agentConversationPath,
+          });
+          const { page } = uiSession;
+          await waitForConversationTraces(page, 2);
+          for (const traceState of ["conversation only", "trace open"]) {
+            if (traceState === "trace open") {
+              await page.locator(".conversation-trace-name", { hasText: "POST /chat" }).click();
+              await page.locator(".trace-detail-panel [role=tree]").waitFor();
+            }
+            for (const width of SWEPT_WIDTHS) {
+              await page.setViewportSize({ width, height: 900 });
+              await assertNoHorizontalOverflow(page, `with the ${traceState} at ${width}px`);
+              assertEquals(
+                await measureHorizontalOverflow(page.locator(".session-conversation")),
+                0,
+                `The conversation scrolls sideways with the ${traceState} at ${width}px.`,
+              );
+              if (traceState === "conversation only") {
+                assert(
+                  await page.locator(".conversation-tools .span-badge-tool").isVisible(),
+                  `The tools called are hidden at ${width}px.`,
+                );
+              }
+              if (traceState === "trace open" && width >= 1100) {
+                // Beside an open trace the conversation keeps the list's width.
+                const listWidth = await measureWidth(page, ".trace-list-panel");
+                assert(
+                  listWidth >= 399 && listWidth <= 521,
+                  `The conversation beside an open trace is ${listWidth}px wide at ${width}px.`,
+                );
+              }
+            }
+          }
+          assertNoPageErrors(uiSession);
+          await uiSession.close();
+        },
+      );
 
       await testContext.step("opens a trace as a drawer over the list below 1100px", async () => {
         const uiSession = await openUi(openBrowser, deployment, {
@@ -512,6 +651,13 @@ async function waitForTraceRows(page: Page, expectedRowCount: number): Promise<v
   );
 }
 
+async function waitForConversationTraces(page: Page, expectedTraceCount: number): Promise<void> {
+  await waitForCondition(
+    `the conversation shows ${expectedTraceCount} traces`,
+    async () => (await page.locator(".conversation-trace").count()) === expectedTraceCount,
+  );
+}
+
 async function openTraceByRootSpanName(page: Page, rootSpanName: string): Promise<void> {
   // The name, not the row's centre, which can hold a cell's own button such as the Session filter.
   await page.locator(".trace-row .trace-cell-name", { hasText: rootSpanName }).first().click();
@@ -535,7 +681,10 @@ async function readSelectedSpanName(page: Page): Promise<string> {
 }
 
 async function readStat(page: Page, label: string): Promise<string> {
-  return (await page.locator(".stat").filter({ hasText: label }).locator("dd").innerText()).trim();
+  const stat = page.locator(".stat").filter({
+    has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }),
+  });
+  return (await stat.locator("dd").innerText()).trim();
 }
 
 async function readProperty(page: Page, label: string): Promise<string> {
@@ -543,6 +692,10 @@ async function readProperty(page: Page, label: string): Promise<string> {
     has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }),
   });
   return (await property.locator("dd").innerText()).trim();
+}
+
+async function measureHeight(locator: Locator): Promise<number> {
+  return await locator.evaluate((element) => element.getBoundingClientRect().height);
 }
 
 async function measureWidth(page: Page, selector: string): Promise<number> {
@@ -587,6 +740,16 @@ async function seedTraces(deployment: RunningDeployment): Promise<SeededTraces> 
           kind: 1,
           from: 12,
           to: 2810,
+          // On the agent's span rather than the root, so the conversation reads it from there.
+          attributes: {
+            "gen_ai.input.messages": JSON.stringify([
+              { role: "user", parts: [{ type: "text", content: "Where is my order #4512?" }] },
+            ]),
+            "gen_ai.output.messages": JSON.stringify([{
+              role: "assistant",
+              parts: [{ type: "text", content: LONG_AGENT_REPLY }],
+            }]),
+          },
         },
         {
           key: "retrieve",

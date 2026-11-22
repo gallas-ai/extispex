@@ -917,8 +917,9 @@ kbd {
 
 .page-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 8px 14px;
 }
 
 .last-updated {
@@ -1259,6 +1260,201 @@ kbd {
 
 .column-correlation .identifier {
   max-width: max(110px, 22cqi);
+}
+
+/* A Session ID opens the Session's conversation. */
+.identifier-link {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.identifier-link:hover .identifier,
+.identifier-link:focus-visible .identifier {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Session conversation
+   --------------------------------------------------------------------------------------------- */
+
+.session-conversation {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  overflow: auto;
+}
+
+.conversation-summary {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.conversation-truncated p {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.conversation-traces {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conversation-trace {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  cursor: pointer;
+  transition: background-color 80ms, border-color 80ms;
+}
+
+.conversation-trace:hover {
+  background: var(--color-surface-hover);
+}
+
+.conversation-trace:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.conversation-trace-highlighted {
+  border-color: var(--color-accent);
+}
+
+.conversation-trace-failed {
+  border-left: 3px solid var(--color-danger);
+}
+
+.conversation-trace-selected,
+.conversation-trace-selected:hover {
+  background: var(--color-accent-soft);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.conversation-message {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.conversation-message-role {
+  color: var(--color-text-subtle);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.conversation-message-assistant .conversation-message-role {
+  color: var(--color-model);
+}
+
+.conversation-message-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.conversation-message-user .conversation-message-text {
+  font-weight: 500;
+}
+
+.conversation-message-folded {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+}
+
+.conversation-message-toggle {
+  justify-self: start;
+  font-size: 12.5px;
+}
+
+.conversation-no-messages {
+  margin: 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.conversation-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The waterfall drops its tool badges on narrow screens; the conversation keeps them. */
+.conversation-tools .span-badge {
+  display: inline-flex;
+}
+
+.conversation-error {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.conversation-error .icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.conversation-trace-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.conversation-trace-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-trace-errors {
+  color: var(--color-danger);
 }
 
 .reveal-on-row-hover {

@@ -271,6 +271,7 @@ Deno.test("publishes one OpenAPI document for every service", async () => {
     const expectedPath of [
       "/v1/traces",
       "/v1/traces/{traceId}",
+      "/v1/sessions/{sessionId}",
       "/v1/logs",
       "/v1/metrics",
       "/v1/metrics/attributes",

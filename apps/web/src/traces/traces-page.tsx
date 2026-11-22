@@ -1,12 +1,13 @@
-import type { TraceSummary } from "@extispex/contracts";
+import type { SessionConversationResponse, TraceSummary } from "@extispex/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type ApiCredentials, isSignInRequired } from "../api/api-request.ts";
-import { listTraces, type TraceFilters } from "../api/telemetry-api.ts";
+import { type ApiCredentials, ApiError, isSignInRequired } from "../api/api-request.ts";
+import { getSessionConversation, listTraces, type TraceFilters } from "../api/telemetry-api.ts";
 import { RejectedTelemetryNotice } from "../logs/rejected-telemetry-notice.tsx";
-import { useTracesUrlState } from "../navigation/traces-url-state.ts";
+import { type SessionView, useTracesUrlState } from "../navigation/traces-url-state.ts";
 import { InboxIcon, RefreshIcon } from "../ui/icons.tsx";
 import { LoadError } from "../ui/load-error.tsx";
 import { useNow } from "../ui/use-now.ts";
+import { SessionConversation } from "./session-conversation.tsx";
 import { TraceDetail } from "./trace-detail.tsx";
 import { TraceFilterBar } from "./trace-filters.tsx";
 import { formatRelativeTime } from "./trace-formatting.ts";
@@ -19,9 +20,14 @@ interface TracesPageProps {
   onSignInRequired: () => void;
 }
 
+/** The table's traces, or a Session's conversation, which is null if the Session has no traces. */
+type LoadedTraces =
+  | { view: "table"; traces: TraceSummary[] }
+  | { view: "conversation"; conversation: SessionConversationResponse | null };
+
 type TraceListState =
   | { status: "loading" }
-  | { status: "loaded"; traces: TraceSummary[]; loadedAtUnixMilliseconds: number }
+  | { status: "loaded"; loadedTraces: LoadedTraces; loadedAtUnixMilliseconds: number }
   | { status: "failed"; message: string; isSignInRequired: boolean };
 
 export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
@@ -34,6 +40,7 @@ export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLive, setIsLive] = useState(false);
   const latestRequestNumber = useRef(0);
+  const shownView: SessionView = urlState.sessionId !== "" ? urlState.sessionView : "table";
   const correlationIdInputRef = useRef<HTMLInputElement>(null);
 
   const loadTraces = useCallback(async (keepCurrentRows: boolean) => {
@@ -44,9 +51,14 @@ export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
       setTraceListState({ status: "loading" });
     }
     try {
-      const { traces } = await listTraces(credentials, appliedFilters);
+      const loadedTraces = shownView === "conversation"
+        ? await loadConversation(credentials, appliedFilters.sessionId)
+        : {
+          view: "table" as const,
+          traces: (await listTraces(credentials, appliedFilters)).traces,
+        };
       if (requestNumber !== latestRequestNumber.current) return;
-      setTraceListState({ status: "loaded", traces, loadedAtUnixMilliseconds: Date.now() });
+      setTraceListState({ status: "loaded", loadedTraces, loadedAtUnixMilliseconds: Date.now() });
     } catch (error) {
       if (requestNumber !== latestRequestNumber.current) return;
       setTraceListState({
@@ -57,7 +69,7 @@ export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
     } finally {
       if (requestNumber === latestRequestNumber.current) setIsRefreshing(false);
     }
-  }, [credentials, appliedFilters]);
+  }, [credentials, appliedFilters, shownView]);
 
   useEffect(() => {
     loadTraces(false);
@@ -72,7 +84,10 @@ export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
     return () => clearInterval(liveRefreshTimer);
   }, [isLive, loadTraces]);
 
-  const loadedTraces = traceListState.status === "loaded" ? traceListState.traces : [];
+  const shownTraceIds = useMemo(
+    () => traceListState.status === "loaded" ? listTraceIds(traceListState.loadedTraces) : [],
+    [traceListState],
+  );
 
   const selectTrace = useCallback(
     (traceId: string) => {
@@ -87,12 +102,23 @@ export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
     [updateUrlState],
   );
   const applyFilters = useCallback(
-    (filters: TraceFilters) => updateUrlState({ ...filters, traceId: null, spanId: null }, "push"),
+    (filters: TraceFilters) =>
+      updateUrlState({
+        ...filters,
+        traceId: null,
+        spanId: null,
+        // Another Session opens as its conversation again.
+        ...(filters.sessionId !== urlState.sessionId ? { sessionView: "conversation" } : {}),
+      }, "push"),
+    [updateUrlState, urlState.sessionId],
+  );
+  const showSessionView = useCallback(
+    (sessionView: SessionView) => updateUrlState({ sessionView }, "replace"),
     [updateUrlState],
   );
 
   useTracesKeyboardShortcuts({
-    traces: loadedTraces,
+    traceIds: shownTraceIds,
     selectedTraceId: urlState.traceId,
     onSelectTrace: selectTrace,
     onCloseTrace: closeTrace,
@@ -109,6 +135,26 @@ export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
           <TraceCountSummary traceListState={traceListState} hasFilters={hasAppliedFilters} />
         </div>
         <div className="page-actions">
+          {urlState.sessionId !== "" && (
+            <div
+              className="segmented-control segmented-control-text"
+              role="radiogroup"
+              aria-label="Show the Session as"
+            >
+              {(["conversation", "table"] as const).map((sessionView) => (
+                <button
+                  key={sessionView}
+                  type="button"
+                  role="radio"
+                  aria-checked={urlState.sessionView === sessionView}
+                  className="segmented-control-option"
+                  onClick={() => showSessionView(sessionView)}
+                >
+                  {sessionView === "conversation" ? "Conversation" : "Table"}
+                </button>
+              ))}
+            </div>
+          )}
           <LastUpdated traceListState={traceListState} />
           <label className="toggle" title="Refresh every 5 seconds">
             <input
@@ -158,16 +204,28 @@ export function TracesPage({ credentials, onSignInRequired }: TracesPageProps) {
               onSignInRequired={onSignInRequired}
             />
           )}
-          {traceListState.status === "loaded" && traceListState.traces.length === 0 && (
+          {traceListState.status === "loaded" && shownTraceIds.length === 0 && (
             <EmptyState
               hasFilters={hasAppliedFilters}
               onClearFilters={() => applyFilters({ correlationId: "", sessionId: "" })}
             />
           )}
-          {traceListState.status === "loaded" && traceListState.traces.length > 0 && (
+          {traceListState.status === "loaded" &&
+            traceListState.loadedTraces.view === "conversation" &&
+            traceListState.loadedTraces.conversation !== null && (
+            <SessionConversation
+              conversation={traceListState.loadedTraces.conversation}
+              selectedTraceId={urlState.traceId}
+              highlightedCorrelationId={urlState.correlationId}
+              onSelectTrace={selectTrace}
+              onShowTable={() => showSessionView("table")}
+            />
+          )}
+          {traceListState.status === "loaded" && traceListState.loadedTraces.view === "table" &&
+            traceListState.loadedTraces.traces.length > 0 && (
             <>
               <TraceTable
-                traces={traceListState.traces}
+                traces={traceListState.loadedTraces.traces}
                 selectedTraceId={urlState.traceId}
                 onSelectTrace={selectTrace}
                 onFilterBySession={(sessionId) => applyFilters({ correlationId: "", sessionId })}
@@ -210,10 +268,15 @@ function TraceCountSummary(
   if (traceListState.status !== "loaded") {
     return <p className="page-subtitle">&nbsp;</p>;
   }
-  const traceCount = traceListState.traces.length;
+  const { loadedTraces } = traceListState;
+  const traceCount = listTraceIds(loadedTraces).length;
+  const countText = traceCount === 1 ? "1 trace" : `${traceCount} traces`;
+  if (loadedTraces.view === "conversation") {
+    return <p className="page-subtitle">{countText} in this Session, oldest first</p>;
+  }
   return (
     <p className="page-subtitle">
-      {traceCount === 1 ? "1 trace" : `${traceCount} traces`}
+      {countText}
       {hasFilters ? " matching the filters" : ", newest first"}
     </p>
   );
@@ -268,8 +331,31 @@ function EmptyState(
   );
 }
 
+/** A Session with no stored traces is a 404, which the page shows as an empty conversation. */
+async function loadConversation(
+  credentials: ApiCredentials,
+  sessionId: string,
+): Promise<LoadedTraces> {
+  try {
+    return {
+      view: "conversation",
+      conversation: await getSessionConversation(credentials, sessionId),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) {
+      return { view: "conversation", conversation: null };
+    }
+    throw error;
+  }
+}
+
+function listTraceIds(loadedTraces: LoadedTraces): string[] {
+  if (loadedTraces.view === "table") return loadedTraces.traces.map((trace) => trace.traceId);
+  return loadedTraces.conversation?.traces.map((trace) => trace.traceId) ?? [];
+}
+
 interface TracesKeyboardShortcutsOptions {
-  traces: TraceSummary[];
+  traceIds: string[];
   selectedTraceId: string | null;
   onSelectTrace: (traceId: string) => void;
   onCloseTrace: () => void;
@@ -278,7 +364,7 @@ interface TracesKeyboardShortcutsOptions {
 
 /** `j`/`k` move between traces, `Escape` closes the open trace and `/` jumps to the search. */
 function useTracesKeyboardShortcuts(
-  { traces, selectedTraceId, onSelectTrace, onCloseTrace, onFocusSearch }:
+  { traceIds, selectedTraceId, onSelectTrace, onCloseTrace, onFocusSearch }:
     TracesKeyboardShortcutsOptions,
 ) {
   useEffect(() => {
@@ -301,16 +387,16 @@ function useTracesKeyboardShortcuts(
         onFocusSearch();
         return;
       }
-      if ((keyboardEvent.key === "j" || keyboardEvent.key === "k") && traces.length > 0) {
-        const selectedIndex = traces.findIndex((trace) => trace.traceId === selectedTraceId);
+      if ((keyboardEvent.key === "j" || keyboardEvent.key === "k") && traceIds.length > 0) {
+        const selectedIndex = traceIds.indexOf(selectedTraceId ?? "");
         const nextIndex = selectedIndex === -1 ? 0 : Math.min(
           Math.max(selectedIndex + (keyboardEvent.key === "j" ? 1 : -1), 0),
-          traces.length - 1,
+          traceIds.length - 1,
         );
-        onSelectTrace(traces[nextIndex].traceId);
+        onSelectTrace(traceIds[nextIndex]);
       }
     };
     globalThis.addEventListener("keydown", handleShortcut);
     return () => globalThis.removeEventListener("keydown", handleShortcut);
-  }, [traces, selectedTraceId, onSelectTrace, onCloseTrace, onFocusSearch]);
+  }, [traceIds, selectedTraceId, onSelectTrace, onCloseTrace, onFocusSearch]);
 }
