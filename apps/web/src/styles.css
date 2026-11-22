@@ -1264,20 +1264,31 @@ kbd {
 
 /* A Session ID opens the Session's conversation. */
 .identifier-link {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   max-width: 100%;
   padding: 0;
   border: 0;
   background: none;
+  color: var(--color-accent);
   text-align: left;
   cursor: pointer;
 }
 
+.identifier-link .icon {
+  flex: none;
+}
+
+.identifier-link .identifier {
+  color: var(--color-accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 .identifier-link:hover .identifier,
 .identifier-link:focus-visible .identifier {
-  color: var(--color-accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-style: solid;
 }
 
 .link-button {
@@ -1401,6 +1412,12 @@ kbd {
 
 .conversation-no-messages {
   margin: 0;
+  font-size: 12.5px;
+}
+
+.conversation-messages-hint {
+  margin: 0;
+  color: var(--color-text-subtle);
   font-size: 12.5px;
   overflow-wrap: anywhere;
 }

@@ -50,6 +50,15 @@ export function SessionConversation(
           </p>
         </div>
       )}
+      {conversation.traces.some((trace) =>
+        trace.userMessage === null && trace.assistantMessage === null
+      ) && (
+        <p className="conversation-messages-hint">
+          A trace shows its messages when its root span carries <code>gen_ai.input.messages</code>
+          {" "}
+          and <code>gen_ai.output.messages</code>.
+        </p>
+      )}
       <ol className="conversation-traces" ref={listRef} aria-label="Conversation">
         {conversation.traces.map((trace) => (
           <ConversationTrace
@@ -140,12 +149,7 @@ function ConversationTrace(
       {trace.assistantMessage !== null && (
         <ConversationMessage role="assistant" text={trace.assistantMessage} />
       )}
-      {!hasMessages && (
-        <p className="conversation-no-messages text-subtle">
-          No messages. Send <code>gen_ai.input.messages</code> and{" "}
-          <code>gen_ai.output.messages</code> on the root span to see them here.
-        </p>
-      )}
+      {!hasMessages && <p className="conversation-no-messages text-subtle">No messages</p>}
       {trace.toolNames.length > 0 && (
         <ul className="conversation-tools" aria-label="Tools called">
           {trace.toolNames.map((toolName, toolIndex) => (

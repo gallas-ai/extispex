@@ -1,6 +1,7 @@
 import type { TraceSummary } from "@extispex/contracts";
 import { type KeyboardEvent, type MouseEvent, useEffect, useRef } from "react";
 import { CopyButton } from "../ui/copy-button.tsx";
+import { SessionIcon } from "../ui/icons.tsx";
 import { useNow } from "../ui/use-now.ts";
 import {
   formatDuration,
@@ -111,6 +112,7 @@ export function TraceTable(
                       }}
                       title={`Show Session ${trace.sessionId} as a conversation`}
                     >
+                      <SessionIcon size={13} />
                       <code className="identifier">{trace.sessionId}</code>
                     </button>
                   )}
