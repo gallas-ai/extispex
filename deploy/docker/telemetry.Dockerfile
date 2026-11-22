@@ -16,7 +16,7 @@ RUN deno install --frozen \
     && chgrp -R 0 /app /deno-dir \
     && chmod -R g=u /app /deno-dir
 
-USER 1993
+USER 1993:0
 # 4317: OTLP/gRPC, 4318: OTLP/HTTP and trace queries
 EXPOSE 4317 4318
 CMD ["deno", "run", "--cached-only", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "--allow-ffi", "--allow-sys", "services/telemetry/src/main.ts"]

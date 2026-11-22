@@ -16,7 +16,7 @@ RUN deno install --frozen \
     && chgrp -R 0 /app /deno-dir \
     && chmod -R g=u /app /deno-dir
 
-USER 1993
+USER 1993:0
 # 8081: prompt REST API
 EXPOSE 8081
 CMD ["deno", "run", "--cached-only", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "--allow-ffi", "--allow-sys", "services/prompt/src/main.ts"]

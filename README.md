@@ -8,10 +8,9 @@ ID, and shows them in a web UI. It also keeps your prompts as immutable versions
 such as `production`, and keeps each Project's data apart: people see a Project through the Roles of
 their Groups, and applications send its API keys.
 
-> **Why "Extispex"?** An _extispex_ was a Roman diviner, from Latin _exta_ (entrails) and _specio_
-> (I look): the one who looks inside. By examining the inner organs of a sacrifice, an extispex
-> judged whether an undertaking would end well. Looking inside and judging the outcome is tracing
-> and evaluation in one word. The ending _-spex_ also echoes _specs_ and _inspect_.
+> **Why "Extispex"?** In ancient Rome, an _extispex_ was a seer who looked inside things to tell how
+> they would turn out. That is what Extispex does for your LLM calls: it looks inside them and helps
+> you judge whether they work.
 
 **Status:** early development. The trace, log and metric pipelines, versioned prompts, Projects with
 API keys, users with Groups and Roles synced from the company's directory, and Datasets judged by
@@ -25,7 +24,7 @@ in SQLite.
 
 ```sh
 docker build -f deploy/docker/all-in-one.Dockerfile -t ghcr.io/gallas-ai/extispex .
-docker run -p 4317:4317 -p 4318:4318 -p 8080:8080 -v extispex-data:/data \
+docker run --name extispex -p 4317:4317 -p 4318:4318 -p 8080:8080 -v extispex-data:/data \
   ghcr.io/gallas-ai/extispex
 ```
 
@@ -44,8 +43,13 @@ administrator, and logs both secrets once:
 ```
 
 Open <http://localhost:8080> and sign in as `admin@extispex.local` with the logged password; the
-image also keeps it in `/data/initial-admin-password`. Then send a sample conversation from
-[examples/](examples/) with the `apiKey`.
+image also keeps it in `/data/initial-admin-password`. Then send the sample conversation that the
+image bundles from [examples/](examples/), with the logged `apiKey`:
+
+```sh
+docker exec -e API_KEY=extispex_… extispex \
+  deno task --cwd examples/typescript send-conversation
+```
 
 To choose them yourself, set `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` (at least 12
 characters) and `BOOTSTRAP_PROJECT_API_KEY` (at least 32 characters) before the first start.

@@ -20,7 +20,7 @@ RUN deno install --frozen \
     && chgrp -R 0 /app /deno-dir /data \
     && chmod -R g=u /app /deno-dir /data
 
-USER 1993
+USER 1993:0
 VOLUME /data
 # 4317: OTLP/gRPC, 4318: OTLP/HTTP, 8080: UI and REST API
 EXPOSE 4317 4318 8080

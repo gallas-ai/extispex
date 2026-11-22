@@ -256,8 +256,14 @@ function EmptyState(
         Send OpenTelemetry spans to OTLP port <code>4318</code> (HTTP) or <code>4317</code>{" "}
         (gRPC) with your API key. Every span needs a <code>correlation.id</code> attribute.
       </p>
-      <pre className="code-block">deno task send-conversation</pre>
-      <p className="text-subtle">The example sends a two-step conversation to the local image.</p>
+      <p>To try it, send the sample conversation bundled in the all-in-one image:</p>
+      <pre className="code-block">
+        {`docker exec -e API_KEY=<your API key> extispex \\
+  deno task --cwd examples/typescript send-conversation`}
+      </pre>
+      <p className="text-subtle">
+        This assumes the container is named <code>extispex</code>, as in the README.
+      </p>
     </div>
   );
 }

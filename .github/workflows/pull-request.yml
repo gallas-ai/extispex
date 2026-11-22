@@ -166,6 +166,19 @@ jobs:
           docker build -f deploy/docker/identity.Dockerfile -t ghcr.io/gallas-ai/extispex-identity:ci .
           docker build -f deploy/docker/evaluation.Dockerfile -t ghcr.io/gallas-ai/extispex-evaluation:ci .
           docker build -f deploy/docker/evaluation-worker.Dockerfile -t ghcr.io/gallas-ai/extispex-evaluation-worker:ci .
+      - name: Start the all-in-one image as the README does
+        run: |
+          docker run -d --name readme-all-in-one -p 18080:8080 -v extispex-data:/data \
+            ghcr.io/gallas-ai/extispex:ci
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:18080/health; then
+              docker rm -f readme-all-in-one
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs readme-all-in-one
+          exit 1
       - name: Start the all-in-one image as an arbitrary user, as OpenShift does
         run: |
           mkdir -p "$RUNNER_TEMP/certs"
